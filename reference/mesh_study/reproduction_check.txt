@@ -1,0 +1,10 @@
+Dry, a = 0.500000 3D workbook mesh: reimplementation 2.553668420037 | workbook 2.553668420038 | diff 9.4e-13
+Dry, a = 0.500000 2D workbook mesh: reimplementation 2.310255027575 | workbook 2.310255027576 | diff 9.1e-13
+Wet, a = 0.500000 3D workbook mesh: reimplementation 1.200121844669 | workbook 1.200121844671 | diff 2.0e-12
+Wet, a = 0.500000 2D workbook mesh: reimplementation 1.035870832455 | workbook 1.035870832457 | diff 1.7e-12
+Dry, a = 0.509923 3D workbook mesh: reimplementation 2.476038083118 | workbook 2.476038083119 | diff 9.6e-13
+Dry, a = 0.509923 2D workbook mesh: reimplementation 2.242063265329 | workbook 2.242063265330 | diff 9.4e-13
+Wet, a = 0.509923 3D workbook mesh: reimplementation 1.158427450179 | workbook 1.158427450181 | diff 1.6e-12
+Wet, a = 0.509923 2D workbook mesh: reimplementation 1.000466157809 | workbook 1.000466157807 | diff 1.7e-12
+Dry, a = 0.500000, published circle 3D workbook mesh: reimplementation 2.141937394996 | workbook 2.141937394996 | diff 2.0e-13
+Dry, a = 0.500000, published circle 2D workbook mesh: reimplementation 2.003873410890 | workbook 2.003873410891 | diff 2.3e-13

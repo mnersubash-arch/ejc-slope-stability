@@ -14,6 +14,7 @@ from typing import Optional, Sequence
 from . import __version__
 from .engine import run_case
 from .io import (export_csv, export_xlsx, load_case, result_to_dict)
+from .geometry import slip_surface_ends
 from .models import CaseResult, Config, Status
 from .presets import PRESETS
 
@@ -29,8 +30,16 @@ def format_result(case: CaseResult) -> str:
         lines.append(f"  reason  : {r.reason}")
         if r.iterations:
             lines.append(f"  iterations: {r.iterations}")
+        if r.evaluated:
+            lines.append(f"  elements with sigma_n' < 0: {r.tension} (minimum sigma_n' = {r.min_normal:.2f} kPa)")
         if r.accepted and r.moment_diagnostic is not None and tag == "3D":
             lines.append(f"  moment-form ratio (diagnostic only): {r.moment_diagnostic:.6f}")
+    ends = slip_surface_ends(case.config)
+    if ends.get("supported"):
+        lines.append(f"Slip surface    : enters at x = {ends['entry_x']:.2f} m (z = {ends['entry_z']:.2f} m); exits the face at "
+                     f"x = {ends['exit_x']:.2f} m, {ends['exit_z']:.2f} m above the toe ({ends['exit_behind_toe']:.2f} m behind the toe)"
+                     if ends["exit_on_face"] else
+                     f"Slip surface    : enters at x = {ends['entry_x']:.2f} m; reaches the toe plane (x = 0) at z = {ends['exit_z']:.3f} m")
     lines.append(f"3D/2D ratio     : {case.ratio:.6f}" if case.ratio is not None else "3D/2D ratio     : n.a. (needs both ACCEPTED)")
     return "\n".join(lines)
 

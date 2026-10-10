@@ -267,6 +267,15 @@ def check_last_run_tables(wb, rep: Report) -> None:
         rep.add("VBA Run!B18", "2D FoS display cell (workbook cache anomaly)", f"{b18!r} (D18 = {d18!r})", "WITHHELD", False, "open")
 
 
+def check_slip_exit(wb, rep: Report) -> None:
+    """Interface!F39:G39 holds the workbook's own chart helper for the slip-surface exit on the face."""
+    from slope3d.geometry import slip_surface_ends
+    ws = wb["Interface"]
+    e = slip_surface_ends(Config())
+    rep.num("Interface!F39", "slip-surface exit x [m]", ws["F39"].value, e["exit_x"])
+    rep.num("Interface!G39", "slip-surface exit z above toe [m]", ws["G39"].value, e["exit_z"])
+
+
 def check_refined_cases(ws, rep: Report) -> None:
     from slope3d.mesh_study import CASES, case_config
     names = {c[0]: c for c in CASES}
@@ -294,6 +303,7 @@ def main(argv=None) -> int:
     check_workbook_qa(wb["Native Workbook QA"], rep)
     check_engine_qa(wb["Native Engine QA"], rep)
     check_last_run_tables(wb, rep)
+    check_slip_exit(wb, rep)
     if not args.skip_mesh:
         check_refined_cases(wb["Refined Cases"], rep)
 

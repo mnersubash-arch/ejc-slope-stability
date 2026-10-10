@@ -16,6 +16,7 @@ import numpy as np
 import pandas as pd
 import yaml
 
+from .geometry import slip_surface_ends
 from .models import CaseResult, Config, Elements, ModelRun
 
 GROUPS = ("geometry", "slope", "water", "rock_mass", "strength_model", "closure_inputs", "tolerances", "mesh",
@@ -133,6 +134,12 @@ def summary_table(case: CaseResult) -> pd.DataFrame:
                  (f"{tag} active elements", r.active), (f"{tag} iterations", r.iterations), (f"{tag} reason", r.reason),
                  (f"{tag} min final normal kPa", r.min_normal if r.evaluated else NOT_EVALUATED),
                  (f"{tag} tension elements", r.tension if r.evaluated else NOT_EVALUATED)]
+    ends = slip_surface_ends(case.config)
+    if ends.get("supported"):
+        rows += [("slip surface entry (crest side) x, z [m]", f"{ends['entry_x']:.2f}, {ends['entry_z']:.2f}"),
+                 ("slip surface exit x, z above toe [m]", f"{ends['exit_x']:.2f}, {ends['exit_z']:.2f}"
+                  + ("" if ends["exit_on_face"] else " (reaches the toe plane)")),
+                 ("exit behind toe / below crest edge [m]", f"{ends['exit_behind_toe']:.2f} / {ends['exit_distance_from_crest']:.2f}")]
     rows.append(("3D/2D ratio", case.ratio if case.ratio is not None else "n.a."))
     m = case.run3d.result.moment_diagnostic
     rows.append(("spherical moment ratio (diagnostic only)", m if m is not None else "NOT EVALUATED"))

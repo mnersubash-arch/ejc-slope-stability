@@ -96,3 +96,67 @@ def build_elements(cfg: Config, dim: int, n: int) -> tuple[Elements, float]:
     if dim == 3:
         volume *= 2
     return els, volume
+
+
+def ground_height(cfg: Config, x):
+    """Ground surface on the central section: z = min(H, -x * slope) for x <= 0 (the slope rises toward -x)."""
+    return np.minimum(cfg.height, -np.asarray(x, dtype=float) * cfg.slope)
+
+
+def base_height(cfg: Config, x, y=0.0):
+    """Slip-sphere base z_b = zc - sqrt(R^2 - (x - xc)^2 - y^2); NaN outside the sphere."""
+    x = np.asarray(x, dtype=float)
+    with np.errstate(invalid="ignore"):
+        return cfg.zc - np.sqrt(cfg.radius ** 2 - (x - cfg.xc) ** 2 - y ** 2)
+
+
+def slip_surface_ends(cfg: Config) -> dict:
+    """Where the slip surface enters and exits the ground on the central section (y = 0), x <= 0.
+
+    The mass exists where the ground is above the sphere base. ``entry`` is the first crossing from the back
+    (z at the crest level or on the face), ``exit`` the last one before the toe-side cutoff at x = 0.
+    Heights are above the toe level (z = 0). ``base_at_toe_plane`` is z_b at x = 0; a value above 0 means the
+    circle passes above the toe plane, so the mass pinches out on the face (``exit_on_face``) before x = 0.
+    """
+    out: dict = {"supported": False}
+    if geometry_issue(cfg):
+        return out
+    x1 = cfg.xc - cfg.radius
+    xs = np.linspace(x1, 0.0, 200001)
+    diff = ground_height(cfg, xs) - base_height(cfg, xs)       # > 0 where there is mass
+    ok = np.isfinite(diff)
+    pos = ok & (diff > 0)
+    out["base_at_toe_plane"] = float(base_height(cfg, 0.0))
+    if not pos.any():
+        return out
+
+    def refine(i0: int, i1: int) -> float:
+        a, b = xs[i0], xs[i1]
+        fa = float(ground_height(cfg, a) - base_height(cfg, a))
+        for _ in range(80):
+            m = (a + b) / 2
+            fm = float(ground_height(cfg, m) - base_height(cfg, m))
+            if (fm > 0) == (fa > 0):
+                a, fa = m, fm
+            else:
+                b = m
+        return (a + b) / 2
+
+    first, last = int(np.argmax(pos)), len(pos) - 1 - int(np.argmax(pos[::-1]))
+    x_in = refine(max(first - 1, 0), first) if first > 0 else float(xs[0])
+    if last < len(xs) - 1:
+        x_out = refine(last, last + 1)
+        reaches_face = True
+    else:
+        x_out, reaches_face = 0.0, False                        # mass still present at the toe plane
+    out.update(
+        supported=True,
+        entry_x=float(x_in), entry_z=float(ground_height(cfg, x_in)),
+        exit_x=float(x_out), exit_z=float(base_height(cfg, x_out)),
+        exit_on_face=reaches_face,
+        crest_x=-cfg.height / cfg.slope,
+    )
+    out["exit_height_above_toe"] = out["exit_z"]
+    out["exit_behind_toe"] = -float(x_out)                      # horizontal distance of the exit behind the toe (x = 0)
+    out["exit_distance_from_crest"] = float(x_out - out["crest_x"])  # horizontal distance below the crest edge
+    return out

@@ -89,8 +89,12 @@ def strength_section(case: CaseResult) -> dict:
     return out
 
 
-def mesh_convergence(cfg: Config, meshes3=(10, 15, 20, 30, 40, 60, 80), meshes2=(20, 40, 80, 160, 320, 640),
-                     progress=None) -> list[dict]:
+MESHES_FULL = ((10, 15, 20, 30, 40, 60, 80), (20, 40, 80, 160, 320, 640))
+MESHES_REDUCED = ((10, 15, 20, 30, 40), (20, 40, 80, 160, 320))     # about 5x cheaper; the GUI default
+MESHES_SCAN = ((10, 15, 20), (20, 40, 80))                          # closures 1 and 2 (full root scan per element)
+
+
+def mesh_convergence(cfg: Config, meshes3=MESHES_FULL[0], meshes2=MESHES_FULL[1], progress=None) -> list[dict]:
     """F against mesh for the current configuration. F is ``None`` unless that run is ACCEPTED."""
     rows = []
     for dim, meshes in ((3, meshes3), (2, meshes2)):

@@ -17,7 +17,7 @@ from slope3d import io as s3io
 from slope3d import plotly_figs as pf
 from slope3d.geometry import slip_surface_ends
 from slope3d.models import CLOSURE_NAMES, DIAGNOSTIC_F_LABEL, MESH2D_RANGE, MESH3D_RANGE, Status
-from slope3d.plotdata import mesh_convergence
+from slope3d.plotdata import MESHES_FULL, MESHES_REDUCED, MESHES_SCAN, mesh_convergence
 from slope3d.presets import PRESETS
 
 STRENGTH_LABELS = {1: "Hoek-Brown / EJC eq. 4.21", 0: "Mohr-Coulomb (verification model)"}
@@ -123,6 +123,9 @@ def input_panel() -> None:
         st.number_input(f"3D mesh n (n x n half-model, {MESH3D_RANGE[0]}-{MESH3D_RANGE[1]})", MESH3D_RANGE[0], MESH3D_RANGE[1],
                         key="in_mesh3d", step=5)
         st.number_input(f"2D slices ({MESH2D_RANGE[0]}-{MESH2D_RANGE[1]})", MESH2D_RANGE[0], MESH2D_RANGE[1], key="in_mesh2d", step=10)
+        if st.session_state["in_strength"] == 1 and st.session_state["in_closure"] != 3 and (
+                st.session_state["in_mesh3d"] > 40 or st.session_state["in_mesh2d"] > 200):
+            st.warning("Closures 1 and 2 are slow on fine meshes (full root scan per element). Keep 3D <= 40 and 2D <= 200 on a hosted app.")
     st.sidebar.button("Run", type="primary", key="run_btn", width="stretch")
 
 
@@ -201,6 +204,26 @@ def tab_elements(case) -> None:
         st.dataframe(df.astype(str) if (df.dtypes == object).any() else df, hide_index=True, width="stretch", height=520)
 
 
+def mesh_convergence_controls(case) -> None:
+    """Mesh convergence runs reduced by default; the full set and the slow closures sit behind a warning."""
+    c = case.config
+    scan = c.strength == 1 and c.closure != 3          # closures 1 and 2: full root scan per element, much slower
+    st.markdown("**Mesh convergence**")
+    if scan:
+        st.warning("Closures 1 and 2 scan for roots element by element, so each mesh is slow (seconds to minutes on a hosted "
+                   "server). Only the small meshes below are run, and only after you confirm.")
+        ok = st.checkbox("I understand this may take a while", key="mesh_ok")
+        meshes, label = MESHES_SCAN, "3D 10-20, 2D 20-80"
+    else:
+        full = st.checkbox("Full mesh set (3D 10-80, 2D 20-640): slower, keeps the hosted app busy", key="mesh_full")
+        meshes, label = (MESHES_FULL, "3D 10-80, 2D 20-640") if full else (MESHES_REDUCED, "3D 10-40, 2D 20-320 (reduced)")
+        ok = True
+    if st.button(f"Run mesh convergence ({label})", disabled=not ok):
+        with st.spinner("Running meshes..."):
+            st.session_state["mesh_rows"] = mesh_convergence(c, *meshes)
+            st.session_state["mesh_for"] = repr(c)
+
+
 def tab_plots(case) -> None:
     st.plotly_chart(pf.section(case), width="stretch")
     c1, c2 = st.columns(2)
@@ -209,11 +232,7 @@ def tab_plots(case) -> None:
     c1, c2 = st.columns(2)
     c1.plotly_chart(pf.convergence(case), width="stretch")
     c2.plotly_chart(pf.strength(case), width="stretch")
-    heavy = case.config.strength == 1 and case.config.closure != 3
-    if st.button("Run mesh convergence", help="3D 10-80, 2D 20-640. " + ("Slow for closures 1 and 2 (full root scan)." if heavy else "")):
-        with st.spinner("Running meshes..."):
-            st.session_state["mesh_rows"] = mesh_convergence(case.config)
-            st.session_state["mesh_for"] = repr(case.config)
+    mesh_convergence_controls(case)
     rows = st.session_state.get("mesh_rows") if st.session_state.get("mesh_for") == repr(case.config) else None
     st.plotly_chart(pf.mesh(rows), width="stretch")
 

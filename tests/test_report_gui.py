@@ -134,3 +134,34 @@ def test_diagnostic_f_is_labelled_in_cli_tables_and_json(capsys, tmp_path):
     assert io.result_to_dict(run_case(Config(), 20, 40))["3d"]["diagnostic_f"] is None
     html = report.write_report(case, tmp_path, "d", pdf=False)[0].read_text()
     assert "Diagnostic F (unchecked roots, not an accepted result)" in html and "F = 2.55" not in html
+
+
+def test_root_streamlit_app_entry_point_runs():
+    from streamlit.testing.v1 import AppTest
+    at = AppTest.from_file(str(Path(__file__).resolve().parents[1] / "streamlit_app.py"), default_timeout=180).run()
+    assert not at.exception
+    at.sidebar.button(key="preset_0").click().run()           # a rerun must work too (runpy re-executes the app)
+    assert not at.exception and [m.value for m in at.metric][:2] == ["2.5537", "2.3103"]
+
+
+def test_mesh_convergence_is_reduced_by_default_and_gated_for_slow_closures():
+    at = _app()
+    at.sidebar.button(key="preset_0").click().run()           # closure 3
+    plots_buttons = [b.label for b in at.button]
+    assert any("3D 10-40, 2D 20-320 (reduced)" in b for b in plots_buttons)
+    assert at.checkbox(key="mesh_full").value is False
+    at.sidebar.button(key="preset_6").click().run()           # thesis closure (scan closure)
+    btn = [b for b in at.button if b.label.startswith("Run mesh convergence")][0]
+    assert btn.proto.disabled and "3D 10-20, 2D 20-80" in btn.label
+    assert any("slow" in w.value for w in at.warning)
+    at.checkbox(key="mesh_ok").check().run()
+    assert not [b for b in at.button if b.label.startswith("Run mesh convergence")][0].proto.disabled
+
+
+def test_mesh_convergence_reduced_run_gives_accepted_points_only():
+    from slope3d.plotdata import MESHES_REDUCED, mesh_convergence
+    rows = mesh_convergence(Config(closure=3), (10, 20), (20, 40))
+    assert len(rows) == 4 and all(r["F"] is not None for r in rows)
+    rows = mesh_convergence(Config(), (10,), (20,))            # thesis closure: nothing plotted, nothing shown
+    assert all(r["F"] is None for r in rows)
+    assert MESHES_REDUCED[0][-1] <= 40 and MESHES_REDUCED[1][-1] <= 320

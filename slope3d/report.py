@@ -29,7 +29,7 @@ from .plotdata import (convergence_data, plan_data, section_data, strength_secti
                        surface_grid)
 
 BLUE, ORANGE, GREY, INK = "#2a78d6", "#eb6834", "#8a8984", "#0b0b0b"
-STATUS_COLOUR = {Status.ACCEPTED: "#008300", Status.NOT_ACCEPTED: "#e34948", Status.DIAGNOSTIC_ONLY: "#c98500"}
+STATUS_COLOUR = {Status.ACCEPTED: "#008300", Status.NOT_ACCEPTED: "#e34948", Status.DIAGNOSTIC_ONLY: "#6b6a66"}
 
 
 def _style(ax) -> None:
@@ -247,7 +247,7 @@ def write_report(case: CaseResult, outdir: str | Path, stem: str = "slope3d", pd
             for tag, run in (("3D", case.run3d), ("2D", case.run2d)):
                 r = run.result
                 fig.text(0.07, y, f"{tag}: {r.status.value}", fontsize=15, weight="bold", color=STATUS_COLOUR[r.status])
-                fig.text(0.30, y, f"F = {r.fos:.6f}" if r.fos is not None else "FoS withheld", fontsize=15)
+                fig.text(0.30, y, r.f_display, fontsize=15 if r.diagnostic_f is None else 9.5, color=INK if r.diagnostic_f is None else "#52514e")
                 fig.text(0.07, y - 0.022, r.reason, fontsize=8.5, color="#52514e", wrap=True)
                 y -= 0.06
             y -= 0.01
@@ -276,7 +276,7 @@ def write_report(case: CaseResult, outdir: str | Path, stem: str = "slope3d", pd
                  f"<h1>slope3d run report</h1><p>{html_escape(case.label)} &middot; slope3d {__version__} &middot; {stamp}</p>"]
         for tag, run in (("3D", case.run3d), ("2D", case.run2d)):
             r = run.result
-            val = f"F = {r.fos:.6f}" if r.fos is not None else "FoS withheld"
+            val = html_escape(r.f_display)
             parts.append(f"<h2>{tag}: <span class='s' style='background:{STATUS_COLOUR[r.status]}'>{r.status.value}</span> {val}</h2>"
                          f"<p>{html_escape(r.reason)}</p>")
         parts.append("<h2>Summary</h2><table>" + "".join(f"<tr><td>{html_escape(str(k))}</td><td>{html_escape(str(v))}</td></tr>"

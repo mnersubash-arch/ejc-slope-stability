@@ -43,6 +43,7 @@ T7SN = 13265.01174607056
 class Report:
     tol: float
     rows: list = field(default_factory=list)
+    rels: list = field(default_factory=list)     # (source, what, relative difference) of every numeric comparison
 
     def add(self, source: str, what: str, recorded, ours, ok: bool, kind: str = "") -> None:
         self.rows.append((source, what, recorded, ours, "PASS" if ok else ("OPEN" if kind == "open" else "FAIL"), kind))
@@ -51,6 +52,8 @@ class Report:
         tol = self.tol if tol is None else tol
         ok = (isinstance(recorded, (int, float)) and isinstance(ours, (int, float)) and
               abs(recorded - ours) <= tol * max(abs(recorded), 1e-300))
+        if isinstance(recorded, (int, float)) and isinstance(ours, (int, float)):
+            self.rels.append((source, what, abs(recorded - ours) / max(abs(recorded), 1e-300)))
         self.add(source, what, recorded, ours, ok)
 
     def text(self, source: str, what: str, recorded, ours) -> None:
@@ -252,6 +255,7 @@ def check_last_run_tables(wb, rep: Report) -> None:
                         bad = (r, col, rec, ours)
                 elif rec is not None and str(rec) != str(ours) and not (rec == "NOT EVALUATED" and ours == "NOT EVALUATED"):
                     bad = bad or (r, col, rec, ours)
+        rep.rels.append((f"{sheet}!A5:W", "element table cells", worst))
         rep.add(f"{sheet}!A5:W{rows[-1] if rows else 4}", f"all {len(rows)} x 23 cells (worst relative difference {worst:.1e})",
                 "recorded", "recomputed", bad is None and worst <= rep.tol)
         if bad:
@@ -287,6 +291,30 @@ def check_refined_cases(ws, rep: Report) -> None:
         rep.num(f"Refined Cases!D{r}", f"{cond} {dim} {mesh} finest F", f_rec, res.fos)
 
 
+def print_summary(rep: Report) -> None:
+    """Markdown table: per workbook sheet, comparisons / reproduced / failed / open and the worst relative difference."""
+    groups: dict = {}
+    for source, what, rec, ours, verdict, _ in rep.rows:
+        g = source.split("!")[0]
+        d = groups.setdefault(g, dict(n=0, ok=0, bad=0, open=0, worst=None, where=""))
+        d["n"] += 1
+        d["ok"] += verdict == "PASS"
+        d["bad"] += verdict == "FAIL"
+        d["open"] += verdict == "OPEN"
+    for source, what, rel in rep.rels:
+        d = groups[source.split("!")[0]]
+        if d["worst"] is None or rel > d["worst"]:
+            d["worst"], d["where"] = rel, f"{source} {what}"
+    print("| Workbook sheet | Comparisons | Reproduced | Failed | Open | Worst relative difference (numeric) | Where |")
+    print("|---|---|---|---|---|---|---|")
+    for g, d in groups.items():
+        w = "n.a." if d["worst"] is None else f"{d['worst']:.1e}"
+        print(f"| {g} | {d['n']} | {d['ok']} | {d['bad']} | {d['open']} | {w} | {d['where']} |")
+    tot = {k: sum(d[k] for d in groups.values()) for k in ("n", "ok", "bad", "open")}
+    worst = max((r[2] for r in rep.rels), default=0.0)
+    print(f"| **All** | **{tot['n']}** | **{tot['ok']}** | **{tot['bad']}** | **{tot['open']}** | **{worst:.1e}** | |")
+
+
 # ------------------------------------------------------------------------------------------------
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -294,6 +322,7 @@ def main(argv=None) -> int:
     ap.add_argument("--tol", type=float, default=1e-9, help="relative tolerance (default 1e-9)")
     ap.add_argument("--skip-mesh", action="store_true", help="skip the 3D 320x320 / 2D 2560-slice comparison (~20 s)")
     ap.add_argument("--strict", action="store_true", help="count OPEN items as failures")
+    ap.add_argument("--summary", action="store_true", help="print a Markdown table of counts and worst relative error per sheet")
     ap.add_argument("--quiet", action="store_true", help="print only failures, open items and the summary")
     args = ap.parse_args(argv)
 
@@ -307,6 +336,8 @@ def main(argv=None) -> int:
     if not args.skip_mesh:
         check_refined_cases(wb["Refined Cases"], rep)
 
+    if args.summary:
+        print_summary(rep)
     n_pass = sum(r[4] == "PASS" for r in rep.rows)
     n_fail = sum(r[4] == "FAIL" for r in rep.rows)
     n_open = sum(r[4] == "OPEN" for r in rep.rows)

@@ -15,18 +15,23 @@ from . import __version__
 from .engine import run_case
 from .io import (export_csv, export_xlsx, load_case, result_to_dict)
 from .geometry import slip_surface_ends
-from .models import CaseResult, Config, Status
+from .models import DIAGNOSTIC_F_LABEL, CaseResult, Config, Status
 from .presets import PRESETS
 
 
 def format_result(case: CaseResult) -> str:
-    """Plain-text result block. A withheld FoS is printed as 'FoS withheld', never as a number."""
+    """Plain-text result block. A withheld FoS is printed as 'FoS withheld'; a DIAGNOSTIC ONLY F only under its own label."""
     lines = [f"Result identity : {case.label}"]
     for tag, run, mesh, unit in (("3D", case.run3d, case.mesh3d, "columns"), ("2D", case.run2d, case.mesh2d, "slices")):
         r = run.result
         lines.append(f"{tag} ({mesh}{'x' + str(mesh) if tag == '3D' else ''} mesh, {r.active} active {unit})")
         lines.append(f"  status  : {r.status.value}")
-        lines.append(f"  F       : {r.fos:.12f}" if r.fos is not None else "  F       : FoS withheld")
+        if r.fos is not None:
+            lines.append(f"  F       : {r.fos:.12f}")
+        elif r.diagnostic_f is not None:
+            lines.append(f"  {DIAGNOSTIC_F_LABEL}: {r.diagnostic_f:.12f}")
+        else:
+            lines.append("  F       : FoS withheld")
         lines.append(f"  reason  : {r.reason}")
         if r.iterations:
             lines.append(f"  iterations: {r.iterations}")

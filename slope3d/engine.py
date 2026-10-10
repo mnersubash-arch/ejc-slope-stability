@@ -213,10 +213,10 @@ def solve_model(cfg: Config, dim: int, mesh: int) -> ModelRun:
                     result.reason = "Every final element and global equilibrium passed."
                 else:
                     result.status = Status.DIAGNOSTIC_ONLY
-                    result.reason = ("Acceptance switch is off; displayed FoS withheld."
+                    result.reason = ("Acceptance switch is off; the diagnostic F is not an accepted result."
                                      if not hb else
-                                     "Diagnostic mode (checks = 0): unchecked eq. 4.21 roots, local equilibrium and "
-                                     "F convergence only; FoS withheld, never ACCEPTED.")
+                                     "Diagnostic mode (checks = 0): unchecked eq. 4.21 roots; only local equilibrium "
+                                     "and convergence of the trial value were tested, so it is never an accepted result.")
                 return ModelRun(result, els)
         fos = fn
     result.reason = "Iteration limit reached; no accepted FoS."

@@ -17,7 +17,7 @@ import pandas as pd
 import yaml
 
 from .geometry import slip_surface_ends
-from .models import CaseResult, Config, Elements, ModelRun
+from .models import DIAGNOSTIC_F_LABEL, CaseResult, Config, Elements, ModelRun
 
 GROUPS = ("geometry", "slope", "water", "rock_mass", "strength_model", "closure_inputs", "tolerances", "mesh",
           "strength", "closure", "run")
@@ -131,6 +131,7 @@ def summary_table(case: CaseResult) -> pd.DataFrame:
     for tag, run, mesh in (("3D", case.run3d, case.mesh3d), ("2D", case.run2d, case.mesh2d)):
         r = run.result
         rows += [(f"{tag} mesh", mesh), (f"{tag} status", r.status.value), (f"{tag} FoS", r.fos if r.fos is not None else "WITHHELD"),
+                 *([(f"{tag} {DIAGNOSTIC_F_LABEL}", r.diagnostic_f)] if r.diagnostic_f is not None else []),
                  (f"{tag} active elements", r.active), (f"{tag} iterations", r.iterations), (f"{tag} reason", r.reason),
                  (f"{tag} min final normal kPa", r.min_normal if r.evaluated else NOT_EVALUATED),
                  (f"{tag} tension elements", r.tension if r.evaluated else NOT_EVALUATED)]
@@ -202,7 +203,7 @@ def result_to_dict(case: CaseResult) -> dict[str, Any]:
     """JSON-safe summary of a run (F is ``null`` unless ACCEPTED)."""
     def one(run: ModelRun, mesh: int) -> dict[str, Any]:
         r = run.result
-        return {"mesh": mesh, "status": r.status.value, "fos": r.fos, "reason": r.reason, "active": r.active,
+        return {"mesh": mesh, "status": r.status.value, "fos": r.fos, "diagnostic_f": r.diagnostic_f, "reason": r.reason, "active": r.active,
                 "iterations": r.iterations, "admissible": r.admissible,
                 "min_normal_kpa": r.min_normal if r.evaluated else None, "tension_elements": r.tension if r.evaluated else None}
     return {"identity": case.label, "inputs": case.config.to_dict(), "3d": one(case.run3d, case.mesh3d),

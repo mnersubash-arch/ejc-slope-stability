@@ -1,0 +1,3 @@
+# The only dependency file for Streamlit Community Cloud: installs slope3d with its GUI extras
+# (numpy, pandas, pyyaml, openpyxl, matplotlib, plotly, streamlit) as declared in pyproject.toml.
+.[gui]

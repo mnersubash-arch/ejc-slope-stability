@@ -202,11 +202,13 @@ def check_workbook_qa(ws, rep: Report) -> None:
         label = str(cells["A"])
         r3, r2 = run(cfg, 3, 20), run(cfg, 2, 40)
         if row == 11:
-            # OPEN: recorded by the worksheet formula engine with P19 = 0 (unchecked eq. 4.21 roots). The VBA engine never
-            # accepts an inadmissible strength, so slope3d (a port of the VBA) withholds it. See docs/SPEC.md section 0.
-            for tag, ce, run_ in (("3D", "B", r3), ("2D", "D", r2)):
-                rep.add(f"{ws.title}!{ce}{row}", f"{label} {tag} internal F", cells[ce],
-                        f"{run_.result.status.value}, F withheld ({run_.result.reason})", False, "open")
+            # Diagnostic mode (checks = 0): internal F only, status DIAGNOSTIC ONLY, never a displayed FoS.
+            for tag, ce, ca, cs, run_ in (("3D", "B", "C", "F", r3), ("2D", "D", "E", "G", r2)):
+                res = run_.result
+                rep.num(f"{ws.title}!{ce}{row}", f"{label} {tag} internal F vs expected", cells[ce], res.internal_f)
+                rep.num(f"{ws.title}!{ca}{row}", f"{label} {tag} internal F vs worksheet actual", cells[ca], res.internal_f)
+                rep.add(f"{ws.title}!{cs}{row}", f"{label} {tag} status", cells[cs],
+                        res.status.value, str(cells[cs]).startswith(res.status.value) and res.fos is None)
             continue
         if row == 12:
             r3.elements.final_n[0] += 1.0
@@ -305,7 +307,7 @@ def main(argv=None) -> int:
         print(f"{verdict:4s}  {source:28s} {what:62s} workbook={fmt(rec)}  slope3d={fmt(ours)}")
     print(f"\n{n_pass} of {len(rep.rows)} comparisons reproduced (tolerance {args.tol:g}); {n_fail} failed; {n_open} open")
     if n_open:
-        print("OPEN items are values the workbook records but the VBA engine (the specification) does not produce; see docs/SPEC.md section 0.")
+        print("OPEN items are workbook records that slope3d does not reproduce; see docs/SPEC.md section 0.")
     bad = n_fail + (n_open if args.strict else 0)
     print("ALL REPRODUCED" if bad == 0 and n_open == 0 else ("NO FAILURES (open items remain)" if bad == 0 else "MISMATCHES FOUND"))
     return 0 if bad == 0 else 1

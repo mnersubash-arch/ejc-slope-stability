@@ -59,6 +59,11 @@ def solve_strength(cfg: Config, els: Elements, p: float, q: float) -> int:
         els.cohesion[good] = coh[good]
         chk = check_state_vec(els.sn[good], coh[good], ph[good], sci, mb, s, a, p, q, cfg.tol_a, cfg.tol_e)
         els.label[good] = chk.label
+    if cfg.strength == 1 and cfg.checks == 0:
+        # DIAGNOSTIC MODE (Interface!R19, P19 = 0): the first converged eq. 4.21 root is used with NO admissibility
+        # test. Only a missing root or a state outside the HB domain still counts as a failure. The acceptance labels
+        # stay in the table for information.
+        return int(np.count_nonzero((els.label == "NO CONVERGED EQ.4.21 ROOT") | (els.label == "OUTSIDE HB DOMAIN")))
     return int(np.count_nonzero(els.label != LABEL_OK))
 
 
@@ -93,10 +98,15 @@ def validate_final(cfg: Config, els: Elements, fos: float, result: ModelResult, 
     result.min_normal = float(normal.min())
     result.tension = int(np.count_nonzero(normal < 0))
     label = np.full(n, LABEL_OK, dtype=object)
-    label[(els.tau < 0) | (els.equilibrium > 1e-9)] = "REJECTED: EQUILIBRIUM/SHEAR"
+    diagnostic = cfg.strength == 1 and cfg.checks == 0
+    if diagnostic:
+        label[els.equilibrium > 1e-9] = "REJECTED: EQUILIBRIUM/SHEAR"      # local equilibrium only
+    else:
+        label[(els.tau < 0) | (els.equilibrium > 1e-9)] = "REJECTED: EQUILIBRIUM/SHEAR"
     if cfg.strength == 1:
         chk = check_state_vec(normal, els.cohesion, els.phi, cfg.sci, cfg.mb, cfg.s, cfg.a, p, q, cfg.tol_a, cfg.tol_e)
-        label = np.where(chk.label != LABEL_OK, chk.label, label)
+        if not diagnostic:
+            label = np.where(chk.label != LABEL_OK, chk.label, label)
         dom = chk.domain == 1
         els.angular = np.where(dom, chk.angular, els.angular)
         els.ejc = np.where(dom, chk.ejc, els.ejc)
@@ -107,7 +117,7 @@ def validate_final(cfg: Config, els: Elements, fos: float, result: ModelResult, 
         if dom.any():
             result.max_angle = float(np.abs(els.angular[dom]).max())
             result.max_ejc = float(np.abs(els.ejc[dom]).max())
-        if not dom.all():
+        if not dom.all() and not diagnostic:
             result.evaluated = False
     els.label = label
     result.admissible = int(np.count_nonzero(label == LABEL_OK))
@@ -157,7 +167,12 @@ def solve_model(cfg: Config, dim: int, mesh: int) -> ModelRun:
         proj = els.sn <= limit
         els.sn[proj] = inside
         result.projections += int(proj.sum())
+    diagnostic = hb and cfg.checks == 0
     tol_conv = min(1e-12, cfg.tol_f / 10)
+    if diagnostic:
+        # Unchecked roots carry the root-finder noise (tol_a, ~1e-10 rad), so the 1e-12 / 1e-9 kPa criteria are
+        # unreachable. Diagnostic mode converges on F alone: |dF|/F <= tol_f/100 (1e-10 by default).
+        tol_conv = cfg.tol_f / 100
     for it in range(1, cfg.max_iter + 1):
         failures = solve_strength(cfg, els, p, q)
         drive = seqsum(els.weight * els.kap)
@@ -191,14 +206,17 @@ def solve_model(cfg: Config, dim: int, mesh: int) -> ModelRun:
         result.iterations = it
         result.internal_f = fn
         result.history.append(IterationRecord(it, fn, result.df_rel, max_move, result.projections))
-        if result.df_rel <= tol_conv and max_move <= 1e-9:
+        if result.df_rel <= tol_conv and (diagnostic or max_move <= 1e-9):
             if validate_final(cfg, els, fn, result):
                 if cfg.checks == 1:
                     result.status = Status.ACCEPTED
                     result.reason = "Every final element and global equilibrium passed."
                 else:
                     result.status = Status.DIAGNOSTIC_ONLY
-                    result.reason = "Acceptance switch is off; displayed FoS withheld."
+                    result.reason = ("Acceptance switch is off; displayed FoS withheld."
+                                     if not hb else
+                                     "Diagnostic mode (checks = 0): unchecked eq. 4.21 roots, local equilibrium and "
+                                     "F convergence only; FoS withheld, never ACCEPTED.")
                 return ModelRun(result, els)
         fos = fn
     result.reason = "Iteration limit reached; no accepted FoS."

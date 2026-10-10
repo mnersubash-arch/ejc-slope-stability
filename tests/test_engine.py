@@ -81,15 +81,22 @@ def test_checks_off_gives_diagnostic_only_and_withholds_f():
         assert run.result.internal_f == pytest.approx(f, rel=REL)
 
 
-@pytest.mark.xfail(strict=True, reason="OPEN QUESTION for the author: these numbers come from the workbook's worksheet "
-                   "engine (Native Workbook QA test 8, P19 = 0 uses unchecked eq.4.21 roots). The VBA engine "
-                   "(Thesis_Columns) never accepts an inadmissible strength, so it returns NOT ACCEPTED. See docs/SPEC.md 0.")
-def test_moscarda_wet_checks_off_diagnostic_values():
+def test_moscarda_wet_checks_off_diagnostic_mode():
+    """Diagnostic mode (checks = 0, Interface!R19): unchecked first eq.4.21 roots, local equilibrium + F convergence only.
+    Reproduces the worksheet engine's recorded internal F; the result is DIAGNOSTIC ONLY and F stays withheld."""
     cfg = Config(closure=2, a_override=0.509923, water_angle=50.0, water_height=360.0, checks=0)
     r = run_case(cfg, 20, 40)
-    assert r.run3d.result.status is Status.DIAGNOSTIC_ONLY and r.run2d.result.status is Status.DIAGNOSTIC_ONLY
-    assert r.run3d.result.internal_f == pytest.approx(1.04327747791523, rel=REL)
-    assert r.run2d.result.internal_f == pytest.approx(0.90176054371878, rel=REL)
+    for run, f in ((r.run3d, 1.04327747791523), (r.run2d, 0.90176054371878)):
+        assert run.result.status is Status.DIAGNOSTIC_ONLY and run.result.fos is None
+        assert run.result.internal_f == pytest.approx(f, rel=REL)
+        assert "never ACCEPTED" in run.result.reason
+    assert r.ratio is None
+
+
+def test_same_case_with_checks_on_is_still_rejected():
+    cfg = Config(closure=2, a_override=0.509923, water_angle=50.0, water_height=360.0)
+    r = run_case(cfg, 20, 40)
+    assert r.run3d.result.status is Status.NOT_ACCEPTED and r.run2d.result.status is Status.NOT_ACCEPTED
 
 
 def test_perturbing_final_normal_stress_is_rejected():

@@ -200,6 +200,14 @@ def _engine_checks() -> list[tuple[str, Callable[[], str]]]:
             assert run.result.status is Status.DIAGNOSTIC_ONLY and run.result.fos is None
             assert _approx(run.result.internal_f, f)
         return "DIAGNOSTIC ONLY, FoS withheld"
+    def diagnostic():
+        cfg = Config(closure=2, a_override=0.509923, water_angle=50.0, water_height=360.0, checks=0)
+        r = run_case(cfg, 20, 40)
+        for run, f in ((r.run3d, 1.04327747791523), (r.run2d, 0.90176054371878)):
+            assert run.result.status is Status.DIAGNOSTIC_ONLY and run.result.fos is None
+            assert _approx(run.result.internal_f, f)
+        return "DIAGNOSTIC ONLY, internal F 1.0432774779 / 0.9017605437 (not shown to users)"
+    out.append(("B Moscarda wet, checks = 0 (diagnostic mode): internal F matches the worksheet engine", diagnostic))
     out.append(("B checks = 0 on a valid run: DIAGNOSTIC ONLY, FoS withheld", checks_off))
 
     def perturb():

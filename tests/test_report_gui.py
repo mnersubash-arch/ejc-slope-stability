@@ -1,0 +1,103 @@
+"""Slip-surface exit, plots, run report and the Streamlit app (headless AppTest)."""
+from pathlib import Path
+
+import pytest
+
+from slope3d import Config, run_case
+from slope3d import plotly_figs as pf
+from slope3d import report
+from slope3d.geometry import slip_surface_ends
+
+
+def test_slip_surface_exit_matches_workbook_chart_helper():
+    """Interface!F39:G39 of the workbook: (-20.40573098459213, 24.31860321039869)."""
+    e = slip_surface_ends(Config())
+    assert e["exit_on_face"]
+    assert e["exit_x"] == pytest.approx(-20.40573098459213, abs=1e-9)
+    assert e["exit_z"] == pytest.approx(24.31860321039869, abs=1e-9)
+    assert e["exit_behind_toe"] == pytest.approx(20.40573098459213, abs=1e-9)
+
+
+def test_slip_surface_ends_published_circle_reaches_toe_plane():
+    e = slip_surface_ends(Config(xc=207.28, zc=586.53, radius=622.08))
+    assert not e["exit_on_face"] and abs(e["exit_z"]) < 2e-3
+
+
+def test_slip_surface_ends_unsupported():
+    assert slip_surface_ends(Config(xc=-1.45, zc=3.24, radius=4.46))["supported"] is False
+
+
+@pytest.mark.parametrize("cfg,accepted", [(Config(closure=3), True), (Config(), False)])
+def test_report_and_figures(tmp_path, cfg, accepted):
+    case = run_case(cfg, 20, 40)
+    for fn in (report.fig_section, report.fig_plan, report.fig_surface3d, report.fig_convergence, report.fig_strength):
+        report.plt.close(fn(case))
+    for fn in (pf.section, pf.plan, pf.surface3d, pf.convergence, pf.strength):
+        assert fn(case).to_plotly_json()["data"] is not None
+    paths = report.write_report(case, tmp_path, "t")
+    assert {p.suffix for p in paths} == {".pdf", ".html"} and all(p.stat().st_size > 5000 for p in paths)
+    html = (tmp_path / "t_report.html").read_text()
+    assert "exits the face" in html or "slip surface exit" in html
+    assert "tension elements" in html
+    if accepted:
+        assert "F = 2.553668" in html
+    else:
+        assert "FoS withheld" in html and "F = " not in html.split("<h2>Summary")[0]
+
+
+def test_withheld_runs_do_not_plot_f():
+    case = run_case(Config(), 20, 40)
+    from slope3d.plotdata import convergence_data, plan_data
+    assert convergence_data(case) == {"3D": None, "2D": None}
+    assert plan_data(case) is None
+
+
+def test_report_via_cli(tmp_path):
+    from slope3d.cli import main
+    assert main(["run", "cases/chile_dry_conventional_hb.yaml", "--out", str(tmp_path), "--format", "report"]) == 0
+    assert (tmp_path / "chile_dry_conventional_hb_report.pdf").exists()
+
+
+APP = str(Path(__file__).resolve().parents[1] / "slope3d" / "gui" / "app.py")
+
+
+def _app():
+    from streamlit.testing.v1 import AppTest
+    return AppTest.from_file(APP, default_timeout=180).run()
+
+
+def _text(at):
+    return " ".join([m.value for m in at.markdown] + [m.value for m in at.warning] + [m.value for m in at.success] + [m.value for m in at.info])
+
+
+def test_gui_preset_shows_f_and_thesis_preset_withholds():
+    at = _app()
+    assert not at.exception
+    at.sidebar.button(key="preset_0").click().run()                  # Dry, a = 0.5
+    assert not at.exception
+    assert [m.value for m in at.metric][:3] == ["2.5537", "2.3103", "1.1054"]
+    assert "ACCEPTED" in _text(at) and "Conventional HB comparator" in _text(at)
+    at.sidebar.button(key="preset_6").click().run()                  # thesis closure
+    assert not at.exception
+    assert [m.value for m in at.metric][:3] == ["WITHHELD", "WITHHELD", "n.a."]
+    t = _text(at)
+    assert "NOT ACCEPTED" in t and "FoS withheld" in t and "F = " not in t
+
+
+def test_gui_has_all_six_presets_and_groups():
+    at = _app()
+    keys = [b.key for b in at.sidebar.button]
+    assert sum(k.startswith("preset_") for k in keys) == 7
+    labels = [e.label for e in at.sidebar.expander]
+    assert labels == ["Geometry", "Slope", "Water", "Rock mass", "Strength model", "Closure", "Tolerances and run controls", "Mesh"]
+
+
+def test_gui_checks_off_is_diagnostic_and_never_shows_f():
+    at = _app()
+    at.sidebar.button(key="preset_0").click().run()
+    at.sidebar.radio(key="in_checks").set_value(0)
+    at.sidebar.button(key="run_btn").click().run()
+    assert not at.exception
+    t = _text(at)
+    assert "DIAGNOSTIC ONLY" in t and "FoS withheld" in t and "F = " not in t
+    assert [m.value for m in at.metric][:2] == ["WITHHELD", "WITHHELD"]

@@ -89,7 +89,7 @@ def test_moscarda_wet_checks_off_diagnostic_mode():
     for run, f in ((r.run3d, 1.04327747791523), (r.run2d, 0.90176054371878)):
         assert run.result.status is Status.DIAGNOSTIC_ONLY and run.result.fos is None
         assert run.result.internal_f == pytest.approx(f, rel=REL)
-        assert "never ACCEPTED" in run.result.reason
+        assert "never an accepted result" in run.result.reason
     assert r.ratio is None
 
 

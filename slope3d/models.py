@@ -21,6 +21,9 @@ MESH3D_RANGE = (2, 400)
 MESH2D_RANGE = (2, 20000)
 
 
+DIAGNOSTIC_F_LABEL = "Diagnostic F (unchecked roots, not an accepted result)"
+
+
 class Status(str, Enum):
     """Run status. A factor of safety is reported only for ``ACCEPTED``."""
 
@@ -249,7 +252,8 @@ class ModelResult:
     """Result of one dimension (3D or 2D). ``fos`` is ``None`` unless ``status`` is ACCEPTED.
 
     ``internal_f`` holds the last trial F *for diagnostics and tests only*; user interfaces must never display it
-    for a run that is not ACCEPTED ("FoS withheld").
+    for a run that is not ACCEPTED ("FoS withheld"). A DIAGNOSTIC ONLY run additionally exposes ``diagnostic_f``, which is
+    shown only under its own label (never as a factor of safety).
     """
 
     dim: int = 3
@@ -281,6 +285,21 @@ class ModelResult:
     def fos(self) -> Optional[float]:
         """The factor of safety, or ``None`` (withheld) unless the run is ACCEPTED."""
         return self.internal_f if self.status == Status.ACCEPTED else None
+
+    @property
+    def diagnostic_f(self) -> Optional[float]:
+        """The converged trial F of a DIAGNOSTIC ONLY run. Never a factor of safety; always show it with
+        :data:`DIAGNOSTIC_F_LABEL` and never in the ACCEPTED style. ``None`` for every other status."""
+        return self.internal_f if self.status == Status.DIAGNOSTIC_ONLY else None
+
+    @property
+    def f_display(self) -> str:
+        """The one-line text every interface uses: ``F = x`` (ACCEPTED), the labelled diagnostic F, or ``FoS withheld``."""
+        if self.fos is not None:
+            return f"F = {self.fos:.6f}"
+        if self.diagnostic_f is not None:
+            return f"{DIAGNOSTIC_F_LABEL}: {self.diagnostic_f:.6f}"
+        return "FoS withheld"
 
     @property
     def fos_text(self) -> str:

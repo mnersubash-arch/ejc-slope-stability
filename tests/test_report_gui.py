@@ -1,4 +1,5 @@
 """Slip-surface exit, plots, run report and the Streamlit app (headless AppTest)."""
+import re
 from pathlib import Path
 
 import pytest
@@ -92,12 +93,44 @@ def test_gui_has_all_six_presets_and_groups():
     assert labels == ["Geometry", "Slope", "Water", "Rock mass", "Strength model", "Closure", "Tolerances and run controls", "Mesh"]
 
 
-def test_gui_checks_off_is_diagnostic_and_never_shows_f():
+def test_gui_checks_off_shows_labelled_diagnostic_f_on_a_grey_card():
     at = _app()
     at.sidebar.button(key="preset_0").click().run()
     at.sidebar.radio(key="in_checks").set_value(0)
     at.sidebar.button(key="run_btn").click().run()
     assert not at.exception
-    t = _text(at)
-    assert "DIAGNOSTIC ONLY" in t and "FoS withheld" in t and "F = " not in t
-    assert [m.value for m in at.metric][:2] == ["WITHHELD", "WITHHELD"]
+    cards = [m.value for m in at.markdown if "<div style='border:2px solid" in m.value]
+    assert len(cards) == 2
+    for c in cards:
+        assert "DIAGNOSTIC ONLY" in c and "Diagnostic F (unchecked roots, not an accepted result)" in c
+        assert "#6b6a66" in c and "#008300" not in c and "F = " not in c and "FoS withheld" not in c
+        assert "rgba(128,128,128" in c
+    assert "ACCEPTED" not in " ".join(re.sub(r"NOT ACCEPTED|DIAGNOSTIC ONLY", "", c) for c in cards)
+    labels = [m.label for m in at.metric][:2]
+    assert labels == ["Diagnostic F 3D (unchecked, not accepted)", "Diagnostic F 2D (unchecked, not accepted)"]
+    assert [m.value for m in at.metric][:2] == ["2.5537", "2.3103"]
+
+
+def test_gui_not_accepted_keeps_fos_withheld_card():
+    at = _app()
+    at.sidebar.button(key="preset_6").click().run()
+    cards = [m.value for m in at.markdown if "<div style='border:2px solid" in m.value]
+    assert all("FoS withheld" in c and "Diagnostic F" not in c for c in cards) and len(cards) == 2
+
+
+def test_diagnostic_f_is_labelled_in_cli_tables_and_json(capsys, tmp_path):
+    from slope3d import io
+    from slope3d.cli import format_result
+    case = run_case(Config(closure=3, checks=0), 20, 40)
+    text = format_result(case)
+    assert text.count("Diagnostic F (unchecked roots, not an accepted result): 2.") + text.count(": 2.3102") >= 2
+    assert "F       : 2." not in text and "FoS withheld" not in text
+    summ = io.summary_table(case)
+    assert (summ["item"] == "3D FoS").any() and summ.loc[summ["item"] == "3D FoS", "value"].iloc[0] == "WITHHELD"
+    assert summ["item"].str.contains("Diagnostic F").sum() == 2
+    d = io.result_to_dict(case)
+    assert d["3d"]["fos"] is None and d["3d"]["diagnostic_f"] == pytest.approx(2.5536684200376, rel=1e-9)
+    # a NOT ACCEPTED run never carries a diagnostic value
+    assert io.result_to_dict(run_case(Config(), 20, 40))["3d"]["diagnostic_f"] is None
+    html = report.write_report(case, tmp_path, "d", pdf=False)[0].read_text()
+    assert "Diagnostic F (unchecked roots, not an accepted result)" in html and "F = 2.55" not in html

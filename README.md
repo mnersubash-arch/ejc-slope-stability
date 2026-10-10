@@ -6,7 +6,7 @@ verified GENG5512 thesis workbook (`reference/`) with a command line, a Streamli
 few places where the VBA, the Python mirror and the brief differed).
 
 * 3D Hungr (1987) simplified columns (n x n half-model) and 2D Bishop slices on a prescribed spherical slip surface.
-* A factor of safety is shown **only** for an ACCEPTED dimension; otherwise you see `FoS withheld` and the reason.
+* A factor of safety is shown **only** for an ACCEPTED dimension; a NOT ACCEPTED run shows `FoS withheld` and the reason.
 * Closure 3 is always labelled *Conventional HB comparator (3D geometry, 2D strength)*, never a 3D-EJC result.
 
 ## Install on Windows
@@ -52,7 +52,7 @@ The slope can be given as `face_angle_deg` or as `slope` (= tan of the angle).
 ### Acceptance checks off = diagnostic mode
 
 With `checks: 0` an HB run uses the first converged eq. 4.21 root of every element with no admissibility test and checks
-only local equilibrium and convergence of F. The result is always **DIAGNOSTIC ONLY** and F is withheld. This reproduces
+only local equilibrium and convergence of F. The result is always **DIAGNOSTIC ONLY**; its value is shown only as "Diagnostic F (unchecked roots, not an accepted result)" (grey card, never the ACCEPTED style), and it is not a factor of safety. NOT ACCEPTED runs still show "FoS withheld". This reproduces
 the workbook's worksheet engine (`Interface!P19 = 0`); it is not part of the VBA engine. The default is `checks: 1`.
 
 ## Tests

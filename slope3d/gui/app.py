@@ -1,7 +1,7 @@
 """slope3d Streamlit app: input panel, presets, status panel, results tabs, plots and exports.
 
-Rule enforced everywhere on screen: a factor of safety is shown only for an ACCEPTED dimension; otherwise the panel says
-"FoS withheld" with the reason. Closure 3 is always labelled as the conventional-HB comparator.
+Rule enforced everywhere on screen: a factor of safety is shown only for an ACCEPTED dimension. A NOT ACCEPTED run says
+"FoS withheld"; a DIAGNOSTIC ONLY run shows its F on a grey card labelled "Diagnostic F (unchecked roots, not an accepted result)". Closure 3 is always labelled as the conventional-HB comparator.
 """
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ from slope3d import Config, __version__, run_case
 from slope3d import io as s3io
 from slope3d import plotly_figs as pf
 from slope3d.geometry import slip_surface_ends
-from slope3d.models import CLOSURE_NAMES, MESH2D_RANGE, MESH3D_RANGE, Status
+from slope3d.models import CLOSURE_NAMES, DIAGNOSTIC_F_LABEL, MESH2D_RANGE, MESH3D_RANGE, Status
 from slope3d.plotdata import mesh_convergence
 from slope3d.presets import PRESETS
 
@@ -25,7 +25,7 @@ CLOSURE_LABELS = {1: "1 - Thesis closure (sigma2' = sigma3'/nu - sigma1')",
                   2: "2 - Moscarda closure (sigma2' = nu (sigma1' + sigma3'))",
                   3: "3 - Conventional HB comparator (3D geometry, 2D strength)"}
 STATUS_STYLE = {Status.ACCEPTED: ("#008300", "ACCEPTED"), Status.NOT_ACCEPTED: ("#c0392b", "NOT ACCEPTED"),
-                Status.DIAGNOSTIC_ONLY: ("#b36b00", "DIAGNOSTIC ONLY")}
+                Status.DIAGNOSTIC_ONLY: ("#6b6a66", "DIAGNOSTIC ONLY")}
 NUM_FIELDS = ["xc", "zc", "radius", "height", "gamma", "water_angle", "water_height", "u_extra", "c_mc", "phi_mc",
               "sci", "mi", "gsi", "d", "nu", "tol_a", "tol_e", "tol_f"]
 
@@ -117,7 +117,7 @@ def input_panel() -> None:
                  format_func=lambda v: "1 - on (default)" if v == 1 else "0 - off: DIAGNOSTIC ONLY, F withheld")
         if st.session_state["in_checks"] == 0:
             st.warning("Diagnostic mode: the first converged eq. 4.21 root of every element is used without an admissibility "
-                       "test. The result can never be ACCEPTED and F is never shown.")
+                       "test. The result can never be ACCEPTED; its F is shown only as a labelled diagnostic value.")
         st.number_input("Maximum iterations", 1, 50000, key="in_max_iter", step=100)
     with st.sidebar.expander("Mesh"):
         st.number_input(f"3D mesh n (n x n half-model, {MESH3D_RANGE[0]}-{MESH3D_RANGE[1]})", MESH3D_RANGE[0], MESH3D_RANGE[1],
@@ -132,13 +132,20 @@ def input_panel() -> None:
 def status_card(tag: str, run, mesh: int) -> None:
     r = run.result
     colour, text = STATUS_STYLE[r.status]
-    fos = f"F = {r.fos:.4f}" if r.fos is not None else "FoS withheld"
+    if r.fos is not None:
+        fos = f"<div style='font-size:1.4rem;font-weight:700'>F = {r.fos:.4f}</div>"
+    elif r.diagnostic_f is not None:      # grey card, never the ACCEPTED style, never a bare "F ="
+        fos = (f"<div style='font-size:0.85rem;font-weight:600;opacity:.8'>{DIAGNOSTIC_F_LABEL}</div>"
+               f"<div style='font-size:1.3rem;font-weight:600;color:{colour}'>{r.diagnostic_f:.4f}</div>")
+    else:
+        fos = "<div style='font-size:1.4rem;font-weight:700'>FoS withheld</div>"
+    bg = "background:rgba(128,128,128,0.14);" if r.status == Status.DIAGNOSTIC_ONLY else ""
     st.markdown(
-        f"<div style='border:2px solid {colour};border-radius:8px;padding:12px 16px'>"
+        f"<div style='border:2px solid {colour};{bg}border-radius:8px;padding:12px 16px'>"
         f"<div style='font-size:0.9rem;opacity:.75'>{tag} &middot; {mesh}{'x' + str(mesh) if tag == '3D' else ''} mesh &middot; "
         f"{r.active} active {'columns' if tag == '3D' else 'slices'}</div>"
         f"<div style='font-size:2rem;font-weight:800;color:{colour};line-height:1.2'>{text}</div>"
-        f"<div style='font-size:1.4rem;font-weight:700'>{fos}</div>"
+        f"{fos}"
         f"<div style='font-size:0.85rem;opacity:.85;margin-top:4px'>{r.reason}</div></div>", unsafe_allow_html=True)
 
 
@@ -151,7 +158,7 @@ def identity_banner(case) -> None:
     elif c.closure == 3:
         st.warning("Conventional HB comparator (3D geometry, 2D strength) - not a 3D-EJC result.")
     elif c.checks == 0:
-        st.warning(f"{CLOSURE_NAMES[c.closure]} - acceptance checks OFF: DIAGNOSTIC ONLY, no factor of safety is reported.")
+        st.warning(f"{CLOSURE_NAMES[c.closure]} - acceptance checks OFF: DIAGNOSTIC ONLY. The diagnostic F is not a factor of safety.")
     else:
         st.info(CLOSURE_NAMES[c.closure])
 
@@ -159,8 +166,11 @@ def identity_banner(case) -> None:
 def tab_summary(case) -> None:
     r3, r2 = case.run3d.result, case.run2d.result
     a, b, c, d = st.columns(4)
-    a.metric("F 3D", f"{r3.fos:.4f}" if r3.fos is not None else "WITHHELD")
-    b.metric("F 2D", f"{r2.fos:.4f}" if r2.fos is not None else "WITHHELD")
+    for col, tag, r in ((a, "3D", r3), (b, "2D", r2)):
+        if r.diagnostic_f is not None:
+            col.metric(f"Diagnostic F {tag} (unchecked, not accepted)", f"{r.diagnostic_f:.4f}")
+        else:
+            col.metric(f"F {tag}", f"{r.fos:.4f}" if r.fos is not None else "WITHHELD")
     c.metric("3D / 2D ratio", f"{case.ratio:.4f}" if case.ratio is not None else "n.a.")
     d.metric("Iterations 3D / 2D", f"{r3.iterations} / {r2.iterations}")
     ends = slip_surface_ends(case.config)

@@ -6,6 +6,8 @@ history:
 - `ejc_app/`: the interactive Streamlit app for the submitted thesis method (EJC with the Moscarda closure, Route 2,
   Hungr 3D / Bishop 2D, with the Law and D'Esterre presets). Run it with `cd ejc_app && streamlit run app.py`; see
   `ejc_app/README.md` and `ejc_app/VERIFICATION.md`.
+- `webapp/`: the same app as a web page, with the engine ported to JavaScript and checked against
+  `ejc_app/engine.py`; published privately on claude.ai. See `webapp/README.md`.
 - `slope3d/` and the other files described below: the earlier port of the thesis workbook (VBA).
 
 Research tool for the prescribed-surface comparison in Mahat (2026) thesis; not for design.

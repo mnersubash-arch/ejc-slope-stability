@@ -1,0 +1,1800 @@
+<title>EJC Slope Stability</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@500;600&family=IBM+Plex+Mono:wght@400;500&family=STIX+Two+Text:ital,wght@0,400;0,600;1,400&display=swap">
+<style>
+/* Layout: a calculation-sheet rail of inputs on the left, the drawing board on the right: the factor-of-safety
+   summary first, then the 3D view, cross-section, free-body diagram, checks, studies and verification as tabs.
+   Below 1080px the rail stacks above the results. */
+:root {
+  --page: #f2f1ed;
+  --surface: #fcfcfb;
+  --sunken: #f6f5f1;
+  --ink: #0b0b0b;
+  --ink-2: #52514e;
+  --muted: #76746e;
+  --rule: #e1e0d9;
+  --line: #c3c2b7;
+  --accent: #1c5cab;
+  --on-accent: #ffffff;
+  --accent-wash: #e8f0fb;
+  --series-n: #2a78d6;
+  --slip: #eb6834;
+  --water: #1baf7a;
+  --rock: #e7e2d8;
+  --rock-edge: #8a7f70;
+  --good: #0ca30c;
+  --good-wash: #e7f5e7;
+  --critical: #d03b3b;
+  --critical-wash: #fbeaea;
+  --warning: #fab219;
+  --warning-wash: #fdf4de;
+  --font-display: "Barlow Condensed", "Arial Narrow", "Roboto Condensed", "STIX Two Text", system-ui, sans-serif;
+  --font-body: "Barlow", "STIX Two Text", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-data: "IBM Plex Mono", "STIX Two Text", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --font-math: "STIX Two Text", "Cambria Math", Cambria, "Times New Roman", serif;
+  --is-dark: 0;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --page: #0e0e0d; --surface: #1a1a19; --sunken: #141413; --ink: #f0efec; --ink-2: #c3c2b7; --muted: #918f87;
+    --rule: #2c2c2a; --line: #44433f; --accent: #6da7ec; --on-accent: #0b1a2c; --accent-wash: #172739;
+    --series-n: #3987e5; --slip: #d95926; --water: #199e70; --rock: #2b2925; --rock-edge: #a69b8b;
+    --good-wash: #12291a; --critical-wash: #331818; --warning-wash: #30260f;
+    --is-dark: 1; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --page: #0e0e0d; --surface: #1a1a19; --sunken: #141413; --ink: #f0efec; --ink-2: #c3c2b7; --muted: #918f87;
+  --rule: #2c2c2a; --line: #44433f; --accent: #6da7ec; --on-accent: #0b1a2c; --accent-wash: #172739;
+  --series-n: #3987e5; --slip: #d95926; --water: #199e70; --rock: #2b2925; --rock-edge: #a69b8b;
+  --good-wash: #12291a; --critical-wash: #331818; --warning-wash: #30260f;
+  --is-dark: 1; color-scheme: dark;
+}
+body { background: var(--page); color: var(--ink); font: 400 15px/1.5 var(--font-body); }
+.page { max-width: 1680px; margin: 0 auto; padding-block: 18px 40px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+h1, h2, h3, p { margin: 0; }
+h2, h3 { text-wrap: balance; }
+h3 { font: 600 19px/1.2 var(--font-display); letter-spacing: .01em; }
+sub { font-size: .72em; line-height: 0; }
+.hint { font-size: 13px; color: var(--ink-2); }
+.mono { font-family: var(--font-data); }
+
+/* masthead and title block */
+.masthead { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 16px 32px; align-items: end;
+  padding-bottom: 14px; border-bottom: 2px solid var(--ink); margin-bottom: 16px; }
+.eyebrow { font: 600 12px var(--font-body); letter-spacing: .09em; text-transform: uppercase; color: var(--ink-2); margin-bottom: 4px; }
+h1 { font: 600 clamp(32px, 4.2vw, 46px)/1 var(--font-display); letter-spacing: .005em; }
+.lede { margin-top: 8px; color: var(--ink-2); max-width: 72ch; }
+.disclaimer { margin-top: 8px; font-weight: 600; }
+.titleblock { display: grid; grid-template-columns: repeat(2, minmax(0, auto)); margin: 0; border-top: 1px solid var(--ink); border-left: 1px solid var(--ink); }
+.titleblock > div { padding: 5px 10px 6px; border-right: 1px solid var(--ink); border-bottom: 1px solid var(--ink); min-width: 0; }
+.titleblock dt { font: 600 10.5px var(--font-body); letter-spacing: .09em; text-transform: uppercase; color: var(--ink-2); }
+.titleblock dd { margin: 0; font: 400 12px/1.4 var(--font-data); }
+@media (max-width: 860px) { .masthead { grid-template-columns: minmax(0, 1fr); } }
+
+/* two-column layout */
+.layout { display: grid; grid-template-columns: 340px minmax(0, 1fr); grid-template-areas: "rail summary" "rail views";
+  grid-template-rows: auto 1fr; gap: 14px 20px; align-items: start; }
+.layout > .summary { grid-area: summary; }
+.layout > .views { grid-area: views; min-width: 0; display: grid; gap: 14px; }
+.rail { grid-area: rail; position: sticky; top: max(12px, env(safe-area-inset-top, 0px)); max-height: calc(100vh - 24px); overflow: auto;
+  overscroll-behavior: contain; background: var(--surface); border: 1px solid var(--rule); border-radius: 8px; }
+@media (max-width: 1080px) {
+  .layout { grid-template-columns: minmax(0, 1fr); grid-template-areas: "summary" "rail" "views"; grid-template-rows: auto; }
+  .rail { position: static; max-height: none; }
+}
+/* phone and tablet: a compact factor-of-safety bar slides in once the summary has scrolled away */
+.minibar { display: none; }
+@media (max-width: 1080px) {
+  .minibar { display: flex; position: fixed; top: 0; left: 0; right: 0; z-index: 20; gap: 6px 18px; flex-wrap: wrap; align-items: center;
+    padding: calc(8px + env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px)) 8px max(16px, env(safe-area-inset-left, 0px));
+    background: var(--surface); border-bottom: 1px solid var(--line); box-shadow: 0 2px 10px rgba(0,0,0,.10); font-size: 14px;
+    transform: translateY(-110%); transition: transform .18s ease; }
+  .minibar.show { transform: none; }
+  .minibar b { font: 600 22px/1 var(--font-display); font-variant-numeric: tabular-nums; }
+  .minibar .lab { color: var(--ink-2); font-size: 12.5px; font-weight: 600; }
+  .minibar > span { display: inline-flex; gap: 7px; align-items: center; }
+}
+@media (prefers-reduced-motion: reduce) { .minibar { transition: none; } }
+
+/* rail: preset and input sections */
+.preset-box { padding: 14px 14px 12px; border-bottom: 1px solid var(--rule); display: grid; gap: 8px; }
+.preset-box select { width: 100%; font-family: var(--font-body); font-size: 14px; }
+.preset-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.preset-about { font-size: 13px; color: var(--ink-2); }
+.preset-about > summary { cursor: pointer; color: var(--ink); font-weight: 500; }
+.preset-about p { margin-top: 6px; }
+.sec { border-bottom: 1px solid var(--rule); }
+.sec:last-child { border-bottom: 0; }
+.sec > summary { list-style: none; cursor: pointer; padding: 11px 14px; display: flex; justify-content: space-between; align-items: center;
+  font: 600 12.5px var(--font-body); letter-spacing: .08em; text-transform: uppercase; color: var(--ink-2); }
+.sec > summary::-webkit-details-marker { display: none; }
+.sec > summary::after { content: "+"; font: 500 16px/1 var(--font-data); color: var(--muted); }
+.sec[open] > summary::after { content: "\2212"; }
+.fields { display: grid; gap: 13px; padding: 0 14px 16px; }
+.num-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-size: 14px; margin-bottom: 3px; }
+.sym { font-family: var(--font-math); font-style: italic; font-weight: 400; font-size: 1.1em; line-height: 1; }
+.unit { font: 12px var(--font-data); color: var(--muted); white-space: nowrap; }
+.num-row { display: grid; grid-template-columns: minmax(0, 1fr) 11ch; gap: 10px; align-items: center; }
+.err { font-size: 12.5px; margin-top: 3px; }
+.err::before { content: "\2715  "; color: var(--critical); font-weight: 700; }
+.derived { font: 12px/1.5 var(--font-data); color: var(--ink-2); background: var(--sunken); border: 1px solid var(--rule); border-radius: 5px; padding: 6px 8px; }
+.group-label { font-size: 13.5px; margin-bottom: 4px; }
+
+/* controls */
+input[type="number"], select { font: 500 13px var(--font-data); color: var(--ink); background: var(--sunken); border: 1px solid var(--line);
+  border-radius: 4px; padding: 5px 6px; min-width: 0; width: 100%; }
+select { font-family: var(--font-body); font-size: 14px; padding: 6px 6px; }
+input[type="range"] { width: 100%; margin: 0; accent-color: var(--accent); min-width: 0; }
+input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px; margin: 2px 0 0; flex: none; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+[aria-invalid="true"] { border-color: var(--critical) !important; background: var(--critical-wash) !important; }
+.check { display: flex; gap: 8px; align-items: flex-start; font-size: 14px; cursor: pointer; }
+.seg { display: inline-flex; flex-wrap: wrap; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; max-width: 100%; }
+.seg label { position: relative; display: block; }
+.seg input { position: absolute; inset: 0; opacity: 0; margin: 0; cursor: pointer; width: 100%; height: 100%; }
+.seg span { display: block; padding: 5px 11px; font-size: 13.5px; border-right: 1px solid var(--line); white-space: nowrap; }
+.seg label:last-child span { border-right: 0; }
+.seg input:checked + span { background: var(--accent); color: var(--on-accent); font-weight: 600; }
+.seg input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: -4px; }
+.seg input:disabled + span { opacity: .45; }
+.seg input:disabled { cursor: not-allowed; }
+.btn { appearance: none; font: 600 14px var(--font-body); padding: 7px 16px; border-radius: 6px; cursor: pointer;
+  border: 1px solid var(--accent); background: var(--accent); color: var(--on-accent); }
+.btn:hover { filter: brightness(1.08); }
+.btn.ghost { background: transparent; color: var(--accent); }
+.btn.ghost:hover { background: var(--accent-wash); filter: none; }
+.btn:disabled { opacity: .5; cursor: not-allowed; filter: none; }
+.btn.small { padding: 4px 10px; font-size: 13px; }
+progress { accent-color: var(--accent); width: 100%; height: 8px; }
+
+/* summary */
+.summary { background: var(--surface); border: 1px solid var(--rule); border-radius: 8px; padding: 14px 18px 16px; display: grid; gap: 12px; }
+.runbar { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; justify-content: space-between;
+  padding-bottom: 10px; border-bottom: 1px solid var(--rule); }
+.runstate { display: inline-flex; gap: 8px; align-items: center; font-size: 14px; color: var(--ink-2); }
+.runstate b { color: var(--ink); font-weight: 600; }
+.runctl { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
+.cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.card { padding: 0 18px; border-left: 1px solid var(--rule); min-width: 0; }
+.card:first-child { border-left: 0; padding-left: 0; }
+.card .k { font: 600 13px/1.3 var(--font-body); letter-spacing: .02em; color: var(--ink-2); }
+.card .v { font: 600 46px/1.05 var(--font-display); margin: 4px 0 7px; font-variant-numeric: tabular-nums; letter-spacing: .01em; }
+.card .v.withheld { color: var(--muted); font-size: 34px; }
+.card .sub { font-size: 13px; color: var(--ink-2); }
+.stale .cards .v, .stale .facts dd { color: var(--muted); }
+.cards.four { grid-template-columns: repeat(4, minmax(0, 1fr)); margin-top: 10px; }
+.cards.four .v { font-size: 36px; }
+@media (max-width: 900px) {
+  .cards.four { grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: 12px; }
+  .cards.four .card:nth-child(3) { border-left: 0; padding-left: 0; }
+}
+@media (max-width: 640px) {
+  .cards, .cards.four { grid-template-columns: minmax(0, 1fr); row-gap: 0; }
+  .card, .cards.four .card { border-left: 0; padding: 8px 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; column-gap: 12px; }
+  .card + .card { border-top: 1px solid var(--rule); }
+  .card .k { grid-column: 1 / -1; }
+  .card .v, .cards.four .v { font-size: 38px; margin: 2px 0 0; }
+  .card .sub { grid-column: 1 / -1; }
+  .lede { display: none; }
+  .titleblock dd { font-size: 11px; }
+}
+.facts { display: flex; flex-wrap: wrap; gap: 4px 22px; margin: 0; font-size: 13.5px; }
+.facts > div { display: flex; gap: 7px; align-items: baseline; }
+.facts dt { color: var(--ink-2); }
+.facts dd { margin: 0; font: 500 13px var(--font-data); }
+.caption { font-size: 13px; color: var(--ink-2); max-width: 120ch; }
+.chip { display: inline-flex; align-items: center; gap: 6px; font: 600 11.5px/1 var(--font-body); letter-spacing: .07em; text-transform: uppercase;
+  padding: 5px 10px 5px 8px; border-radius: 999px; border: 1px solid var(--line); background: var(--sunken); color: var(--ink); white-space: nowrap; }
+.chip i { font-style: normal; font-weight: 700; font-size: 12px; }
+.chip.good { border-color: var(--good); background: var(--good-wash); } .chip.good i { color: var(--good); }
+.chip.critical { border-color: var(--critical); background: var(--critical-wash); } .chip.critical i { color: var(--critical); }
+.chip.warning { border-color: var(--warning); background: var(--warning-wash); } .chip.warning i { color: var(--warning); }
+.chip.neutral i { color: var(--muted); }
+.note { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 9px; font-size: 13.5px; padding: 8px 12px;
+  border: 1px solid var(--line); border-radius: 6px; background: var(--sunken); }
+.note > i { font-style: normal; font-weight: 700; }
+.note.critical { border-color: var(--critical); background: var(--critical-wash); } .note.critical > i { color: var(--critical); }
+.note.warning { border-color: var(--warning); background: var(--warning-wash); } .note.warning > i { color: var(--warning); }
+.note.info > i { color: var(--accent); }
+.note.good { border-color: var(--good); background: var(--good-wash); } .note.good > i { color: var(--good); }
+.notes { display: grid; gap: 8px; }
+.spin { width: 12px; height: 12px; border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; flex: none; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spin { animation: none; border-top-color: var(--line); border-right-color: var(--accent); } }
+
+/* tabs and panels */
+.tabs { display: flex; gap: 2px; overflow-x: auto; border-bottom: 1px solid var(--line); scrollbar-width: thin; }
+.tab { appearance: none; background: none; border: 0; border-bottom: 3px solid transparent; padding: 8px 13px 7px; cursor: pointer;
+  font: 600 14.5px var(--font-body); color: var(--ink-2); white-space: nowrap; }
+.tab:hover { color: var(--ink); }
+.tab[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--accent); }
+.panel { background: var(--surface); border: 1px solid var(--rule); border-radius: 8px; padding: 14px 16px 16px; display: grid; gap: 14px; min-width: 0; }
+.toolbar { display: flex; flex-wrap: wrap; gap: 10px 22px; align-items: end; }
+.toolbar .ctl { display: grid; gap: 4px; font-size: 13.5px; min-width: 0; }
+.toolbar select { width: auto; max-width: 100%; }
+.pick { display: grid; grid-template-columns: minmax(0, 1fr) 9ch; gap: 10px; align-items: center; width: min(360px, 100%); }
+.chart { width: 100%; min-width: 0; position: relative; }
+.h-xl { height: 600px; } .h-l { height: 500px; } .h-m { height: 420px; } .h-s { height: 320px; }
+@media (max-width: 640px) { .h-xl { height: 430px; } .h-l { height: 380px; } .h-m { height: 340px; } .h-s { height: 280px; } }
+.grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.grid-32 { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 16px; }
+@media (max-width: 900px) { .grid-2, .grid-32 { grid-template-columns: minmax(0, 1fr); } }
+.stack { display: grid; gap: 10px; min-width: 0; align-content: start; }
+.empty { display: grid; place-items: center; min-height: 160px; text-align: center; color: var(--ink-2); font-size: 14px;
+  border: 1px dashed var(--line); border-radius: 6px; padding: 16px; }
+.subhead { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: baseline; justify-content: space-between; }
+
+/* tables */
+.tbl-wrap { overflow-x: auto; max-width: 100%; }
+.tbl-wrap.tall { max-height: 420px; overflow-y: auto; }
+table.data { border-collapse: collapse; width: 100%; font-size: 13px; font-variant-numeric: tabular-nums; }
+table.data th { text-align: left; font: 600 12px/1.3 var(--font-body); letter-spacing: .02em; color: var(--ink-2);
+  border-bottom: 1px solid var(--line); padding: 6px 8px; position: sticky; top: 0; background: var(--surface); z-index: 1; white-space: nowrap; }
+table.data td { border-bottom: 1px solid var(--rule); padding: 5px 8px; vertical-align: top; }
+table.data td.n { font-family: var(--font-data); font-size: 12.5px; text-align: right; white-space: nowrap; }
+table.data td.m { font-family: var(--font-data); font-size: 12.5px; }
+table.data tr.grp td { font-weight: 600; background: var(--sunken); padding-top: 9px; }
+.res { display: inline-flex; gap: 5px; align-items: center; font-weight: 600; font-size: 12px; letter-spacing: .05em; white-space: nowrap; }
+.res i { font-style: normal; }
+.res.pass i { color: var(--good); } .res.fail i { color: var(--critical); } .res.info i { color: var(--accent); } .res.skip i { color: var(--muted); }
+.balance { font-size: 14px; }
+.copybox { width: 100%; height: 120px; font: 12px var(--font-data); color: var(--ink); background: var(--sunken); border: 1px solid var(--line); border-radius: 4px; }
+fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
+legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
+.ticks { display: flex; flex-wrap: wrap; gap: 4px 12px; }
+.ticks label { display: inline-flex; gap: 5px; align-items: center; font: 13px var(--font-data); cursor: pointer; }
+.inline-nums { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.inline-nums label { display: grid; gap: 3px; font-size: 13.5px; }
+.footer { margin-top: 22px; padding-top: 12px; border-top: 1px solid var(--line); font-size: 12.5px; color: var(--ink-2); display: grid; gap: 4px; }
+</style>
+
+<div class="page">
+  <header class="masthead">
+    <div>
+      <p class="eyebrow">UWA GENG5512 · thesis tool</p>
+      <h1>EJC Slope Stability</h1>
+      <p class="lede">Fully 3D limit equilibrium with Hungr's columns, and Bishop's 2D slices on the central section, for a prescribed spherical slip surface. Strength from the Extended Jiang Criterion solved by Route 2, with GHB and Mohr-Coulomb for comparison.</p>
+      <p class="disclaimer">Research tool for the prescribed-surface comparison in Mahat (2026) thesis; not for design.</p>
+    </div>
+    <dl class="titleblock" aria-label="Method summary">
+      <div><dt>3D method</dt><dd>Hungr columns, F<sub>H</sub> eq. 4.14</dd></div>
+      <div><dt>2D method</dt><dd>Bishop slices, eq. 4.16</dd></div>
+      <div><dt>Strength</dt><dd>EJC eq. 2.8, Route 2</dd></div>
+      <div><dt>Engine</dt><dd>engine.py, ported to JS</dd></div>
+    </dl>
+  </header>
+
+  <div class="minibar" id="minibar" aria-hidden="true"></div>
+  <div class="layout">
+    <aside class="rail" aria-label="Inputs">
+      <div class="preset-box">
+        <label for="preset" class="group-label">Preset</label>
+        <select id="preset"></select>
+        <div class="preset-row">
+          <button type="button" class="btn ghost small" id="reset">Reset inputs to preset</button>
+          <span class="hint" id="preset-state"></span>
+        </div>
+        <details class="preset-about" id="preset-about">
+          <summary>About this preset</summary>
+          <div id="preset-info"></div>
+        </details>
+      </div>
+
+      <details class="sec" open>
+        <summary>Slope and slip sphere</summary>
+        <div class="fields">
+          <div data-num="H"></div>
+          <div data-num="beta"></div>
+          <div data-num="xc"></div>
+          <div data-num="zc"></div>
+          <div data-num="R"></div>
+          <label class="check"><input type="checkbox" id="base_circle"><span>Base circle: grid from exit to entry, floor columns allowed</span></label>
+          <p class="hint">Off by default (thesis grid). Needed for circles that cross the toe level behind the toe (x<sub>c</sub> ≤ 0) or exit on the floor ahead of the toe. Toe at the origin; the slope rises towards −x.</p>
+        </div>
+      </details>
+
+      <details class="sec" open>
+        <summary>Strength</summary>
+        <div class="fields">
+          <div>
+            <p class="group-label">Strength model</p>
+            <div class="seg" role="radiogroup" aria-label="Strength model">
+              <label><input type="radio" name="strength" id="strength-EJC" value="EJC"><span>EJC</span></label>
+              <label><input type="radio" name="strength" id="strength-GHB" value="GHB"><span>GHB</span></label>
+              <label><input type="radio" name="strength" id="strength-MC" value="MC"><span>Mohr-Coulomb</span></label>
+            </div>
+          </div>
+          <div id="closure-wrap">
+            <label for="closure" class="group-label">Closure (EJC)</label>
+            <select id="closure">
+              <option value="moscarda">Moscarda: σ2 = ν(σ1 + σ3) (adopted)</option>
+              <option value="original">Original: σ2 = σ3/ν − σ1 (admissibility check only)</option>
+              <option value="s2s3">σ2 = σ3 (check: must reproduce GHB)</option>
+            </select>
+          </div>
+          <div data-num="nu"></div>
+          <div data-num="c_mc"></div>
+          <div data-num="phi_mc"></div>
+          <div data-num="gamma"></div>
+          <div data-num="sigma_ci"></div>
+          <div data-num="mi"></div>
+          <div data-num="gsi"></div>
+          <div data-num="D"></div>
+          <label class="check" id="a_on-wrap"><input type="checkbox" id="a_on"><span>Override a (otherwise a from GSI, eq. 2.5)</span></label>
+          <div data-num="a_value"></div>
+          <p class="derived" id="derived"></p>
+        </div>
+      </details>
+
+      <details class="sec" open>
+        <summary>Pore pressure</summary>
+        <div class="fields">
+          <div class="seg" role="radiogroup" aria-label="Pore pressure">
+            <label><input type="radio" name="water" id="water-Dry" value="Dry"><span>Dry</span></label>
+            <label><input type="radio" name="water" id="water-Wet" value="Wet"><span>Water table</span></label>
+            <label><input type="radio" name="water" id="water-ru" value="ru"><span>r<sub>u</sub></span></label>
+          </div>
+          <div data-num="Hw"></div>
+          <div data-num="beta_w"></div>
+          <div data-num="ru_value"></div>
+          <p class="hint" id="water-hint"></p>
+        </div>
+      </details>
+
+      <details class="sec" open>
+        <summary>Mesh and solver</summary>
+        <div class="fields">
+          <div data-num="n3"></div>
+          <div data-num="n2"></div>
+          <div>
+            <label for="iteration" class="group-label">Iteration path</label>
+            <select id="iteration">
+              <option value="default">Default (brief §1.4): F from F_H/F_M, then σ_n</option>
+              <option value="native_v15">Native v15 iteration path (workbook)</option>
+            </select>
+          </div>
+          <div>
+            <p class="group-label">Global equilibrium (3D)</p>
+            <div class="seg" role="radiogroup" aria-label="Global equilibrium form">
+              <label><input type="radio" name="form" id="form-FH" value="FH"><span>F<sub>H</sub> force, eq. 4.14</span></label>
+              <label><input type="radio" name="form" id="form-FM" value="FM"><span>F<sub>M</sub> moment, eq. 4.15</span></label>
+            </div>
+          </div>
+          <div>
+            <p class="group-label">Tension sensitivity</p>
+            <div class="seg" role="radiogroup" aria-label="Tension sensitivity">
+              <label><input type="radio" name="tension" id="tension-none" value="none"><span>None</span></label>
+              <label><input type="radio" name="tension" id="tension-C0" value="C0"><span>C0: no c<sub>i</sub></span></label>
+              <label><input type="radio" name="tension" id="tension-T0" value="T0"><span>T0: no shear</span></label>
+            </div>
+          </div>
+          <p class="hint" id="solver-hint">Trial-stress projection (thesis Section 4.6) is always on; a run is accepted only if no base is projected at convergence. C0 and T0 act on bases with σ<sub>n</sub> &lt; 0 and are sensitivities, not a calibrated contact law.</p>
+        </div>
+      </details>
+    </aside>
+
+      <section class="summary" id="summary" aria-live="polite">
+        <div class="runbar">
+          <p class="runstate" id="runstate"></p>
+          <div class="runctl">
+            <label class="check"><input type="checkbox" id="live" checked><span>Live update (N ≤ 40)</span></label>
+            <button type="button" class="btn" id="run">Run</button>
+          </div>
+        </div>
+        <div class="cards" id="cards">
+          <article class="card"><h2 class="k" id="k3">FoS 3D · Hungr F<sub>H</sub></h2><p class="v" id="fos3">–</p><p id="chip3"></p></article>
+          <article class="card"><h2 class="k">FoS 2D · Bishop</h2><p class="v" id="fos2">–</p><p id="chip2"></p></article>
+          <article class="card"><h2 class="k">3D / 2D ratio</h2><p class="v" id="ratio">–</p><p class="sub">3D FoS over the central-section FoS</p></article>
+        </div>
+        <div id="orig" hidden></div>
+        <dl class="facts" id="facts"></dl>
+        <p class="caption" id="caption"></p>
+        <div class="notes" id="notes"></div>
+      </section>
+
+    <main class="views">
+      <nav class="tabs" role="tablist" aria-label="Views">
+        <button type="button" class="tab" role="tab" id="tab-view-3d" aria-controls="panel-view-3d">3D view</button>
+        <button type="button" class="tab" role="tab" id="tab-cross-section" aria-controls="panel-cross-section">Cross-section</button>
+        <button type="button" class="tab" role="tab" id="tab-free-body" aria-controls="panel-free-body">Free-body diagram</button>
+        <button type="button" class="tab" role="tab" id="tab-checks" aria-controls="panel-checks">Checks</button>
+        <button type="button" class="tab" role="tab" id="tab-studies" aria-controls="panel-studies">Studies</button>
+        <button type="button" class="tab" role="tab" id="tab-verification" aria-controls="panel-verification">Verification</button>
+      </nav>
+
+      <section class="panel" id="panel-view-3d" role="tabpanel" aria-labelledby="tab-view-3d">
+        <div class="toolbar">
+          <label class="ctl">Colour columns by<select id="field3" data-field></select></label>
+          <label class="check"><input type="checkbox" id="mirror" checked><span>Mirror (full mass)</span></label>
+          <div class="ctl"><span>Highlight column</span><div class="pick"><input type="range" id="sl-k3a" aria-label="Highlighted column" min="0" max="0" step="1"><input type="number" id="nb-k3a" aria-label="Highlighted column index" min="0" step="1"></div></div>
+        </div>
+        <div id="v3-msg"></div>
+        <div class="chart h-xl" id="chart-3d"></div>
+        <p class="hint">Column prisms run from the slip surface to the ground, coloured by the selected field (contribution to resistance = τ<sub>s</sub>A; tension flag = σ<sub>n</sub> &lt; 0 or in the C0/T0 tensile set). Hover over the base points for values; click one to select it. Above 4,000 prisms only the coloured bases are drawn. Drag to rotate, scroll to zoom.</p>
+        <div class="subhead"><h3>Plan view</h3><p class="hint" id="plan-info"></p></div>
+        <div class="chart h-m" id="chart-plan"></div>
+      </section>
+
+      <section class="panel" id="panel-cross-section" role="tabpanel" aria-labelledby="tab-cross-section" hidden>
+        <div class="toolbar">
+          <label class="ctl">Colour slices by<select id="field2" data-field></select></label>
+        </div>
+        <div id="xs-msg"></div>
+        <div class="chart h-l" id="chart-section"></div>
+        <p class="hint">Central section y = 0 with the 2D slices (unit thickness). Hover over a slice for its values; click a slice to open its free-body diagram. The dotted full circle is in the legend.</p>
+      </section>
+
+      <section class="panel" id="panel-free-body" role="tabpanel" aria-labelledby="tab-free-body" hidden>
+        <div id="fbd-msg"></div>
+        <div id="fbd-body" class="stack">
+          <div class="grid-32">
+            <div class="stack">
+              <h3 id="col-title">Column</h3>
+              <p class="hint">Click a column in the plan view, or set its index. The default is the tallest column.</p>
+              <div class="pick"><input type="range" id="sl-k3" aria-label="Column index" min="0" max="0" step="1"><input type="number" id="nb-k3" aria-label="Column index" min="0" step="1"></div>
+              <p class="hint" id="col-where"></p>
+            </div>
+            <div class="chart h-s" id="chart-fbd-plan"></div>
+          </div>
+          <div class="grid-32">
+            <div class="chart h-l" id="chart-fbd3d"></div>
+            <div class="chart h-l" id="chart-lever"></div>
+          </div>
+          <div class="tbl-wrap" id="col-table"></div>
+          <p class="balance" id="col-balance"></p>
+          <div class="subhead"><h3 id="slice-title">Matching 2D slice (central section, per metre)</h3></div>
+          <div class="pick"><input type="range" id="sl-k2" aria-label="Slice index" min="0" max="0" step="1"><input type="number" id="nb-k2" aria-label="Slice index" min="0" step="1"></div>
+          <p class="hint">Default: the slice nearest to the column's x. Clicking a slice in the cross-section also selects it.</p>
+          <div id="slice-msg"></div>
+          <div class="grid-32" id="slice-body">
+            <div class="chart h-l" id="chart-fbd2d"></div>
+            <div class="stack"><div class="tbl-wrap" id="slice-table"></div><p class="balance" id="slice-balance"></p></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel" id="panel-checks" role="tabpanel" aria-labelledby="tab-checks" hidden>
+        <div class="grid-2">
+          <div class="stack" id="checks3"></div>
+          <div class="stack" id="checks2"></div>
+        </div>
+        <div class="grid-2">
+          <div class="stack"><h3>Trial F by iteration</h3><div class="chart h-s" id="chart-hist"></div></div>
+          <div class="stack"><h3>Convergence |ΔF|/F</h3><div class="chart h-s" id="chart-conv"></div></div>
+        </div>
+        <div class="stack">
+          <div class="subhead"><h3>Column and slice results</h3>
+            <div class="toolbar">
+              <div class="seg" role="radiogroup" aria-label="Results table">
+                <label><input type="radio" name="tbl" id="tbl-3" value="3" checked><span>3D columns</span></label>
+                <label><input type="radio" name="tbl" id="tbl-2" value="2"><span>2D slices</span></label>
+              </div>
+              <button type="button" class="btn ghost small" id="copy-csv">Copy table as CSV</button>
+            </div>
+          </div>
+          <p class="hint" id="copy-msg"></p>
+          <textarea class="copybox" id="copy-box" hidden readonly aria-label="CSV text"></textarea>
+          <div class="tbl-wrap tall" id="result-table"></div>
+        </div>
+      </section>
+
+      <section class="panel" id="panel-studies" role="tabpanel" aria-labelledby="tab-studies" hidden>
+        <div class="grid-2">
+          <div class="stack">
+            <h3>Mesh study (eq. 4.17)</h3>
+            <fieldset><legend>3D meshes N</legend><div class="ticks" id="mesh-n3"></div></fieldset>
+            <fieldset><legend>2D slices N<sub>2D</sub></legend><div class="ticks" id="mesh-n2"></div></fieldset>
+            <div class="toolbar"><button type="button" class="btn" id="mesh-run">Run mesh study</button></div>
+            <progress id="mesh-prog" max="1" value="0" hidden></progress>
+            <div id="mesh-out" class="stack"></div>
+          </div>
+          <div class="stack">
+            <h3><span class="sym">ν</span> sweep (Moscarda closure)</h3>
+            <div class="inline-nums">
+              <label><span><span class="sym">ν</span> from</span><input type="number" id="nu0" min="0.01" max="0.49" step="0.01" value="0.05"></label>
+              <label><span><span class="sym">ν</span> to</span><input type="number" id="nu1" min="0.01" max="0.49" step="0.01" value="0.49"></label>
+              <label>step<input type="number" id="dnu" min="0.005" max="0.2" step="0.005" value="0.02"></label>
+            </div>
+            <div class="toolbar"><button type="button" class="btn" id="nu-run">Run the ν sweep</button></div>
+            <progress id="nu-prog" max="1" value="0" hidden></progress>
+            <div id="nu-out" class="stack"></div>
+          </div>
+        </div>
+        <p class="hint">Studies use the current inputs (the strength model is set to EJC with the Moscarda closure for the ν sweep). Gaps are runs with no accepted FoS; the reason is in the table.</p>
+      </section>
+
+      <section class="panel" id="panel-verification" role="tabpanel" aria-labelledby="tab-verification" hidden>
+        <div class="stack">
+          <p>This page solves with <span class="mono">engine.js</span>, a line-for-line port of <span class="mono">ejc_app/engine.py</span>. On 148 analyses (every main case, GHB, F<sub>M</sub>, C0/T0, the native v15 path, Carranza-Torres, Law and D'Esterre presets, input errors) and 63 strength fixtures the port matches the Python engine: largest FoS difference 4.4 × 10<sup>−16</sup> (relative), with the same iteration counts, projection counts and check results.</p>
+          <p>The table below recomputes the thesis targets of <span class="mono">verification.py</span> in your browser. Its rows, targets and tolerances are those of the Python table; without the slow rows it gives the same text, row for row.</p>
+        </div>
+        <div class="toolbar">
+          <button type="button" class="btn" id="ver-run">Run the verification targets</button>
+          <label class="check"><input type="checkbox" id="ver-slow"><span>Include the slow rows (320×320, 240×240 and 5120 slices; about a minute)</span></label>
+        </div>
+        <progress id="ver-prog" max="1" value="0" hidden></progress>
+        <p class="hint" id="ver-status"></p>
+        <div id="ver-summary"></div>
+        <div class="tbl-wrap" id="ver-table"></div>
+      </section>
+    </main>
+  </div>
+
+  <footer class="footer">
+    <p>Conventions: compression positive, effective stresses; strength in MPa, column forces in kN (kN/m for 2D slices), stresses in kPa. Equation numbers are those of the submitted thesis; "brief §" refers to the app brief.</p>
+    <p>Charts: Plotly.js 2.35.2. Your inputs are remembered in this browser only.</p>
+  </footer>
+</div>
+
+<script src="engine.js"></script>
+<script src="presets.js"></script>
+<script src="checks.js"></script>
+<script src="jobs.js"></script>
+<script>
+"use strict";
+(function () {
+  const E = window.EJC, PRESETS = window.EJC_PRESETS;
+  const CHECKS = window.EJC_CHECKS.make(E, PRESETS);
+  const JOBS = window.EJC_JOBS.make(E, PRESETS, CHECKS);
+  const $ = (s) => document.querySelector(s);
+  const LIVE_MAX_N3 = 40, LIVE_MAX_N2 = 640, MAX_PRISMS = 4000, MAX_POLYGONS = 200;
+  const BY_KEY = Object.fromEntries(PRESETS.map((p) => [p.key, p]));
+  const DEFAULT_KEY = "thesis_dry_05";
+  const STORE = "ejc-slope-stability:v1";
+  const TABS = ["view-3d", "cross-section", "free-body", "checks", "studies", "verification"];
+
+  // -------------------------------------------------------------------------------------------------------------
+  // inputs (ui.py NUM) and the state dict (ui.py to_state / to_inputs)
+  // -------------------------------------------------------------------------------------------------------------
+  const NUM = {
+    H: { sym: "H", label: "slope height", unit: "m", min: 0.5, max: 1000, scale: "H" },
+    beta: { sym: "β", label: "slope face angle", unit: "°", min: 10, max: 89, step: 0.1 },
+    xc: { sym: "x<sub>c</sub>", label: "sphere centre", unit: "m", min: -1000, max: 2000, scale: "L" },
+    zc: { sym: "z<sub>c</sub>", label: "sphere centre", unit: "m", min: 1, max: 3000, scale: "L" },
+    R: { sym: "R", label: "sphere radius", unit: "m", min: 1, max: 4000, scale: "L" },
+    gamma: { sym: "γ", label: "unit weight", unit: "kN/m³", min: 10, max: 40, step: 0.1 },
+    sigma_ci: { sym: "σ<sub>ci</sub>", label: "intact UCS", unit: "MPa", min: 1, max: 300, step: 0.1 },
+    mi: { sym: "m<sub>i</sub>", label: "intact rock constant", unit: "", min: 1, max: 40, step: 0.5 },
+    gsi: { sym: "GSI", label: "geological strength index", unit: "", min: 10, max: 100, step: 1 },
+    D: { sym: "D", label: "disturbance factor", unit: "", min: 0, max: 1, step: 0.05 },
+    a_value: { sym: "a", label: "override value", unit: "", min: 0.3, max: 1, step: 0.001 },
+    nu: { sym: "ν", label: "Poisson's ratio", unit: "", min: 0.01, max: 0.49, step: 0.001 },
+    c_mc: { sym: "c′", label: "cohesion", unit: "kPa", min: 0, max: 1000, scale: "c" },
+    phi_mc: { sym: "φ′", label: "friction angle", unit: "°", min: 0, max: 60, step: 0.1 },
+    ru_value: { sym: "r<sub>u</sub>", label: "pore-pressure ratio", unit: "", min: 0, max: 0.99, step: 0.01 },
+    Hw: { sym: "H<sub>w</sub>", label: "water-table height", unit: "m", min: 0, max: 1000, scale: "Hw" },
+    beta_w: { sym: "β<sub>w</sub>", label: "water-table angle", unit: "°", min: 1, max: 89, step: 0.1 },
+    n3: { sym: "N", label: "3D mesh, N × N half-model", unit: "", min: 2, max: 320, int: true, slider: 80 },
+    n2: { sym: "N<sub>2D</sub>", label: "2D slices", unit: "", min: 2, max: 10000, int: true, slider: 640 },
+  };
+  const plainSym = (k) => NUM[k].sym.replace(/<sub>(.*?)<\/sub>/g, "_$1");
+  const FIELDS = {
+    sigma_n: ["σ<sub>n</sub> (kPa)", "σ_n"], phi: ["φ<sub>i</sub> (°)", "φ_i"], c: ["c<sub>i</sub> (kPa)", "c_i"],
+    tau: ["τ<sub>s</sub> (kPa)", "τ_s"], u: ["u (kPa)", "u"], resistance: ["Resistance τ<sub>s</sub>A (kN)", "τ_s A"],
+    tension: ["Tension flag (σ<sub>n</sub> &lt; 0)", "tension"],
+  };
+  const FIELD_NAMES = { sigma_n: "σn, effective normal stress", phi: "φi, instantaneous friction angle", c: "ci, instantaneous cohesion",
+    tau: "τs, shear strength", u: "u, pore pressure", resistance: "τs A, contribution to resistance", tension: "Tension flag (σn < 0)" };
+
+  function toState(inp) {
+    return Object.assign({}, inp, {
+      a_on: inp.a_override !== null && inp.a_override !== undefined,
+      a_value: inp.a_override === null || inp.a_override === undefined ? 0.5 : Number(inp.a_override),
+      strength: { ghb: "GHB", mc: "MC" }[inp.model] || "EJC",
+      closure: { ejc_original: "original", ejc_sigma2_eq_sigma3: "s2s3" }[inp.model] || "moscarda",
+      water: inp.ru !== null && inp.ru !== undefined ? "ru" : (inp.wet ? "Wet" : "Dry"),
+      ru_value: inp.ru === null || inp.ru === undefined ? 0 : Number(inp.ru),
+    });
+  }
+  function toInputs(d) {
+    const model = d.strength === "GHB" ? "ghb" : d.strength === "MC" ? "mc"
+      : { moscarda: "ejc_moscarda", original: "ejc_original", s2s3: "ejc_sigma2_eq_sigma3" }[d.closure];
+    const native = d.iteration === "native_v15";
+    return E.inputs({ H: d.H, beta: d.beta, xc: d.xc, zc: d.zc, R: d.R, gamma: d.gamma, sigma_ci: d.sigma_ci, mi: d.mi,
+      gsi: d.gsi, D: d.D, a_override: d.a_on ? d.a_value : null, nu: d.nu, model, wet: d.water === "Wet", Hw: d.Hw,
+      beta_w: d.beta_w, n3: d.n3, n2: d.n2, form: native ? "FH" : d.form, tension: native ? "none" : d.tension,
+      iteration: d.iteration, c_mc: d.c_mc, phi_mc: d.phi_mc, ru: d.water === "ru" ? d.ru_value : null,
+      base_circle: !!d.base_circle });
+  }
+  const inputsKey = (inp) => JSON.stringify(inp);
+  const relevant = (k, d) => {
+    if (["sigma_ci", "mi", "gsi", "D"].includes(k)) return d.strength !== "MC";
+    if (k === "a_value") return d.strength !== "MC" && d.a_on;
+    if (k === "nu") return d.strength === "EJC";
+    if (k === "c_mc" || k === "phi_mc") return d.strength === "MC";
+    if (k === "Hw" || k === "beta_w") return d.water === "Wet";
+    if (k === "ru_value") return d.water === "ru";
+    return true;
+  };
+  function validate(d) {
+    const errs = {};
+    for (const [k, sp] of Object.entries(NUM)) {
+      if (!relevant(k, d)) continue;
+      const v = d[k];
+      const name = `${plainSym(k)}, ${sp.label},`;
+      if (!Number.isFinite(v)) errs[k] = `${name} needs a number.`;
+      else if (v < sp.min || v > sp.max) errs[k] = `${name} must be from ${sp.min} to ${sp.max}${sp.unit ? " " + sp.unit : ""}.`;
+      else if (sp.int && !Number.isInteger(v)) errs[k] = `${name} must be a whole number.`;
+    }
+    return errs;
+  }
+
+  // -------------------------------------------------------------------------------------------------------------
+  // state
+  // -------------------------------------------------------------------------------------------------------------
+  let S = null, PRESET_KEY = DEFAULT_KEY, WIN = {};
+  const UI = { tab: "view-3d", field: "sigma_n", mirror: true, live: true, k3: null, k2: null, k3ij: null, k2i: null, tbl: "3" };
+  let RES = null;                         // last analysis: {key, inputs, r3, e3, r2, e2, orig, ms}
+  let running = false, rerun = null, debounceT = null, lastError = null;
+  const DIRTY = new Set(TABS);
+  let STUDY = { mesh: null, nu: null, ver: null };
+
+  const isNum = (v) => typeof v === "number" && Number.isFinite(v);
+  const f6 = (v) => (isNum(v) ? v.toFixed(6) : "withheld");
+  const fx = (v, d) => (isNum(v) ? v.toFixed(d) : "–");
+  const g = (v, p = 4) => (isNum(v) ? E.fmtG(v, p) : "–");
+  const gc = (v, p = 4) => {                // Python format(v, ",.pg")
+    if (!isNum(v)) return "–";
+    const s = E.fmtG(v, p);
+    if (/e/.test(s)) return s;
+    const [i, d] = s.split(".");
+    return i.replace(/\B(?=(\d{3})+(?!\d))/g, ",") + (d ? "." + d : "");
+  };
+  const e3 = (v) => {                       // Python format(v, ".3e")
+    if (!isNum(v)) return String(v);
+    const [m, ex] = v.toExponential(3).split("e");
+    const n = parseInt(ex, 10);
+    return `${m}e${n < 0 ? "-" : "+"}${String(Math.abs(n)).padStart(2, "0")}`;
+  };
+  const e2 = (v) => e3(v).replace(/^(-?\d\.\d\d)\d/, "$1");     // Python format(v, ".2e")
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  const fmtInput = (v) => (isNum(v) ? String(+v.toPrecision(12)) : "");
+  const clamp = (v, lo, hi) => Math.min(Math.max(v, lo), hi);
+  const linspace = (a, b, n) => Array.from({ length: n }, (_, k) => (k === n - 1 ? b : a + (b - a) * k / (n - 1)));
+
+  // -------------------------------------------------------------------------------------------------------------
+  // slider windows: the number box takes any valid value; the slider spans a window around the preset's value
+  // -------------------------------------------------------------------------------------------------------------
+  function niceStep(span) {
+    const raw = span / 1000, p = Math.pow(10, Math.floor(Math.log10(raw))), m = raw / p;
+    return (m < 2 ? 1 : m < 5 ? 2 : 5) * p;
+  }
+  const decimalsOf = (step) => Math.max(0, Math.ceil(-Math.log10(step) - 1e-9));
+  function windowFor(k, d) {
+    const sp = NUM[k], v = isNum(d[k]) ? d[k] : sp.min;
+    if (sp.int) return { lo: sp.min, hi: Math.max(sp.slider, Math.min(sp.max, Math.ceil(v * 1.25))), step: 1 };
+    if (sp.step) return { lo: sp.min, hi: sp.max, step: sp.step };
+    const L = Math.max(isNum(d.H) ? d.H : 1, 1);
+    let lo, hi;
+    if (sp.scale === "H") { lo = 0.25 * v; hi = 2 * v; }
+    else if (sp.scale === "L") { lo = v - L; hi = v + L; }
+    else if (sp.scale === "Hw") { lo = 0; hi = 1.25 * Math.max(L, v); }
+    else { lo = 0; hi = Math.max(50, 3 * v); }
+    lo = Math.max(sp.min, lo); hi = Math.min(sp.max, hi);
+    const step = niceStep(hi - lo);
+    lo = Math.max(sp.min, Math.floor(lo / step) * step); hi = Math.min(sp.max, Math.ceil(hi / step) * step);
+    return { lo, hi, step };
+  }
+  function setSliderWindow(k) {
+    const w = WIN[k], sl = $("#sl-" + k);
+    sl.min = w.lo; sl.max = w.hi; sl.step = w.step;
+  }
+
+  // -------------------------------------------------------------------------------------------------------------
+  // rail
+  // -------------------------------------------------------------------------------------------------------------
+  function buildRail() {
+    document.querySelectorAll("[data-num]").forEach((el) => {
+      const k = el.dataset.num, sp = NUM[k];
+      el.className = "num";
+      el.id = "f-" + k;
+      el.innerHTML = `<div class="num-head"><label for="nb-${k}"><span class="sym">${sp.sym}</span> ${sp.label}</label>` +
+        `<span class="unit">${sp.unit || "&nbsp;"}</span></div>` +
+        `<div class="num-row"><input type="range" id="sl-${k}" aria-label="${plainSym(k)} ${sp.label}">` +
+        `<input type="number" id="nb-${k}" step="any" min="${sp.min}" max="${sp.max}" inputmode="decimal"></div>` +
+        `<p class="err" id="err-${k}" hidden></p>`;
+      const sl = $("#sl-" + k), nb = $("#nb-" + k);
+      sl.addEventListener("input", () => {
+        const w = WIN[k];
+        let v = parseFloat(sl.value);
+        v = sp.int ? Math.round(v) : +v.toFixed(decimalsOf(w.step));
+        S[k] = v; nb.value = fmtInput(v);
+        changed();
+      });
+      const fromBox = (immediate) => {
+        const v = nb.value.trim() === "" ? NaN : Number(nb.value);
+        S[k] = v;
+        if (isNum(v) && v >= sp.min && v <= sp.max) {
+          const w = WIN[k];
+          if (v < w.lo || v > w.hi) { WIN[k] = windowFor(k, S); setSliderWindow(k); }
+          sl.value = v;
+        }
+        changed({ typing: !immediate });
+      };
+      nb.addEventListener("input", () => fromBox(false));
+      nb.addEventListener("change", () => fromBox(true));
+    });
+    const sel = $("#preset");
+    const groups = [];
+    PRESETS.forEach((p) => { if (!groups.includes(p.group)) groups.push(p.group); });
+    sel.innerHTML = groups.map((gr) => `<optgroup label="${esc(gr)}">` +
+      PRESETS.filter((p) => p.group === gr).map((p) => `<option value="${esc(p.key)}">${esc(p.label)}</option>`).join("") +
+      "</optgroup>").join("");
+    sel.addEventListener("change", () => applyPreset(sel.value));
+    $("#reset").addEventListener("click", () => applyPreset(PRESET_KEY));
+    document.querySelectorAll('input[name="strength"], input[name="water"], input[name="form"], input[name="tension"]').forEach((el) =>
+      el.addEventListener("change", () => { if (el.checked) { S[el.name] = el.value; changed({ immediate: true }); } }));
+    $("#closure").addEventListener("change", (ev) => { S.closure = ev.target.value; changed({ immediate: true }); });
+    $("#iteration").addEventListener("change", (ev) => {
+      S.iteration = ev.target.value;
+      if (S.iteration === "native_v15") { S.form = "FH"; S.tension = "none"; }
+      writeChoices(); changed({ immediate: true });
+    });
+    $("#base_circle").addEventListener("change", (ev) => { S.base_circle = ev.target.checked; changed({ immediate: true }); });
+    $("#a_on").addEventListener("change", (ev) => { S.a_on = ev.target.checked; changed({ immediate: true }); });
+    document.querySelectorAll("[data-field]").forEach((el) => {
+      el.innerHTML = Object.keys(FIELDS).map((k) => `<option value="${k}">${esc(FIELD_NAMES[k])}</option>`).join("");
+      el.addEventListener("change", () => { UI.field = el.value; syncFieldSelects(); markDirty("view-3d", "cross-section"); renderActive(); save(); });
+    });
+    $("#mirror").addEventListener("change", (ev) => { UI.mirror = ev.target.checked; markDirty("view-3d"); renderActive(); save(); });
+    $("#live").addEventListener("change", (ev) => { UI.live = ev.target.checked; save(); if (UI.live) schedule(true); renderSummary(); });
+    $("#run").addEventListener("click", () => requestRun(true));
+  }
+  function syncFieldSelects() { document.querySelectorAll("[data-field]").forEach((el) => { el.value = UI.field; }); }
+  function writeChoices() {
+    for (const n of ["strength", "water", "form", "tension"]) {
+      const el = document.getElementById(`${n}-${S[n]}`);
+      if (el) el.checked = true;
+    }
+    $("#closure").value = S.closure; $("#iteration").value = S.iteration;
+    $("#base_circle").checked = !!S.base_circle; $("#a_on").checked = !!S.a_on;
+  }
+  function writeRail() {
+    for (const k of Object.keys(NUM)) {
+      setSliderWindow(k);
+      $("#sl-" + k).value = isNum(S[k]) ? S[k] : WIN[k].lo;
+      $("#nb-" + k).value = fmtInput(S[k]);
+    }
+    writeChoices();
+    $("#preset").value = PRESET_KEY;
+  }
+  function renderRailDeps(errs) {
+    for (const k of Object.keys(NUM)) {
+      $("#f-" + k).hidden = !relevant(k, S);
+      const nb = $("#nb-" + k), er = $("#err-" + k);
+      if (errs[k]) { nb.setAttribute("aria-invalid", "true"); er.textContent = errs[k]; er.hidden = false; }
+      else { nb.removeAttribute("aria-invalid"); er.hidden = true; }
+    }
+    $("#closure-wrap").hidden = S.strength !== "EJC";
+    $("#a_on-wrap").hidden = S.strength === "MC";
+    const native = S.iteration === "native_v15";
+    document.querySelectorAll('input[name="form"], input[name="tension"]').forEach((el) => { el.disabled = native; });
+    let txt;
+    if (S.strength === "MC") txt = "Mohr-Coulomb: τ<sub>s</sub> = c′ + σ<sub>n</sub> tan φ′; m<sub>b</sub>, s and a are not used.";
+    else {
+      const [mb, s, a] = E.hb(toInputs(S));
+      txt = `eq. 2.5: m<sub>b</sub> = ${fx(mb, 6)}, s = ${fx(s, 7)}, a used = ${fx(a, 6)}${S.a_on ? " (override)" : " (from GSI)"}<br>` +
+        `σ<sub>3,t</sub> = −sσ<sub>ci</sub>/m<sub>b</sub> = ${g(-s * S.sigma_ci / mb, 5)} MPa`;
+    }
+    $("#derived").innerHTML = txt;
+    $("#water-hint").innerHTML = S.water === "Wet" ? "u = γ<sub>w</sub> max(0, z<sub>w</sub> − z<sub>b</sub>), γ<sub>w</sub> = 9.81 kN/m³; z<sub>w</sub> = min(H<sub>w</sub>, −x tan β<sub>w</sub>)."
+      : S.water === "ru" ? "u = r<sub>u</sub> γ h for every column and slice (h = column height)." : "u = 0.";
+  }
+
+  // -------------------------------------------------------------------------------------------------------------
+  // presets
+  // -------------------------------------------------------------------------------------------------------------
+  function applyPreset(key, opts = {}) {
+    const p = BY_KEY[key] || BY_KEY[DEFAULT_KEY];
+    PRESET_KEY = p.key;
+    S = toState(E.inputs(p.inputs));
+    for (const k of Object.keys(NUM)) WIN[k] = windowFor(k, S);
+    writeRail();
+    renderPresetInfo();
+    if (p.action === "nu_sweep") { $("#nu0").value = 0.05; $("#nu1").value = 0.49; $("#dnu").value = 0.02; }
+    UI.k3ij = null; UI.k2i = null;
+    changed({ immediate: true, fromPreset: !opts.quiet });
+  }
+  function renderPresetInfo() {
+    const p = BY_KEY[PRESET_KEY];
+    const parts = [`<p><b>${esc(p.group)}: ${esc(p.label)}.</b> ${esc(p.source)}</p>`];
+    if (p.info) parts.push(`<p>${esc(p.info)}</p>`);
+    if (p.targets) parts.push(`<p><b>Targets:</b> ${esc(p.targets)}</p>`);
+    if (p.reference) parts.push(`<p><b>Reference only (not a target):</b> ${esc(p.reference)}</p>`);
+    if (p.slow) parts.push("<p>This preset uses fine meshes and is slow: press Run, then allow up to a minute.</p>");
+    if (p.action === "nu_sweep") parts.push('<p>Open <a href="#studies">Studies</a> and press Run ν sweep.</p>');
+    $("#preset-info").innerHTML = parts.join("");
+  }
+  function renderPresetState() {
+    const base = inputsKey(E.inputs(BY_KEY[PRESET_KEY].inputs));
+    let same = false;
+    try { same = inputsKey(toInputs(S)) === base; } catch (e) { same = false; }
+    $("#preset-state").textContent = same ? "Inputs match the preset." : "Inputs changed from the preset.";
+    $("#reset").disabled = same;
+  }
+
+  // -------------------------------------------------------------------------------------------------------------
+  // running: a Web Worker, or the page itself if the worker cannot start
+  // -------------------------------------------------------------------------------------------------------------
+  let worker = null, workerState = "none", jobSeq = 0;
+  const queue = [], pending = new Map();
+  function startWorker() {
+    try {
+      worker = new Worker("worker.js");
+      workerState = "starting";
+      worker.onmessage = (ev) => {
+        const msg = ev.data;
+        if (msg.type === "pong") { workerState = "ready"; queue.splice(0).forEach((j) => worker.postMessage(j)); return; }
+        const p = pending.get(msg.id);
+        if (!p) return;
+        if (msg.type === "progress") { if (p.onProgress) p.onProgress(msg); return; }
+        pending.delete(msg.id); p.resolve(msg);
+      };
+      worker.onerror = (ev) => { if (ev && ev.preventDefault) ev.preventDefault(); fallback(); };
+      worker.postMessage({ type: "ping" });
+      setTimeout(() => { if (workerState === "starting") fallback(); }, 5000);
+    } catch (e) { fallback(); }
+  }
+  function fallback() {
+    if (workerState === "failed") return;
+    workerState = "failed";
+    try { if (worker) worker.terminate(); } catch (e) { /* ignore */ }
+    worker = null;
+    queue.length = 0;
+    for (const p of pending.values()) runLocal(p.job);
+  }
+  function runLocal(job) {
+    setTimeout(() => {
+      const p = pending.get(job.id);
+      if (!p) return;
+      let out;
+      try { out = JOBS.handle(job, (m) => { if (p.onProgress) p.onProgress(Object.assign({ type: "progress", id: job.id }, m)); }); }
+      catch (e) { out = { type: "error", id: job.id, error: String(e.message || e) }; }
+      pending.delete(job.id); p.resolve(out);
+    }, 30);
+  }
+  function submit(job, onProgress) {
+    job.id = ++jobSeq;
+    return new Promise((resolve) => {
+      pending.set(job.id, { resolve, onProgress, job });
+      if (workerState === "ready") worker.postMessage(job);
+      else if (workerState === "starting") queue.push(job);
+      else runLocal(job);
+    });
+  }
+
+  const liveAllowed = () => S.n3 <= LIVE_MAX_N3 && S.n2 <= LIVE_MAX_N2;
+  function changed(opts = {}) {
+    const errs = validate(S);
+    renderRailDeps(errs);
+    renderPresetState();
+    save();
+    if (!Object.keys(errs).length && UI.live && liveAllowed()) schedule(!!opts.immediate);
+    renderSummary();
+  }
+  function schedule(immediate) {
+    clearTimeout(debounceT);
+    debounceT = setTimeout(() => { debounceT = null; requestRun(false); }, immediate ? 0 : 160);
+  }
+  function requestRun(forced) {
+    if (Object.keys(validate(S)).length) { renderSummary(); return; }
+    if (!forced && !(UI.live && liveAllowed())) { renderSummary(); return; }
+    if (running) { rerun = forced ? "forced" : (rerun || "live"); renderSummary(); return; }
+    const inp = toInputs(S), key = inputsKey(inp);
+    if (RES && RES.key === key) { renderSummary(); return; }
+    running = true;
+    renderSummary();
+    submit({ type: "run", inputs: inp, key }).then((out) => {
+      running = false;
+      if (out.type === "run") { out.inputs = inp; RES = out; lastError = null; onResults(); }
+      else { lastError = out.error || "The run failed."; }
+      const again = rerun; rerun = null;
+      if (again) requestRun(again === "forced"); else renderSummary();
+    });
+  }
+
+  // -------------------------------------------------------------------------------------------------------------
+  // results: selections, summary
+  // -------------------------------------------------------------------------------------------------------------
+  function argmax(a) { let k = 0; for (let q = 1; q < a.length; q++) if (a[q] > a[k]) k = q; return k; }
+  function onResults() {
+    const r3 = RES.r3, r2 = RES.r2;
+    if (r3 && r3.mesh.count) {
+      const m = r3.mesh;
+      let k = -1;
+      if (UI.k3ij) for (let q = 0; q < m.count; q++) if (m.i[q] === UI.k3ij[0] && m.j[q] === UI.k3ij[1]) { k = q; break; }
+      UI.k3 = k >= 0 ? k : argmax(m.h);
+      UI.k3ij = [m.i[UI.k3], m.j[UI.k3]];
+    } else { UI.k3 = null; }
+    if (r2 && r2.mesh.count) {
+      const m = r2.mesh;
+      let k = -1;
+      if (UI.k2i !== null) for (let q = 0; q < m.count; q++) if (m.i[q] === UI.k2i) { k = q; break; }
+      UI.k2 = k >= 0 ? k : nearestSlice();
+      UI.k2i = m.i[UI.k2];
+    } else { UI.k2 = null; }
+    markDirty(...TABS.filter((t) => t !== "studies" && t !== "verification"));
+    renderSummary();
+    renderActive();
+  }
+  function nearestSlice() {
+    const r3 = RES.r3, m2 = RES.r2.mesh;
+    const x = r3 && UI.k3 !== null ? r3.mesh.x[UI.k3] : m2.x[Math.floor(m2.count / 2)];
+    let best = 0;
+    for (let q = 1; q < m2.count; q++) if (Math.abs(m2.x[q] - x) < Math.abs(m2.x[best] - x)) best = q;
+    return best;
+  }
+  const STATUS = { "ACCEPTED": ["good", "✓", "Accepted"], "REJECTED": ["critical", "✕", "Rejected"],
+    "NOT CONVERGED": ["warning", "!", "Not converged"], "NOT APPLICABLE": ["neutral", "–", "Not applicable"],
+    "INPUT ERROR": ["critical", "✕", "Input error"] };
+  const chip = (status) => { const [c, i, t] = STATUS[status] || ["neutral", "–", status]; return `<span class="chip ${c}"><i aria-hidden="true">${i}</i>${esc(t)}</span>`; };
+  const note = (kind, html) => `<div class="note ${kind}"><i aria-hidden="true">${{ critical: "✕", warning: "!", info: "i", good: "✓" }[kind]}</i><div>${html}</div></div>`;
+
+  function renderSummary() {
+    const errs = validate(S);
+    const invalid = Object.keys(errs).length > 0;
+    let curKey = null;
+    try { curKey = inputsKey(toInputs(S)); } catch (e) { curKey = null; }
+    const stale = !!RES && RES.key !== curKey;
+    const busy = running || debounceT !== null;
+    $("#summary").classList.toggle("stale", stale);
+    // run state line
+    let state;
+    if (invalid) state = `<span aria-hidden="true" style="color:var(--critical);font-weight:700">✕</span> <span><b>Fix the highlighted inputs</b> to run.</span>`;
+    else if (busy) state = `<span class="spin" aria-hidden="true"></span><span><b>Solving</b> 3D ${S.n3}×${S.n3} and 2D ${S.n2} slices…</span>`;
+    else if (!RES) state = `<span><b>Not run yet.</b> ${liveAllowed() ? "" : `N = ${S.n3} is above the live limit: press Run (fine meshes can take up to a minute).`}</span>`;
+    else if (stale) {
+      const why = !UI.live ? "Live update is off" : !liveAllowed() ? `N = ${S.n3} × ${S.n3} and N<sub>2D</sub> = ${S.n2} are above the live limit (N ≤ 40, N<sub>2D</sub> ≤ 640)` : "";
+      state = `<span aria-hidden="true" style="color:var(--warning);font-weight:700">!</span> <span><b>Inputs changed.</b> ${why ? why + ", so the" : "The"} results below are for the previous inputs: press Run to update${liveAllowed() ? "" : " (fine meshes can take up to a minute)"}.</span>`;
+    }
+    else state = `<span aria-hidden="true" style="color:var(--good);font-weight:700">✓</span> <span><b>Up to date.</b> Solved in ${(RES.ms / 1000).toFixed(2)} s${workerState === "failed" ? " on this page" : ""}.</span>`;
+    if (lastError) state += ` <span>Last run failed: ${esc(lastError)}</span>`;
+    $("#runstate").innerHTML = state;
+    $("#run").disabled = invalid || running;
+    $("#live").checked = UI.live;
+    const notes = [];
+    if (invalid) notes.push(note("critical", Object.values(errs).map(esc).join("<br>")));
+    if (!RES) {
+      $("#fos3").textContent = "–"; $("#fos2").textContent = "–"; $("#ratio").textContent = "–";
+      $("#chip3").innerHTML = ""; $("#chip2").innerHTML = ""; $("#facts").innerHTML = ""; $("#caption").textContent = "";
+      $("#notes").innerHTML = notes.join("");
+      renderMinibar();
+      return;
+    }
+    const inp = RES.inputs, r3 = RES.r3, r2 = RES.r2;
+    const orig = inp.model === "ejc_original";
+    $("#cards").hidden = orig;
+    $("#orig").hidden = !orig;
+    if (orig) renderOriginal();
+    $("#k3").innerHTML = `FoS 3D · Hungr ${inp.form === "FM" ? "F<sub>M</sub>" : "F<sub>H</sub>"}`;
+    const setFos = (el, r) => { el.textContent = r ? f6(r.fos) : "–"; el.classList.toggle("withheld", !r || r.fos === null); };
+    setFos($("#fos3"), r3); setFos($("#fos2"), r2);
+    $("#chip3").innerHTML = chip(r3 ? r3.status : "INPUT ERROR");
+    $("#chip2").innerHTML = chip(r2 ? r2.status : "INPUT ERROR");
+    const ratio = r3 && r2 && r3.fos !== null && r2.fos !== null ? r3.fos / r2.fos : null;
+    $("#ratio").textContent = ratio === null ? "withheld" : ratio.toFixed(4);
+    $("#ratio").classList.toggle("withheld", ratio === null);
+    const facts = [];
+    const pair = (a, b) => `${a} / ${b}`;
+    if (r3 || r2) {
+      facts.push(["Iterations 3D / 2D", pair(r3 ? r3.iterations : "–", r2 ? r2.iterations : "–")]);
+      facts.push(["Active columns / slices", pair(r3 ? r3.mesh.count : "–", r2 ? r2.mesh.count : "–")]);
+      facts.push(["Projections 3D / 2D", pair(r3 ? r3.projections : "–", r2 ? r2.projections : "–")]);
+      if (r3) facts.push(["Sliding volume (full mass)", `${gc(r3.mesh.volume, 4)} m³`]);
+      if (r2) facts.push(["2D area", `${gc(r2.mesh.volume, 4)} m²`]);
+    }
+    $("#facts").innerHTML = facts.map(([k, v]) => `<div><dt>${k}</dt><dd>${v}</dd></div>`).join("");
+    // caption (as the Calculator page)
+    const [mb, s, a] = E.hb(inp);
+    const strengthTxt = inp.model === "mc" ? `c′ = ${E.fmtG(inp.c_mc, 6)} kPa, φ′ = ${E.fmtG(inp.phi_mc, 6)}°`
+      : `m_b = ${fx(mb, 6)}, s = ${fx(s, 7)}, a = ${fx(a, 6)}${inp.model === "ejc_moscarda" || inp.model === "ejc_original" ? `, ν = ${E.fmtG(inp.nu, 6)}` : ""}`;
+    const waterTxt = inp.ru !== null ? `u = r_u γ h with r_u = ${E.fmtG(inp.ru, 6)}` : inp.wet ? `water table (H_w = ${E.fmtG(inp.Hw, 6)} m, β_w = ${E.fmtG(inp.beta_w, 6)}°)` : "dry";
+    let cap = `Strength: ${E.MODELS[inp.model]}. ${strengthTxt}. Water: ${waterTxt}. Iteration path: ${E.ITERATIONS[inp.iteration]}.`;
+    if (inp.base_circle && r3 && r2) cap += ` Base-circle grid (exit to entry, floor columns allowed): ${Array.from(r3.mesh.x).filter((x) => x > 0).length} floor columns, ${Array.from(r2.mesh.x).filter((x) => x > 0).length} floor slices.`;
+    if (r3 && r3.projection_limit !== null) cap += ` Projection limit ${r3.projection_limit.toFixed(4)} kPa.`;
+    $("#caption").textContent = cap;
+    if (inp.tension !== "none") notes.push(note("info", `${inp.tension}: sensitivity, not a calibrated contact law.`));
+    for (const [lab, r, e] of [["3D", r3, RES.e3], ["2D", r2, RES.e2]]) {
+      if (e) notes.push(note("critical", `<b>${lab}: input error.</b> ${esc(e)}`));
+      else if (r && r.status !== "ACCEPTED" && !orig) {
+        const kind = r.status === "NOT CONVERGED" ? "warning" : "critical";
+        notes.push(note(kind, `<b>${lab}: ${esc(r.status)}, no accepted FoS.</b> ${esc(r.reason)}`));
+      }
+    }
+    $("#notes").innerHTML = notes.join("");
+    renderMinibar();
+  }
+  function renderMinibar() {
+    const el = $("#minibar");
+    if (!RES) { el.innerHTML = `<span class="lab">FoS</span><span>${running || debounceT !== null ? "solving…" : "not run yet"}</span>`; return; }
+    if (RES.inputs.model === "ejc_original") { el.innerHTML = '<span class="lab">Original closure</span><span>admissibility check only, no FoS</span>'; return; }
+    const one = (lab, r) => `<span><span class="lab">${lab}</span> <b>${r && r.fos !== null ? r.fos.toFixed(4) : "withheld"}</b> ${chip(r ? r.status : "INPUT ERROR")}</span>`;
+    let curKey = null;
+    try { curKey = inputsKey(toInputs(S)); } catch (e) { curKey = null; }
+    el.innerHTML = one("FoS 3D", RES.r3) + one("2D", RES.r2) + (running || debounceT !== null ? '<span class="spin" aria-hidden="true"></span>' : RES.key !== curKey ? '<span class="hint">previous inputs</span>' : "");
+  }
+  function renderOriginal() {
+    const o = RES.orig, el = $("#orig");
+    if (!o) { el.innerHTML = note("critical", esc(RES.orig_error || "The original-closure check failed.")); return; }
+    if (!o.found) { el.innerHTML = note("critical", "No admissible state of the original closure in σ3 = 1e-6 to 1e6 MPa."); return; }
+    let html = `<h3>Original closure: admissibility check (no FoS)</h3><div class="cards four">` +
+      `<article class="card"><h2 class="k">σ3 at the minimum (MPa)</h2><p class="v">${o.sigma3_min.toFixed(3)}</p></article>` +
+      `<article class="card"><h2 class="k">Minimum admissible σ<sub>n</sub> (MPa)</h2><p class="v">${o.sn_min.toFixed(3)}</p><p class="sub">φ<sub>i</sub> there = ${o.phi_deg.toFixed(3)}°</p></article>` +
+      (o.mesh_error ? "" : `<article class="card"><h2 class="k">Gravity cap γh − u, dry (MPa)</h2><p class="v">${(o.cap_dry / 1000).toFixed(3)}</p><p class="sub">${o.n3}×${o.n3} half-model</p></article>` +
+        `<article class="card"><h2 class="k">Gravity cap γh − u, wet (MPa)</h2><p class="v">${(o.cap_wet / 1000).toFixed(3)}</p><p class="sub">${o.n3}×${o.n3} half-model</p></article>`) +
+      "</div>";
+    if (o.mesh_error) html += note("critical", esc(o.mesh_error));
+    else {
+      const verdict = o.sn_min * 1000 > Math.max(o.cap_dry, o.cap_wet) ? "The minimum admissible σ<sub>n</sub> is above the gravity cap of every column."
+        : "Some columns lie above the minimum, but every base must have an admissible state for a FoS.";
+      html += `<p style="margin-top:10px">At ν = ${E.fmtG(o.nu, 6)}, a = ${E.fmtG(o.a, 6)}: <b>${o.below_dry} of ${o.count_dry}</b> dry columns and <b>${o.below_wet} of ${o.count_wet}</b> wet columns (${o.n3}×${o.n3} half-model) have γh − u below the minimum admissible σ<sub>n</sub>. Those bases have no admissible state, so this closure gives no FoS.</p>` +
+        note("info", `${verdict} Ordering requires σ3/(2ν) ≤ σ1 ≤ σ3(1 − ν)/ν, and the EJC requires σ1 − σ3 ≥ σ<sub>ci</sub>Q<sup>a</sup>.`);
+    }
+    el.innerHTML = html;
+  }
+
+  // -------------------------------------------------------------------------------------------------------------
+  // theme and Plotly helpers
+  // -------------------------------------------------------------------------------------------------------------
+  const RAMP = ["#cde2fb", "#b7d3f6", "#9ec5f4", "#86b6ef", "#6da7ec", "#5598e7", "#3987e5", "#2a78d6", "#256abf", "#1c5cab", "#184f95", "#104281", "#0d366b"];
+  function theme() {
+    const cs = getComputedStyle(document.documentElement);
+    const v = (n) => cs.getPropertyValue(n).trim();
+    const dark = v("--is-dark") === "1";
+    return { dark, surface: v("--surface"), sunken: v("--sunken"), ink: v("--ink"), ink2: v("--ink-2"), muted: v("--muted"), rule: v("--rule"),
+      line: v("--line"), accent: v("--accent"), n: v("--series-n"), slip: v("--slip"), water: v("--water"), rock: v("--rock"),
+      rockEdge: v("--rock-edge"), ramp: dark ? RAMP.slice().reverse() : RAMP };
+  }
+  const hex = (h) => { const n = parseInt(h.slice(1), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; };
+  const rgba = (h, a) => `rgba(${hex(h).join(",")},${a})`;
+  function rampColor(ramp, t) {
+    t = clamp(isNum(t) ? t : 0, 0, 1);
+    const x = t * (ramp.length - 1), i = Math.min(Math.floor(x), ramp.length - 2), f = x - i;
+    const a = hex(ramp[i]), b = hex(ramp[i + 1]);
+    return `rgb(${a.map((v, q) => Math.round(v + (b[q] - v) * f)).join(",")})`;
+  }
+  function scaleFor(field, T) {
+    if (field === "tension") {
+      const lo = T.ramp[2], hi = T.ramp[10];
+      return { colorscale: [[0, lo], [0.5, lo], [0.5, hi], [1, hi]], cmin: 0, cmax: 1,
+        colorbar: { tickvals: [0.25, 0.75], ticktext: ["σn ≥ 0", "tensile"] } };
+    }
+    return { colorscale: T.ramp.map((c, i) => [i / (T.ramp.length - 1), c]) };
+  }
+  function range(vals) {
+    let lo = Infinity, hi = -Infinity;
+    for (const v of vals) if (isNum(v)) { if (v < lo) lo = v; if (v > hi) hi = v; }
+    return lo === Infinity ? [0, 1] : [lo, hi];
+  }
+  function layout(T, extra) {
+    const ax = { gridcolor: T.rule, zerolinecolor: T.line, linecolor: T.line, tickcolor: T.line, color: T.ink2,
+      title: { font: { color: T.ink2, size: 13 } }, automargin: true };
+    const base = { paper_bgcolor: T.surface, plot_bgcolor: T.surface, font: { family: "Barlow, 'STIX Two Text', system-ui, sans-serif", size: 12.5, color: T.ink2 },
+      margin: { l: 10, r: 10, t: 34, b: 10 }, hovermode: "closest",
+      hoverlabel: { bgcolor: T.surface, bordercolor: T.line, font: { family: "IBM Plex Mono, 'STIX Two Text', ui-monospace, monospace", color: T.ink, size: 12 } },
+      legend: { orientation: "h", x: 0, y: 1.0, yanchor: "bottom", font: { color: T.ink2 }, bgcolor: "rgba(0,0,0,0)" },
+      xaxis: Object.assign({}, ax), yaxis: Object.assign({}, ax) };
+    for (const [k, v] of Object.entries(extra || {})) {
+      if ((k === "xaxis" || k === "yaxis") && v) {
+        base[k] = Object.assign({}, base[k], v);
+        if (v.title && typeof v.title === "string") base[k].title = { text: v.title, font: { color: T.ink2, size: 13 } };
+      } else base[k] = v;
+    }
+    return base;
+  }
+  function scene(T, extra) {
+    const ax = (t) => ({ title: { text: t, font: { color: T.ink2 } }, color: T.ink2, gridcolor: T.rule, zerolinecolor: T.line,
+      backgroundcolor: T.surface, showbackground: true, linecolor: T.line });
+    return Object.assign({ aspectmode: "data", bgcolor: T.surface, xaxis: ax("x (m)"), yaxis: ax("y (m)"), zaxis: ax("z (m)") }, extra || {});
+  }
+  const CONFIG = { responsive: true, displaylogo: false, modeBarButtonsToRemove: ["toImage", "lasso2d", "select2d", "sendDataToCloud"] };
+  let PLOTLY = null;
+  function plot(id, data, lay) {
+    const el = document.getElementById(id);
+    if (!PLOTLY) { el.innerHTML = `<div class="empty">${window.__plotlyFailed ? "The chart library (Plotly.js) did not load, so the charts cannot be drawn. The numbers above are unaffected." : "Loading the chart library…"}</div>`; return null; }
+    if (el.firstElementChild && el.firstElementChild.classList.contains("empty")) el.innerHTML = "";
+    PLOTLY.react(el, data, lay, CONFIG);
+    return el;
+  }
+  function clearChart(id) { const el = document.getElementById(id); if (PLOTLY && el.data) PLOTLY.purge(el); el.innerHTML = ""; }
+  function onClick(el, fn) { if (!el) return; el.__ejcFn = fn; if (!el.__ejcBound) { el.__ejcBound = true; el.on("plotly_click", (ev) => el.__ejcFn && el.__ejcFn(ev)); } }
+
+  // -------------------------------------------------------------------------------------------------------------
+  // per-element values (plots.field_values) and hover text (plots._hover_rows)
+  // -------------------------------------------------------------------------------------------------------------
+  function fieldValues(r, name) {
+    const m = r.mesh, n = m.count, s = r.strength;
+    const nan = () => new Float64Array(n).fill(NaN);
+    if (name === "u") return Float64Array.from(m.u);
+    if (name === "sigma_n") return r.sn ? Float64Array.from(r.sn) : nan();
+    if (!s) return nan();
+    if (name === "phi") return Float64Array.from(s.phi, (v) => v * E.RAD);
+    if (name === "c") return Float64Array.from(r.c_used || s.c);
+    if (name === "tau") return Float64Array.from(r.tau_used || s.tau);
+    if (name === "resistance") { const tau = r.tau_used || s.tau; return Float64Array.from(tau, (v, k) => v * m.area[k]); }
+    const sn = r.sn || nan();
+    return Float64Array.from(sn, (v, k) => (v < 0 || (r.tensile && r.tensile[k]) ? 1 : 0));
+  }
+  function hoverRows(r, k, twoD) {
+    const m = r.mesh, s = r.strength;
+    const lines = [`${twoD ? "slice" : "column"} ${k}  (i = ${m.i[k]}${twoD ? "" : `, j = ${m.j[k]}`})`,
+      `x = ${fx(m.x[k], 2)} m${twoD ? "" : `, y = ${fx(m.y[k], 2)} m`}`,
+      `h = ${fx(m.h[k], 2)} m, W = ${fx(m.w[k], 1)} kN${twoD ? "/m" : ""}`, `u = ${fx(m.u[k], 2)} kPa`];
+    if (r.sn) lines.push(`σn = ${fx(r.sn[k], 2)} kPa`);
+    if (s && isNum(s.phi[k])) {
+      const tau = r.tau_used ? r.tau_used[k] : s.tau[k], c = r.c_used ? r.c_used[k] : s.c[k];
+      lines.push(`φi = ${fx(s.phi[k] * E.RAD, 3)}°`, `ci = ${fx(c, 2)} kPa`, `τs = ${fx(tau, 2)} kPa`);
+    } else if (s) lines.push(E.REASONS[s.code[k]]);
+    return lines.join("<br>");
+  }
+  function frame(inp, m) {
+    const crest = -inp.H / Math.tan(inp.beta * E.DEG);
+    const left = Math.min(m.x1, crest), right = Math.max(m.x0, 0);
+    const pad = 0.1 * Math.max(right - left, inp.H);
+    return [left - pad, right + 2 * pad, pad];
+  }
+  function frameNoMesh(inp) {
+    const x0 = inp.R > inp.zc ? inp.xc - Math.sqrt(inp.R * inp.R - inp.zc * inp.zc) : inp.xc;
+    return frame(inp, { x1: inp.xc - inp.R, x0 });
+  }
+  const slipX = (inp, m, n) => linspace(m.x1, inp.base_circle ? m.x0 : Math.min(m.x0, 0), n);
+
+  // -------------------------------------------------------------------------------------------------------------
+  // 3D view and plan view (plots.view3d, plots.plan_view)
+  // -------------------------------------------------------------------------------------------------------------
+  const OX = [-1, 1, 1, -1, -1, 1, 1, -1], OY = [-1, -1, 1, 1, -1, -1, 1, 1];
+  const TRI = [[0, 1, 2], [0, 2, 3], [4, 5, 6], [4, 6, 7], [0, 1, 5], [0, 5, 4], [1, 2, 6], [1, 6, 5], [2, 3, 7], [2, 7, 6], [3, 0, 4], [3, 4, 7]];
+  function prisms(xs, ys, dx, dy, zb, zt, vals) {
+    const n = xs.length;
+    const X = new Float64Array(8 * n), Y = new Float64Array(8 * n), Z = new Float64Array(8 * n);
+    const I = new Int32Array(12 * n), J = new Int32Array(12 * n), K = new Int32Array(12 * n), F = new Float64Array(12 * n);
+    for (let p = 0; p < n; p++) {
+      for (let v = 0; v < 8; v++) { X[8 * p + v] = xs[p] + OX[v] * dx / 2; Y[8 * p + v] = ys[p] + OY[v] * dy / 2; Z[8 * p + v] = v < 4 ? zb[p] : zt[p]; }
+      for (let f = 0; f < 12; f++) { I[12 * p + f] = 8 * p + TRI[f][0]; J[12 * p + f] = 8 * p + TRI[f][1]; K[12 * p + f] = 8 * p + TRI[f][2]; F[12 * p + f] = vals[p]; }
+    }
+    return { x: X, y: Y, z: Z, i: I, j: J, k: K, intensity: F };
+  }
+  function quads(xs, ys, dx, dy, zb, vals) {
+    const n = xs.length;
+    const X = new Float64Array(4 * n), Y = new Float64Array(4 * n), Z = new Float64Array(4 * n);
+    const I = new Int32Array(2 * n), J = new Int32Array(2 * n), K = new Int32Array(2 * n), F = new Float64Array(2 * n);
+    for (let p = 0; p < n; p++) {
+      for (let v = 0; v < 4; v++) { X[4 * p + v] = xs[p] + OX[v] * dx / 2; Y[4 * p + v] = ys[p] + OY[v] * dy / 2; Z[4 * p + v] = zb[p]; }
+      I[2 * p] = 4 * p; J[2 * p] = 4 * p + 1; K[2 * p] = 4 * p + 2; I[2 * p + 1] = 4 * p; J[2 * p + 1] = 4 * p + 2; K[2 * p + 1] = 4 * p + 3;
+      F[2 * p] = vals[p]; F[2 * p + 1] = vals[p];
+    }
+    return { x: X, y: Y, z: Z, i: I, j: J, k: K, intensity: F };
+  }
+  function msg(id, html, kind = "warning") { const el = document.getElementById(id); el.innerHTML = html ? note(kind, html) : ""; }
+  const notRun = () => (running || debounceT !== null ? "Solving…" : "Not run yet. Press Run above.");
+  function noResult(r, e, lab) {
+    if (!RES) return [notRun(), "info"];
+    if (e) return [`${lab}: input error. ${esc(e)}`, "critical"];
+    if (RES.inputs.model === "ejc_original") return ["The original closure is an admissibility check only; there are no column results. See the summary above.", "info"];
+    if (!r || !r.mesh.count) return [`${lab}: no active columns for this geometry and mesh, so there is nothing to draw.`, "warning"];
+    return null;
+  }
+  function render3d() {
+    const r = RES && RES.r3;
+    const why = noResult(r, RES && RES.e3, "3D");
+    if (why) { msg("v3-msg", why[0], why[1]); clearChart("chart-3d"); clearChart("chart-plan"); $("#plan-info").textContent = ""; syncPick("k3a", 0, 0); return; }
+    const inp = RES.inputs, m = r.mesh, T = theme(), field = UI.field;
+    msg("v3-msg", r.status !== "ACCEPTED" ? `3D: ${esc(r.status)}. Values are from the last iterate, not an accepted solution.` : "");
+    const vals = fieldValues(r, field);
+    let [vmin, vmax] = range(vals);
+    if (field === "tension") { vmin = 0; vmax = 1; }
+    const mirror = UI.mirror;
+    const [xa, xb] = frame(inp, m);
+    let ymass = 0;
+    for (let q = 0; q < m.count; q++) ymass = Math.max(ymass, m.y[q] + m.dy / 2);
+    const yext = Math.min(inp.R, Math.max(1.3 * ymass, 0.25 * (xb - xa)));
+    const ylo = mirror ? -yext : 0;
+    const data = [];
+    const gx = linspace(xa, xb, 90), gy = linspace(ylo, yext, 60);
+    const gz = gy.map(() => gx.map((x) => E.groundZ(x, inp.H, inp.beta)));
+    data.push({ type: "surface", x: gx, y: gy, z: gz, colorscale: [[0, T.rockEdge], [1, T.rockEdge]], showscale: false, opacity: 0.28,
+      name: "ground surface", hoverinfo: "skip", showlegend: true });
+    const sx = slipX(inp, m, 90), sy = linspace(ylo, yext, 90);
+    const sz = sy.map((y) => sx.map((x) => { const z = E.sphereZ(x, y, inp.xc, inp.zc, inp.R); return z < E.groundZ(x, inp.H, inp.beta) ? z : null; }));
+    data.push({ type: "surface", x: sx, y: sy, z: sz, colorscale: [[0, T.slip], [1, T.slip]], showscale: false, opacity: 0.5,
+      name: "slip surface", hoverinfo: "skip", showlegend: true });
+    let xs = Array.from(m.x), ys = Array.from(m.y), zb = Array.from(m.zb), zt = Array.from(m.zt);
+    let vv = Array.from(vals, (v) => (isNum(v) ? v : vmin));
+    if (mirror) { xs = xs.concat(xs); ys = ys.concat(ys.map((y) => -y)); zb = zb.concat(zb); zt = zt.concat(zt); vv = vv.concat(vv); }
+    const full = xs.length <= MAX_PRISMS;
+    const pr = full ? prisms(xs, ys, m.dx, m.dy, zb, zt, vv) : quads(xs, ys, m.dx, m.dy, zb, vv);
+    const sc = scaleFor(field, T);
+    data.push(Object.assign({ type: "mesh3d", intensitymode: "cell", flatshading: true, opacity: 1, name: full ? "columns" : "column bases",
+      hoverinfo: "skip", cmin: vmin, cmax: vmax === vmin ? vmin + 1 : vmax, showlegend: true,
+      lighting: { ambient: 0.7, diffuse: 0.55, specular: 0.05, roughness: 0.9, fresnel: 0.1 },
+      colorbar: Object.assign({ title: { text: FIELDS[field][0], side: "right", font: { color: T.ink2 } }, len: 0.7, thickness: 12, outlinewidth: 0,
+        tickfont: { color: T.ink2, family: "IBM Plex Mono, monospace", size: 11 } }, sc.colorbar || {}) }, pr, { colorscale: sc.colorscale }));
+    const hover = Array.from({ length: m.count }, (_, q) => hoverRows(r, q, false));
+    data.push({ type: "scatter3d", mode: "markers", x: m.x, y: m.y, z: m.zb, marker: { size: 2.5, color: T.ink }, text: hover,
+      hoverinfo: "text", name: "base centres (half-model)", customdata: Array.from({ length: m.count }, (_, q) => q) });
+    const k = UI.k3;
+    if (k !== null) data.push({ type: "scatter3d", mode: "lines+markers", x: [m.x[k], m.x[k]], y: [m.y[k], m.y[k]], z: [m.zb[k], m.zt[k]],
+      line: { color: T.ink, width: 9 }, marker: { size: 4, color: T.ink }, name: `column ${k}`, hoverinfo: "name" });
+    const narrow = window.matchMedia("(max-width: 640px)").matches;
+    const el = plot("chart-3d", data, layout(T, { margin: { l: 0, r: 0, t: 30, b: 0 }, uirevision: `${PRESET_KEY}|${mirror}`, showlegend: !narrow,
+      scene: scene(T, { camera: { eye: { x: 1.45, y: -1.05, z: 0.62 } } }) }));
+    onClick(el, (ev) => { const p = ev.points && ev.points[0]; if (p && p.data && p.data.type === "scatter3d" && p.customdata !== undefined) selectColumn(p.customdata); });
+    renderPlan("chart-plan", vals, mirror, field);
+    $("#plan-info").textContent = k !== null ? `Column ${k}: i = ${m.i[k]}, j = ${m.j[k]}, x = ${fx(m.x[k], 2)} m, y = ${fx(m.y[k], 2)} m, h = ${fx(m.h[k], 2)} m. Click a cell to select a column.` : "";
+    syncPick("k3a", m.count - 1, k);
+  }
+  function renderPlan(id, vals, mirror, field) {
+    const r = RES.r3, m = r.mesh, n = m.n, T = theme();
+    let grid = Array.from({ length: n }, () => new Array(n).fill(null));
+    for (let q = 0; q < m.count; q++) grid[m.j[q] - 1][n - m.i[q]] = isNum(vals[q]) ? vals[q] : null;
+    const xs = Array.from({ length: n }, (_, c) => m.x0 - (n - c - 0.5) * m.dx);
+    let ys = Array.from({ length: n }, (_, q) => (q + 0.5) * m.dy);
+    if (mirror) { grid = grid.slice().reverse().concat(grid); ys = ys.map((y) => -y).reverse().concat(ys); }
+    let [vmin, vmax] = range(vals);
+    if (field === "tension") { vmin = 0; vmax = 1; }
+    const sc = scaleFor(field, T);
+    const data = [Object.assign({ type: "heatmap", x: xs, y: ys, z: grid, zmin: vmin, zmax: vmax === vmin ? vmin + 1 : vmax, hoverongaps: false,
+      hovertemplate: `x = %{x:.2f} m<br>y = %{y:.2f} m<br>${FIELDS[field][1]} = %{z:.4g}<extra></extra>`,
+      colorbar: Object.assign({ title: { text: FIELDS[field][0], side: "right", font: { color: T.ink2 } }, len: 0.85, thickness: 12, outlinewidth: 0,
+        tickfont: { color: T.ink2, family: "IBM Plex Mono, monospace", size: 11 } }, sc.colorbar || {}) }, { colorscale: sc.colorscale })];
+    if (m.count <= 1600) {
+      data.push({ type: "scatter", mode: "markers", x: m.x, y: m.y, marker: { size: Math.max(4, Math.min(9, 360 / n)), color: rgba(T.surface, 0.75), line: { width: 0.6, color: T.ink2 } },
+        text: Array.from({ length: m.count }, (_, q) => hoverRows(r, q, false)), hoverinfo: "text", customdata: Array.from({ length: m.count }, (_, q) => q), name: "columns" });
+    }
+    const shapes = [];
+    const k = UI.k3;
+    if (k !== null) shapes.push({ type: "rect", x0: m.x[k] - m.dx / 2, x1: m.x[k] + m.dx / 2, y0: m.y[k] - m.dy / 2, y1: m.y[k] + m.dy / 2, line: { color: T.ink, width: 2.5 } });
+    let xmin = Infinity, xmax = -Infinity, ymax = -Infinity;
+    for (let q = 0; q < m.count; q++) { xmin = Math.min(xmin, m.x[q]); xmax = Math.max(xmax, m.x[q]); ymax = Math.max(ymax, m.y[q]); }
+    ymax += m.dy;
+    const el = plot(id, data, layout(T, { showlegend: false, shapes, margin: { l: 10, r: 10, t: 10, b: 10 },
+      xaxis: { title: "x (m)", range: [xmin - m.dx, xmax + m.dx], showgrid: false, zeroline: false },
+      yaxis: { title: "y (m)", scaleanchor: "x", scaleratio: 1, range: [mirror ? -ymax : 0, ymax], showgrid: false, zeroline: false } }));
+    onClick(el, (ev) => {
+      const p = ev.points && ev.points[0];
+      if (!p) return;
+      if (p.customdata !== undefined && p.data.type === "scatter") { selectColumn(p.customdata); return; }
+      const i = Math.round((m.x0 - p.x) / m.dx + 0.5), j = Math.round(Math.abs(p.y) / m.dy + 0.5);
+      for (let q = 0; q < m.count; q++) if (m.i[q] === i && m.j[q] === j) { selectColumn(q); return; }
+    });
+  }
+
+  // -------------------------------------------------------------------------------------------------------------
+  // cross-section (plots.cross_section)
+  // -------------------------------------------------------------------------------------------------------------
+  function renderSection() {
+    const T = theme();
+    if (!RES) { msg("xs-msg", notRun(), "info"); clearChart("chart-section"); return; }
+    const inp = RES.inputs, r = RES.r2;
+    const m = r ? r.mesh : null;
+    msg("xs-msg", RES.e2 ? `2D: input error. ${esc(RES.e2)} The drawing shows the ground and the full circle only.`
+      : r && r.status !== "ACCEPTED" && inp.model !== "ejc_original" ? `2D: ${esc(r.status)}. Values are from the last iterate, not an accepted solution.` : "");
+    const [xa, xb, pad] = m && m.count ? frame(inp, m) : frameNoMesh(inp);
+    const span = xb - xa;
+    const bottom = Math.min(-pad / 2, inp.zc - inp.R - pad / 2);
+    const xrange = [Math.min(xa, inp.xc - 0.05 * span), Math.max(xb, inp.xc + 0.12 * span)];
+    const yrange = [bottom, Math.max(inp.H, inp.zc) + pad];
+    const crest = -inp.H / Math.tan(inp.beta * E.DEG);
+    const xs = [xrange[0] - 3 * span].concat(linspace(Math.min(xa, crest - 1e-9), Math.max(xb, 1e-9), 1200), [xrange[1] + 3 * span]);
+    const zt = xs.map((x) => E.groundZ(x, inp.H, inp.beta));
+    const deep = bottom - 3 * span;
+    const data = [];
+    data.push({ type: "scatter", x: xs.concat(xs.slice().reverse()), y: zt.concat(xs.map(() => deep)), fill: "toself", fillcolor: rgba(T.rock, T.dark ? 0.9 : 0.85),
+      line: { width: 0 }, hoverinfo: "skip", name: "rock mass" });
+    data.push({ type: "scatter", x: xs, y: zt, mode: "lines", line: { color: T.rockEdge, width: 2 }, name: "ground surface", hoverinfo: "skip" });
+    const th = linspace(0, 2 * Math.PI, 1441);
+    data.push({ type: "scatter", x: th.map((t) => inp.xc + inp.R * Math.cos(t)), y: th.map((t) => inp.zc + inp.R * Math.sin(t)), mode: "lines",
+      line: { color: T.slip, width: 1, dash: "dot" }, name: "slip circle (full)", hoverinfo: "skip", visible: m && m.count ? "legendonly" : true });
+    let inside = [], xb_ = [], slipTrace = null;
+    if (m && m.count) {
+      xb_ = slipX(inp, m, 1200);
+      const zb_ = xb_.map((x) => E.sphereZ(x, 0, inp.xc, inp.zc, inp.R));
+      inside = xb_.map((x, q) => zb_[q] < E.groundZ(x, inp.H, inp.beta));
+      slipTrace = { type: "scatter", x: xb_, y: zb_.map((z, q) => (inside[q] ? z : null)), mode: "lines", line: { color: T.slip, width: 3 },
+        name: "slip surface", hoverinfo: "skip" };
+    }
+    if (inp.wet) data.push({ type: "scatter", x: xs, y: xs.map((x, q) => Math.min(E.waterZ(x, inp.Hw, inp.beta_w), zt[q])), mode: "lines",
+      line: { color: T.water, width: 2, dash: "dash" }, name: "water table", hoverinfo: "skip" });
+    const ann = [];
+    if (inp.ru !== null) ann.push({ xref: "paper", yref: "paper", x: 0.01, y: 0.02, showarrow: false, align: "left", text: `pore pressure u = r<sub>u</sub> γ h, r<sub>u</sub> = ${E.fmtG(inp.ru, 6)}`, font: { color: T.ink } });
+    const curveToSlice = {};
+    if (m && m.count) {
+      const vals = fieldValues(r, UI.field);
+      let [vmin, vmax] = range(vals);
+      if (UI.field === "tension") { vmin = 0; vmax = 1; }
+      const span = vmax > vmin ? vmax - vmin : 1;
+      const hover = Array.from({ length: m.count }, (_, q) => hoverRows(r, q, true));
+      if (m.count <= MAX_POLYGONS) {
+        for (let q = 0; q < m.count; q++) {
+          const xl = m.x[q] - m.dx / 2, xr = m.x[q] + m.dx / 2;
+          let zl = E.sphereZ(xl, 0, inp.xc, inp.zc, inp.R), zr = E.sphereZ(xr, 0, inp.xc, inp.zc, inp.R);
+          if (!isNum(zl)) zl = m.zb[q];
+          if (!isNum(zr)) zr = m.zb[q];
+          const gl = E.groundZ(xl, inp.H, inp.beta), gr = E.groundZ(xr, inp.H, inp.beta);
+          const fill = isNum(vals[q]) ? (UI.field === "tension" ? (vals[q] > 0.5 ? T.ramp[10] : T.ramp[2]) : rampColor(T.ramp, (vals[q] - vmin) / span)) : rgba(T.line, 0.6);
+          const sel = q === UI.k2;
+          curveToSlice[data.length] = q;
+          data.push({ type: "scatter", x: [xl, xr, xr, xl, xl], y: [zl, zr, gr, gl, zl], fill: "toself", fillcolor: fill, mode: "lines",
+            line: { color: sel ? T.ink : rgba(T.ink2, 0.55), width: sel ? 2.5 : 0.6 }, hoveron: "fills", text: hover[q], hoverinfo: "text", showlegend: false });
+        }
+      }
+      data.push(slipTrace);
+      const sc = scaleFor(UI.field, T);
+      curveToSlice.markers = data.length;
+      data.push({ type: "scatter", mode: "markers", x: m.x, y: m.zb, name: "slice bases", text: hover, hoverinfo: "text", customdata: Array.from({ length: m.count }, (_, q) => q),
+        marker: Object.assign({ size: 7, color: Array.from(vals, (v) => (isNum(v) ? v : null)), cmin: vmin, cmax: vmax === vmin ? vmin + 1 : vmax,
+          line: { width: 0.8, color: T.surface },
+          colorbar: Object.assign({ title: { text: FIELDS[UI.field][0], side: "right", font: { color: T.ink2 } }, len: 0.75, thickness: 12, outlinewidth: 0,
+            tickfont: { color: T.ink2, family: "IBM Plex Mono, monospace", size: 11 } }, sc.colorbar || {}) }, { colorscale: sc.colorscale }) });
+    }
+    data.push({ type: "scatter", x: [inp.xc], y: [inp.zc], mode: "markers+text", marker: { symbol: "x", size: 11, color: T.slip }, text: ["centre"],
+      textposition: "middle right", textfont: { color: T.ink }, name: "circle centre", hovertext: [`centre (${fx(inp.xc, 3)}, ${fx(inp.zc, 3)}), R = ${fx(inp.R, 3)} m`], hoverinfo: "text" });
+    if (m && m.count) {
+      const xi = xb_.filter((x, q) => inside[q]);
+      if (xi.length) for (const xe of [xi[0], xi[xi.length - 1]]) data.push({ type: "scatter", x: [inp.xc, xe], y: [inp.zc, E.sphereZ(xe, 0, inp.xc, inp.zc, inp.R)],
+        mode: "lines", showlegend: false, hoverinfo: "skip", line: { color: T.slip, width: 0.8, dash: "dash" } });
+    }
+    const el = plot("chart-section", data, layout(T, { annotations: ann, uirevision: `${PRESET_KEY}`, margin: { l: 10, r: 10, t: 40, b: 10 },
+      xaxis: { title: "x (m), toe at 0, slope rises to −x", range: xrange }, yaxis: { title: "z (m)", scaleanchor: "x", scaleratio: 1, range: yrange } }));
+    onClick(el, (ev) => {
+      const p = ev.points && ev.points[0];
+      if (!p) return;
+      let q = curveToSlice[p.curveNumber];
+      if (q === undefined && p.curveNumber === curveToSlice.markers) q = p.customdata;
+      if (q !== undefined) { selectSlice(q, false); setTab("free-body"); }
+    });
+  }
+
+  // -------------------------------------------------------------------------------------------------------------
+  // free-body diagrams (plots.column_forces, fbd3d, lever_view, fbd2d)
+  // -------------------------------------------------------------------------------------------------------------
+  function arrow3d(data, start, vec, color, name, width = 6) {
+    const end = [start[0] + vec[0], start[1] + vec[1], start[2] + vec[2]];
+    data.push({ type: "scatter3d", x: [start[0], end[0]], y: [start[1], end[1]], z: [start[2], end[2]], mode: "lines", line: { color, width }, name, hoverinfo: "name" });
+    const L = Math.hypot(...vec);
+    if (L > 0) data.push({ type: "cone", x: [end[0]], y: [end[1]], z: [end[2]], u: [vec[0] / L], v: [vec[1] / L], w: [vec[2] / L], anchor: "tip",
+      sizemode: "absolute", sizeref: L * 0.18, showscale: false, colorscale: [[0, color], [1, color]], hoverinfo: "skip", showlegend: false });
+  }
+  const sub3 = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+  const mul3 = (a, s) => [a[0] * s, a[1] * s, a[2] * s];
+  const add3 = (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
+  function forceTable(rows) {
+    return `<table class="data"><thead><tr><th>Quantity</th><th>Value</th><th>Unit</th><th>Note</th></tr></thead><tbody>` +
+      rows.map(([q, v, u, n]) => `<tr><td>${q}</td><td class="n">${v}</td><td class="m">${u}</td><td>${n || ""}</td></tr>`).join("") + "</tbody></table>";
+  }
+  function balanceText(f, twoD) {
+    const ok = f.residual_rel <= 1e-9;
+    const lhs = twoD ? "W − (N′ + U) cos α − S sin α" : "W − (N′ + U) g<sub>z</sub> − S κ";
+    return `Vertical balance (eq. 4.12) ${lhs} = <b class="mono">${e3(f.residual)} kN${twoD ? "/m" : ""}</b> (relative ${e2(f.residual_rel)}; limit 1e-9) ` +
+      `<span class="res ${ok ? "pass" : "fail"}"><i aria-hidden="true">${ok ? "✓" : "✕"}</i>${ok ? "PASS" : "FAIL"}</span>`;
+  }
+  function renderFbd() {
+    const r3 = RES && RES.r3;
+    const why = noResult(r3, RES && RES.e3, "3D") || (r3 && !r3.tau_used ? ["The 3D run did not reach a final state, so there are no column forces to draw.", "warning"] : null);
+    $("#fbd-body").hidden = !!why;
+    if (why) { msg("fbd-msg", why[0], why[1]); return; }
+    msg("fbd-msg", r3.fos === null ? `3D: ${esc(r3.status)}. The diagram uses the last trial F = ${fx(r3.f_trial, 6)}, which is not a FoS.` : "");
+    const inp = RES.inputs, m = r3.mesh, T = theme(), k = UI.k3;
+    const f = E.columnForces(inp, r3, k);
+    $("#col-title").textContent = `Column ${k} (i = ${m.i[k]}, j = ${m.j[k]})`;
+    $("#col-where").textContent = `x = ${fx(m.x[k], 2)} m, y = ${fx(m.y[k], 2)} m, h = ${fx(m.h[k], 2)} m. ${m.count} active half-columns.`;
+    syncPick("k3", m.count - 1, k);
+    renderPlan("chart-fbd-plan", fieldValues(r3, "sigma_n"), false, "sigma_n");
+    // 3D column
+    const data = [];
+    const pr = prisms([m.x[k]], [m.y[k]], m.dx, m.dy, [m.zb[k]], [m.zt[k]], [0]);
+    const { intensity: _unused, ...geo } = pr;
+    data.push(Object.assign({ type: "mesh3d", color: T.line, opacity: 0.45, name: "column", hoverinfo: "skip", flatshading: true, showlegend: true, showscale: false }, geo));
+    const L = Math.max(m.h[k], m.dx, m.dy) * 1.2, sc = L / f.W;
+    const cen = mul3(add3(f.base, f.top), 0.5);
+    arrow3d(data, cen, [0, 0, -f.W * sc], T.ink, `W = ${fx(f.W, 1)} kN`);
+    arrow3d(data, sub3(f.base, mul3(f.n, f.N * sc)), mul3(f.n, f.N * sc), T.n, `N′ = ${fx(f.N, 1)} kN`);
+    if (f.U > 0) { const off = mul3(f.s, 0.15 * L); arrow3d(data, sub3(add3(f.base, off), mul3(f.n, f.U * sc)), mul3(f.n, f.U * sc), T.water, `U = ${fx(f.U, 1)} kN`); }
+    arrow3d(data, f.base, mul3(f.s, f.S * sc), T.slip, `S = ${fx(f.S, 1)} kN`);
+    arrow3d(data, f.base, mul3(f.n, 0.5 * L), T.muted, "base normal n", 3);
+    plot("chart-fbd3d", data, layout(T, { margin: { l: 0, r: 0, t: 40, b: 0 }, uirevision: `${PRESET_KEY}|fbd`, scene: scene(T) }));
+    // lever view
+    const rho = f.rho, th = linspace(Math.PI, 2 * Math.PI, 400), [xa, xb] = frame(inp, m), xs = linspace(xa, xb, 500);
+    const lev = [
+      { type: "scatter", x: xs, y: xs.map((x) => E.groundZ(x, inp.H, inp.beta)), mode: "lines", line: { color: T.rockEdge, width: 2 }, name: "ground (any y)", hoverinfo: "skip" },
+      { type: "scatter", x: th.map((t) => inp.xc + rho * Math.cos(t)), y: th.map((t) => inp.zc + rho * Math.sin(t)), mode: "lines", line: { color: T.slip, width: 2 },
+        name: `sphere section at y = ${fx(m.y[k], 1)} m`, hoverinfo: "skip" },
+      { type: "scatter", x: [inp.xc], y: [inp.zc], mode: "markers+text", marker: { symbol: "circle-x", size: 13, color: T.slip, line: { color: T.slip } },
+        text: ["rotation axis (parallel to y)"], textposition: "top center", textfont: { color: T.ink }, name: "rotation axis", hoverinfo: "name" },
+      { type: "scatter", x: [inp.xc, m.x[k]], y: [inp.zc, m.zb[k]], mode: "lines+text", line: { color: T.ink, dash: "dash", width: 1.5 },
+        text: ["", `ρ = ${fx(rho, 1)} m`], textposition: "bottom left", textfont: { color: T.ink }, name: "lever arm ρ" },
+      { type: "scatter", x: [m.x[k] - m.dx / 2, m.x[k] + m.dx / 2, m.x[k] + m.dx / 2, m.x[k] - m.dx / 2, m.x[k] - m.dx / 2],
+        y: [m.zb[k], m.zb[k], m.zt[k], m.zt[k], m.zb[k]], fill: "toself", fillcolor: rgba(T.n, 0.3), line: { color: T.n }, name: `column ${k}` },
+    ];
+    plot("chart-lever", lev, layout(T, { margin: { l: 10, r: 10, t: 40, b: 10 }, uirevision: `${PRESET_KEY}|lever`,
+      xaxis: { title: "x (m)" }, yaxis: { title: "z (m)", scaleanchor: "x", scaleratio: 1 } }));
+    const st = r3.strength;
+    $("#col-table").innerHTML = forceTable([
+      ["W (weight)", fx(f.W, 3), "kN", "vertical, down"],
+      ["N′ = σ<sub>n</sub> A (effective normal)", fx(f.N, 3), "kN", "along the base normal n, into the column"],
+      ["U = u A (pore force)", fx(f.U, 3), "kN", "along n"],
+      ["S = τ<sub>s</sub> A / F (mobilised shear)", fx(f.S, 3), "kN", "in the base plane, in x-z, resisting sliding"],
+      ["F used", fx(f.F, 6), "–", r3.fos !== null ? "accepted FoS" : "last trial F (not a FoS)"],
+      ["σ<sub>n</sub>", fx(r3.sn[k], 3), "kPa", ""], ["u", fx(m.u[k], 3), "kPa", ""], ["τ<sub>s</sub> used", fx(r3.tau_used[k], 3), "kPa", ""],
+      ["φ<sub>i</sub>, c<sub>i</sub> used", `${fx(st.phi[k] * E.RAD, 3)}°, ${fx(r3.c_used[k], 3)}`, "°, kPa", E.REASONS[st.code[k]]],
+      ["σ1, σ2, σ3", `${g(st.s1[k], 6)}, ${g(st.s2[k], 6)}, ${g(st.s3[k], 6)}`, "MPa", `M = ${g(st.M[k], 6)}`],
+      ["A (base area)", fx(f.area, 3), "m²", "A = A<sub>h</sub> / g<sub>z</sub>"], ["g<sub>z</sub> (vertical component of n)", fx(f.g, 6), "–", ""],
+      ["κ (vertical component of the shear direction)", fx(f.kap, 6), "–", "κ = (x<sub>c</sub> − x)/ρ"],
+      ["ρ (lever arm to the rotation axis)", fx(f.rho, 3), "m", "ρ = √(R² − y²)"],
+    ]);
+    $("#col-balance").innerHTML = balanceText(f, false);
+    renderSlice();
+  }
+  function renderSlice() {
+    const r2 = RES.r2, why = !r2 ? `2D: input error. ${esc(RES.e2 || "")}` : !r2.mesh.count ? "2D: no active slices." : !r2.tau_used ? `2D: ${esc(r2.status)}. ${esc(r2.reason)}` : null;
+    $("#slice-body").hidden = !!why;
+    if (why) { msg("slice-msg", why, "warning"); syncPick("k2", 0, 0); return; }
+    msg("slice-msg", r2.fos === null ? `2D: ${esc(r2.status)}. The diagram uses the last trial F = ${fx(r2.f_trial, 6)}, which is not a FoS.` : "");
+    const inp = RES.inputs, m = r2.mesh, T = theme(), j = UI.k2;
+    syncPick("k2", m.count - 1, j);
+    $("#slice-title").textContent = `Matching 2D slice ${j} (i = ${m.i[j]}), central section, per metre`;
+    const f = E.columnForces(inp, r2, j);
+    const xl = m.x[j] - m.dx / 2, xr = m.x[j] + m.dx / 2;
+    let zl = E.sphereZ(xl, 0, inp.xc, inp.zc, inp.R), zr = E.sphereZ(xr, 0, inp.xc, inp.zc, inp.R);
+    if (!isNum(zl)) zl = m.zb[j];
+    if (!isNum(zr)) zr = m.zb[j];
+    const gl = E.groundZ(xl, inp.H, inp.beta), gr = E.groundZ(xr, inp.H, inp.beta);
+    const data = [{ type: "scatter", x: [xl, xr, xr, xl, xl], y: [zl, zr, gr, gl, zl], fill: "toself", fillcolor: rgba(T.rock, 0.95), line: { color: T.ink2 }, name: `slice ${j}`, hoverinfo: "skip" }];
+    const L = Math.max(m.h[j], m.dx), sc = L / f.W;
+    const base = [m.x[j], m.zb[j]], cen = [m.x[j], (m.zb[j] + m.zt[j]) / 2];
+    const n2 = [f.n[0], f.n[2]], s2 = [f.s[0], f.s[2]];
+    const arrows = [["W", cen, [0, -f.W * sc], T.ink], ["N′", [base[0] - n2[0] * f.N * sc, base[1] - n2[1] * f.N * sc], [n2[0] * f.N * sc, n2[1] * f.N * sc], T.n],
+      ["S", base, [s2[0] * f.S * sc, s2[1] * f.S * sc], T.slip]];
+    if (f.U > 0) arrows.push(["U", [base[0] + s2[0] * 0.12 * L - n2[0] * f.U * sc, base[1] + s2[1] * 0.12 * L - n2[1] * f.U * sc], [n2[0] * f.U * sc, n2[1] * f.U * sc], T.water]);
+    const ann = [];
+    for (const [name, st_, vec, col] of arrows) {
+      const end = [st_[0] + vec[0], st_[1] + vec[1]];
+      ann.push({ x: end[0], y: end[1], ax: st_[0], ay: st_[1], xref: "x", yref: "y", axref: "x", ayref: "y", showarrow: true, arrowhead: 3, arrowsize: 1.2, arrowwidth: 2.5, arrowcolor: col, text: "" });
+      ann.push({ x: end[0], y: end[1], text: `<b>${name}</b>`, showarrow: false, font: { color: T.ink, size: 14 }, xshift: 12, yshift: 8 });
+      data.push({ type: "scatter", x: [null], y: [null], mode: "lines", line: { color: col, width: 3 }, name: `${name} = ${fx(name === "W" ? f.W : name === "N′" ? f.N : name === "S" ? f.S : f.U, 1)} kN/m` });
+    }
+    data.push({ type: "scatter", x: [base[0], base[0] + n2[0] * 0.5 * L], y: [base[1], base[1] + n2[1] * 0.5 * L], mode: "lines", line: { color: T.muted, dash: "dot" }, name: "base normal" });
+    plot("chart-fbd2d", data, layout(T, { annotations: ann, margin: { l: 10, r: 10, t: 40, b: 10 }, uirevision: `${PRESET_KEY}|fbd2d|${j}`,
+      xaxis: { title: "x (m)" }, yaxis: { title: "z (m)", scaleanchor: "x", scaleratio: 1 } }));
+    const alpha = Math.asin(m.kap[j]) * E.RAD;
+    $("#slice-table").innerHTML = forceTable([["W", fx(f.W, 3), "kN/m"], ["N′ = σ<sub>n</sub> A", fx(f.N, 3), "kN/m"], ["U = u A", fx(f.U, 3), "kN/m"],
+      ["S = τ<sub>s</sub> A / F", fx(f.S, 3), "kN/m"], ["F used", fx(f.F, 6), "–", r2.fos !== null ? "accepted FoS" : "last trial F (not a FoS)"],
+      ["α (base inclination)", fx(alpha, 3), "°"], ["σ<sub>n</sub>", fx(r2.sn[j], 3), "kPa"], ["u", fx(m.u[j], 3), "kPa"],
+      ["τ<sub>s</sub> used", fx(r2.tau_used[j], 3), "kPa"]]);
+    $("#slice-balance").innerHTML = balanceText(f, true);
+  }
+  function syncPick(name, max, k) {
+    const sl = document.getElementById("sl-" + name), nb = document.getElementById("nb-" + name);
+    if (!sl) return;
+    sl.max = Math.max(0, max); nb.max = Math.max(0, max);
+    if (k !== null && k !== undefined) { sl.value = k; nb.value = k; }
+  }
+  function selectColumn(k) {
+    const m = RES.r3.mesh;
+    if (!(k >= 0 && k < m.count) || k === UI.k3) return;
+    UI.k3 = k; UI.k3ij = [m.i[k], m.j[k]];
+    if (RES.r2 && RES.r2.mesh.count) { UI.k2 = nearestSlice(); UI.k2i = RES.r2.mesh.i[UI.k2]; }
+    markDirty("view-3d", "free-body", "cross-section");
+    renderActive();
+  }
+  function selectSlice(k, render = true) {
+    const m = RES.r2.mesh;
+    if (!(k >= 0 && k < m.count)) return;
+    UI.k2 = k; UI.k2i = m.i[k];
+    markDirty("free-body", "cross-section");
+    if (render) renderActive();
+  }
+  function bindPick(name, fn) {
+    const sl = document.getElementById("sl-" + name), nb = document.getElementById("nb-" + name);
+    sl.addEventListener("input", () => fn(parseInt(sl.value, 10)));
+    nb.addEventListener("change", () => { const v = parseInt(nb.value, 10); if (Number.isInteger(v)) fn(v); });
+  }
+
+  // -------------------------------------------------------------------------------------------------------------
+  // checks tab
+  // -------------------------------------------------------------------------------------------------------------
+  const checkValue = (v) => (!isNum(v) ? String(v) : (Math.abs(v) < 1e-3 || Math.abs(v) >= 1e4 ? e3(v) : E.fmtG(v, 6)));
+  const result = (passed) => `<span class="res ${passed ? "pass" : "fail"}"><i aria-hidden="true">${passed ? "✓" : "✕"}</i>${passed ? "PASS" : "FAIL"}</span>`;
+  function checksBlock(r, e, lab) {
+    if (e) return `<h3>${lab}</h3>` + note("critical", `<b>Input error.</b> ${esc(e)}`);
+    if (!r) return `<h3>${lab}</h3><div class="empty">Not run yet.</div>`;
+    let html = `<div class="subhead"><h3>${lab}</h3>${chip(r.status)}</div><p class="hint">${esc(r.reason)}</p>`;
+    if (r.checks.length) {
+      html += `<div class="tbl-wrap"><table class="data"><thead><tr><th>Check</th><th>Value</th><th>Limit</th><th>Result</th></tr></thead><tbody>` +
+        r.checks.map((c) => `<tr><td>${esc(c.name)}</td><td class="n">${checkValue(c.value)}</td><td class="m">${esc(c.limit)}</td><td>${result(c.passed)}</td></tr>`).join("") +
+        "</tbody></table></div>";
+    } else html += `<div class="empty">Final checks not reached: ${esc(r.reason)}</div>`;
+    const facts = [`${r.iterations} iterations`, `${r.projections} projections on the path`];
+    if (r.projection_limit !== null) facts.push(`projection limit ${fx(r.projection_limit, 4)} kPa, projected value ${fx(r.projection_value, 4)} kPa`);
+    html += `<p class="hint">${facts.join("; ")}.</p>`;
+    return html;
+  }
+  function renderChecks() {
+    $("#checks3").innerHTML = RES ? checksBlock(RES.r3, RES.e3, "3D Hungr columns") : checksBlock(null, null, "3D Hungr columns");
+    $("#checks2").innerHTML = RES ? checksBlock(RES.r2, RES.e2, "2D Bishop slices") : checksBlock(null, null, "2D Bishop slices");
+    const T = theme(), data = [], conv = [];
+    const series = [["3D", RES && RES.r3, T.n], ["2D", RES && RES.r2, T.slip]];
+    for (const [lab, r, col] of series) {
+      if (!r || !r.history.length) continue;
+      const it = r.history.map((h) => h[0]);
+      data.push({ type: "scatter", mode: "lines+markers", x: it, y: r.history.map((h) => h[1]), name: lab, line: { color: col, width: 2 }, marker: { size: 5, color: col } });
+      conv.push({ type: "scatter", mode: "lines+markers", x: it, y: r.history.map((h) => (isNum(h[2]) && h[2] > 0 ? h[2] : null)), name: lab, line: { color: col, width: 2 }, marker: { size: 5, color: col } });
+    }
+    if (data.length) {
+      plot("chart-hist", data, layout(T, { margin: { l: 10, r: 10, t: 30, b: 10 }, xaxis: { title: "iteration" }, yaxis: { title: "trial F" } }));
+      plot("chart-conv", conv, layout(T, { margin: { l: 10, r: 10, t: 30, b: 10 }, xaxis: { title: "iteration" },
+        yaxis: { title: "|ΔF|/F", type: "log", exponentformat: "power" },
+        shapes: [{ type: "line", xref: "paper", x0: 0, x1: 1, y0: 1e-12, y1: 1e-12, line: { color: T.muted, dash: "dot", width: 1 } }],
+        annotations: [{ xref: "paper", x: 1, y: -12, yref: "y", text: "1e-12", showarrow: false, xanchor: "right", yanchor: "bottom", font: { color: T.ink2, size: 11 } }] }));
+    } else { clearChart("chart-hist"); clearChart("chart-conv"); }
+    renderResultTable();
+  }
+  function columnsTable(r) {
+    const m = r.mesh, cols = [["i", m.i], ["j", m.j], ["x_m", m.x], ["y_m", m.y], ["z_base_m", m.zb], ["z_top_m", m.zt], ["h_m", m.h], ["A_h_m2", m.ah],
+      ["A_m2", m.area], ["g_z", m.g], ["rho_m", m.rho], ["kappa", m.kap], ["W_kN", m.w], ["u_kPa", m.u]];
+    if (r.strength && r.sn) {
+      const s = r.strength;
+      cols.push(["sigma_n_kPa", r.sn], ["phi_i_deg", Float64Array.from(s.phi, (v) => v * E.RAD)], ["c_i_kPa", s.c], ["tau_s_kPa", s.tau], ["M", s.M],
+        ["sigma1_MPa", s.s1], ["sigma2_MPa", s.s2], ["sigma3_MPa", s.s3], ["f_MPa", s.f], ["closure_res_MPa", s.closure],
+        ["state", Array.from(s.code, (c) => E.REASONS[c])], ["n_brackets", s.n_brackets]);
+      if (r.tau_used) {
+        const F = r.f_trial;
+        cols.push(["c_used_kPa", r.c_used], ["tan_phi_used", r.tan_used], ["tau_used_kPa", r.tau_used], ["tensile", Array.from(r.tensile, (v) => (v ? "True" : "False"))],
+          ["m_alpha", r.m_alpha], ["N_prime_kN", Float64Array.from(r.sn, (v, k) => v * m.area[k])], ["U_kN", Float64Array.from(m.u, (v, k) => v * m.area[k])],
+          ["S_mobilised_kN", Float64Array.from(r.tau_used, (v, k) => v * m.area[k] / F)], ["resistance_kN", Float64Array.from(r.tau_used, (v, k) => v * m.area[k])],
+          ["local_residual_rel", r.local_res]);
+      }
+    }
+    return cols;
+  }
+  function renderResultTable() {
+    const r = RES && (UI.tbl === "3" ? RES.r3 : RES.r2);
+    if (!r || !r.mesh.count) { $("#result-table").innerHTML = '<div class="empty">No elements to list.</div>'; return; }
+    const m = r.mesh, n = Math.min(m.count, 400), s = r.strength;
+    const twoD = UI.tbl === "2";
+    const head = ["k", "i", twoD ? null : "j", "x (m)", twoD ? null : "y (m)", "h (m)", `W (kN${twoD ? "/m" : ""})`, "u (kPa)", "σ<sub>n</sub> (kPa)", "φ<sub>i</sub> (°)", "c<sub>i</sub> (kPa)", "τ<sub>s</sub> (kPa)", "State"].filter((v) => v !== null);
+    let rows = "";
+    for (let k = 0; k < n; k++) {
+      const cells = [k, m.i[k], twoD ? null : m.j[k], fx(m.x[k], 3), twoD ? null : fx(m.y[k], 3), fx(m.h[k], 3), fx(m.w[k], 1), fx(m.u[k], 2),
+        r.sn ? fx(r.sn[k], 3) : "–", s ? fx(s.phi[k] * E.RAD, 3) : "–", s ? fx(r.c_used ? r.c_used[k] : s.c[k], 3) : "–", s ? fx(r.tau_used ? r.tau_used[k] : s.tau[k], 3) : "–"].filter((v) => v !== null);
+      rows += `<tr>${cells.map((c) => `<td class="n">${c}</td>`).join("")}<td>${s ? esc(E.REASONS[s.code[k]].split(":")[0]) : "–"}</td></tr>`;
+    }
+    $("#result-table").innerHTML = `<table class="data"><thead><tr>${head.map((h) => `<th>${h}</th>`).join("")}</tr></thead><tbody>${rows}</tbody></table>` +
+      (m.count > n ? `<p class="hint" style="margin-top:6px">Showing ${n} of ${m.count} rows; the CSV has all of them.</p>` : "");
+  }
+  function csvOf(r) {
+    const cols = columnsTable(r), n = r.mesh.count;
+    const cell = (v) => (typeof v === "number" ? (Number.isNaN(v) ? "" : String(v)) : /[",\n]/.test(String(v)) ? `"${String(v).replace(/"/g, '""')}"` : String(v));
+    const lines = [cols.map((c) => c[0]).join(",")];
+    for (let k = 0; k < n; k++) lines.push(cols.map((c) => cell(c[1][k])).join(","));
+    return lines.join("\n");
+  }
+
+  // -------------------------------------------------------------------------------------------------------------
+  // studies and verification
+  // -------------------------------------------------------------------------------------------------------------
+  const MESH3 = [10, 15, 20, 30, 40, 60, 80, 120, 160, 240, 320], MESH3_ON = [10, 20, 40, 80];
+  const MESH2 = [20, 40, 80, 160, 320, 640, 1280, 2560, 5120], MESH2_ON = [20, 40, 80, 160, 320];
+  function buildStudies() {
+    $("#mesh-n3").innerHTML = MESH3.map((n) => `<label><input type="checkbox" id="m3-${n}" value="${n}"${MESH3_ON.includes(n) ? " checked" : ""}>${n}</label>`).join("");
+    $("#mesh-n2").innerHTML = MESH2.map((n) => `<label><input type="checkbox" id="m2-${n}" value="${n}"${MESH2_ON.includes(n) ? " checked" : ""}>${n}</label>`).join("");
+    $("#mesh-run").addEventListener("click", runMesh);
+    $("#nu-run").addEventListener("click", runNu);
+    $("#ver-run").addEventListener("click", runVerify);
+  }
+  function validInputsOrSay(el) {
+    if (Object.keys(validate(S)).length) { el.innerHTML = note("critical", "Fix the highlighted inputs first."); return null; }
+    return toInputs(S);
+  }
+  function progressTo(bar) { return (p) => { bar.hidden = false; bar.max = p.total; bar.value = p.done; }; }
+  function runMesh() {
+    const out = $("#mesh-out"), inp = validInputsOrSay(out);
+    if (!inp) return;
+    const n3s = MESH3.filter((n) => $("#m3-" + n).checked), n2s = MESH2.filter((n) => $("#m2-" + n).checked);
+    if (!n3s.length && !n2s.length) { out.innerHTML = note("warning", "Pick at least one mesh."); return; }
+    const bar = $("#mesh-prog"); bar.hidden = false; bar.value = 0; $("#mesh-run").disabled = true;
+    out.innerHTML = '<p class="hint">Solving…</p>';
+    submit({ type: "mesh", inputs: inp, n3s, n2s }, progressTo(bar)).then((res) => {
+      bar.hidden = true; $("#mesh-run").disabled = false;
+      if (res.type !== "mesh") { out.innerHTML = note("critical", esc(res.error || "The study failed.")); return; }
+      STUDY.mesh = res; renderMesh();
+    });
+  }
+  function renderMesh() {
+    const res = STUDY.mesh, out = $("#mesh-out");
+    if (!res) return;
+    const rows = res.rows, T = theme();
+    let html = `<div class="tbl-wrap"><table class="data"><thead><tr><th>Dim</th><th>Mesh</th><th>Elements</th><th>Status</th><th>FoS</th><th>Iter.</th><th>Proj.</th></tr></thead><tbody>` +
+      rows.map((r) => `<tr><td>${r.dim}</td><td class="m" style="white-space:nowrap">${r.mesh}</td><td class="n">${r.elements ?? "–"}</td><td>${chip(r.status)}</td><td class="n">${r.fos === null ? "withheld" : r.fos.toFixed(6)}</td><td class="n">${r.iterations ?? "–"}</td><td class="n">${r.projections ?? "–"}</td></tr>` +
+        (r.reason ? `<tr><td></td><td colspan="6" class="hint">${esc(r.reason)}</td></tr>` : "")).join("") + "</tbody></table></div>";
+    for (const dim of ["3D", "2D"]) {
+      const d = rows.filter((r) => r.dim === dim && r.fos !== null).sort((a, b) => a.n - b.n);
+      if (d.length >= 2) {
+        const fs = d.map((r) => r.fos), eps = (Math.max(...fs) - Math.min(...fs)) / d[d.length - 1].fos * 100;
+        html += `<p>${dim}: ε<sub>mesh</sub> = (F<sub>max</sub> − F<sub>min</sub>)/F<sub>finest</sub> × 100 = <b class="mono">${eps.toFixed(3)} %</b> over ${d.map((r) => r.mesh).join(", ")}; ${eps <= 0.5 ? "meets" : "does not meet"} the 0.5 % screening threshold. Convergence is not an error bound.</p>`;
+      }
+    }
+    html += '<div class="grid-2"><div class="chart h-s" id="chart-mesh3"></div><div class="chart h-s" id="chart-mesh2"></div></div>';
+    out.innerHTML = html;
+    for (const [dim, id, col, xt] of [["3D", "chart-mesh3", T.n, "3D mesh N"], ["2D", "chart-mesh2", T.slip, "2D slices N₂D"]]) {
+      const d = rows.filter((r) => r.dim === dim);
+      if (!d.length) continue;
+      plot(id, [{ type: "scatter", mode: "lines+markers", x: d.map((r) => r.n), y: d.map((r) => r.fos), name: `FoS ${dim}`, line: { color: col, width: 2 }, marker: { size: 7, color: col } }],
+        layout(T, { showlegend: false, margin: { l: 10, r: 10, t: 30, b: 10 }, title: { text: `FoS ${dim}`, font: { size: 13, color: T.ink2 }, x: 0.01 }, xaxis: { title: xt, type: "log" }, yaxis: { title: "FoS" } }));
+    }
+  }
+  function runNu() {
+    const out = $("#nu-out"), inp = validInputsOrSay(out);
+    if (!inp) return;
+    const nu0 = Number($("#nu0").value), nu1 = Number($("#nu1").value), dnu = Number($("#dnu").value);
+    if (!(nu0 >= 0.01 && nu1 <= 0.49 && nu0 <= nu1 && dnu >= 0.005)) { out.innerHTML = note("critical", "Use 0.01 ≤ ν from ≤ ν to ≤ 0.49 and a step of at least 0.005."); return; }
+    const nus = [];
+    for (let k = 0; nu0 + k * dnu <= nu1 + 1e-9; k++) nus.push(+(nu0 + k * dnu).toFixed(6));
+    const bar = $("#nu-prog"); bar.hidden = false; bar.value = 0; $("#nu-run").disabled = true;
+    out.innerHTML = '<p class="hint">Solving…</p>';
+    submit({ type: "nusweep", inputs: inp, nus }, progressTo(bar)).then((res) => {
+      bar.hidden = true; $("#nu-run").disabled = false;
+      if (res.type !== "nusweep") { out.innerHTML = note("critical", esc(res.error || "The sweep failed.")); return; }
+      STUDY.nu = res; renderNu();
+    });
+  }
+  function renderNu() {
+    const res = STUDY.nu, out = $("#nu-out");
+    if (!res) return;
+    const T = theme(), rows = res.rows;
+    out.innerHTML = '<div class="chart h-s" id="chart-nu"></div>' +
+      `<div class="tbl-wrap tall"><table class="data"><thead><tr><th>ν</th><th>FoS 3D</th><th>FoS 2D</th><th>Status 3D</th><th>Status 2D</th><th>Reason (3D)</th></tr></thead><tbody>` +
+      rows.map((r) => `<tr><td class="n">${r.nu}</td><td class="n">${r.fos3 === null ? "withheld" : r.fos3.toFixed(6)}</td><td class="n">${r.fos2 === null ? "withheld" : r.fos2.toFixed(6)}</td><td>${chip(r.status3)}</td><td>${chip(r.status2)}</td><td class="hint">${esc(r.reason3 || "")}</td></tr>`).join("") +
+      "</tbody></table></div>";
+    const x = rows.map((r) => r.nu);
+    const last = (key) => { for (let q = rows.length - 1; q >= 0; q--) if (rows[q][key] !== null) return [rows[q].nu, rows[q][key]]; return null; };
+    const ann = [];
+    for (const [key, lab, col] of [["fos3", "3D", T.n], ["fos2", "2D", T.slip]]) { const p = last(key); if (p) ann.push({ x: p[0], y: p[1], text: `<b>${lab}</b>`, showarrow: false, xanchor: "left", xshift: 8, font: { color: T.ink, size: 12 } }); }
+    plot("chart-nu", [
+      { type: "scatter", mode: "lines+markers", x, y: rows.map((r) => r.fos3), name: "FoS 3D", line: { color: T.n, width: 2 }, marker: { size: 6, color: T.n } },
+      { type: "scatter", mode: "lines+markers", x, y: rows.map((r) => r.fos2), name: "FoS 2D", line: { color: T.slip, width: 2 }, marker: { size: 6, color: T.slip } },
+    ], layout(T, { annotations: ann, margin: { l: 10, r: 30, t: 30, b: 10 }, xaxis: { title: "ν" }, yaxis: { title: "FoS" } }));
+  }
+  function runVerify() {
+    const bar = $("#ver-prog"), slow = $("#ver-slow").checked;
+    bar.hidden = false; bar.value = 0; $("#ver-run").disabled = true;
+    $("#ver-status").textContent = slow ? "Running every target, including the slow rows (about a minute)…" : "Running the targets (a few seconds)…";
+    submit({ type: "verify", slow }, (p) => { progressTo(bar)(p); $("#ver-status").textContent = `Running: ${p.label}…`; }).then((res) => {
+      bar.hidden = true; $("#ver-run").disabled = false;
+      if (res.type !== "verify") { $("#ver-status").textContent = ""; $("#ver-summary").innerHTML = note("critical", esc(res.error || "The verification run failed.")); return; }
+      STUDY.ver = res; renderVerify();
+    });
+  }
+  function renderVerify() {
+    const res = STUDY.ver;
+    if (!res) { $("#ver-status").textContent = "Not run yet."; return; }
+    const s = res.summary;
+    $("#ver-status").textContent = `Finished in ${(res.ms / 1000).toFixed(1)} s${res.slow ? ", with the slow rows" : "; the slow rows are listed as skipped"}.`;
+    const pill = (cls, icon, txt) => `<span class="chip ${cls}"><i aria-hidden="true">${icon}</i>${txt}</span>`;
+    $("#ver-summary").innerHTML = `<div class="toolbar">${pill(s.FAIL ? "critical" : "good", s.FAIL ? "✕" : "✓", `${s.PASS} pass`)}${pill(s.FAIL ? "critical" : "neutral", s.FAIL ? "✕" : "–", `${s.FAIL} fail`)}${pill("neutral", "i", `${s.INFO} info`)}${pill("neutral", "–", `${s.SKIPPED} skipped`)}</div>`;
+    const cls = { PASS: ["pass", "✓"], FAIL: ["fail", "✕"], INFO: ["info", "i"], SKIPPED: ["skip", "–"] };
+    let html = '<table class="data"><thead><tr><th>Item</th><th>Target</th><th>Computed</th><th>Difference</th><th>Tolerance</th><th>Status</th><th>Note</th></tr></thead><tbody>';
+    let grp = null;
+    for (const r of res.rows) {
+      if (r.group !== grp) { grp = r.group; html += `<tr class="grp"><td colspan="7">${esc(grp)}</td></tr>`; }
+      const [c, i] = cls[r.status] || ["info", "i"];
+      html += `<tr><td>${esc(r.item)}</td><td class="m">${esc(r.target)}</td><td class="m">${esc(r.computed)}</td><td class="m">${esc(r.difference)}</td><td>${esc(r.tolerance)}</td>` +
+        `<td><span class="res ${c}"><i aria-hidden="true">${i}</i>${r.status}</span></td><td class="hint">${esc(r.note)}</td></tr>`;
+    }
+    $("#ver-table").innerHTML = html + "</tbody></table>";
+  }
+
+  // -------------------------------------------------------------------------------------------------------------
+  // tabs, rendering, storage
+  // -------------------------------------------------------------------------------------------------------------
+  function markDirty(...tabs) { tabs.forEach((t) => DIRTY.add(t)); }
+  function setTab(t, fromHash) {
+    if (!TABS.includes(t)) t = "view-3d";
+    UI.tab = t;
+    for (const x of TABS) {
+      document.getElementById("tab-" + x).setAttribute("aria-selected", String(x === t));
+      document.getElementById("tab-" + x).tabIndex = x === t ? 0 : -1;
+      document.getElementById("panel-" + x).hidden = x !== t;
+    }
+    if (!fromHash && location.hash !== "#" + t) { try { history.replaceState(null, "", "#" + t); } catch (e) { /* ignore */ } }
+    renderActive();
+    save();
+  }
+  function renderActive() {
+    const t = UI.tab;
+    if (!DIRTY.has(t)) return;
+    DIRTY.delete(t);
+    try {
+      if (t === "view-3d") render3d();
+      else if (t === "cross-section") renderSection();
+      else if (t === "free-body") { if (!RES) { msg("fbd-msg", notRun(), "info"); $("#fbd-body").hidden = true; } else renderFbd(); }
+      else if (t === "checks") renderChecks();
+      else if (t === "studies") { renderMesh(); renderNu(); }
+      else if (t === "verification") { if (STUDY.ver) renderVerify(); else if (!$("#ver-run").disabled) runVerify(); }
+    } catch (e) {
+      console.error(e);
+      const panel = document.getElementById("panel-" + t);
+      panel.insertAdjacentHTML("afterbegin", note("critical", `This view could not be drawn: ${esc(e.message || e)}`));
+    }
+  }
+  let saveT = null;
+  function save() {
+    clearTimeout(saveT);
+    saveT = setTimeout(() => {
+      try { localStorage.setItem(STORE, JSON.stringify({ S, PRESET_KEY, UI: { tab: UI.tab, field: UI.field, mirror: UI.mirror, live: UI.live } })); } catch (e) { /* storage unavailable */ }
+    }, 300);
+  }
+  function load() {
+    try { const v = JSON.parse(localStorage.getItem(STORE) || "null"); return v && v.S && BY_KEY[v.PRESET_KEY] ? v : null; } catch (e) { return null; }
+  }
+
+  function start(hot) {
+    buildRail(); buildStudies();
+    if (window.matchMedia("(max-width: 1080px)").matches) document.querySelectorAll(".rail .sec").forEach((d, q) => { if (q > 0) d.open = false; });
+    if ("IntersectionObserver" in window) {
+      const io = new IntersectionObserver((ents) => {
+        const e = ents[0];
+        $("#minibar").classList.toggle("show", !e.isIntersecting && e.boundingClientRect.top < 0);
+      });
+      io.observe($("#facts"));
+    }
+    TABS.forEach((t) => document.getElementById("tab-" + t).addEventListener("click", () => setTab(t)));
+    document.querySelector(".tabs").addEventListener("keydown", (ev) => {
+      if (ev.key !== "ArrowRight" && ev.key !== "ArrowLeft") return;
+      const q = TABS.indexOf(UI.tab), nx = TABS[(q + (ev.key === "ArrowRight" ? 1 : TABS.length - 1)) % TABS.length];
+      setTab(nx); document.getElementById("tab-" + nx).focus();
+    });
+    bindPick("k3", (k) => selectColumn(k)); bindPick("k3a", (k) => selectColumn(k)); bindPick("k2", (k) => selectSlice(k));
+    document.querySelectorAll('input[name="tbl"]').forEach((el) => el.addEventListener("change", () => { if (el.checked) { UI.tbl = el.value; renderResultTable(); } }));
+    $("#copy-csv").addEventListener("click", () => {
+      const r = RES && (UI.tbl === "3" ? RES.r3 : RES.r2);
+      if (!r || !r.mesh.count) { $("#copy-msg").textContent = "No results to copy."; return; }
+      const text = csvOf(r), box = $("#copy-box");
+      const shown = () => { box.hidden = false; box.value = text; box.focus(); box.select(); $("#copy-msg").textContent = "Copying was blocked here: the CSV is selected below, press Ctrl+C (⌘C on a Mac)."; };
+      try {
+        navigator.clipboard.writeText(text).then(() => { box.hidden = true; $("#copy-msg").textContent = `Copied ${r.mesh.count} rows (${UI.tbl === "3" ? "3D columns" : "2D slices"}) as CSV.`; }, shown);
+      } catch (e) { shown(); }
+    });
+    window.addEventListener("hashchange", () => setTab(location.hash.slice(1), true));
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    const retheme = () => { markDirty(...TABS); renderActive(); };
+    if (mq.addEventListener) mq.addEventListener("change", retheme);
+    new MutationObserver(retheme).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+
+    const saved = (hot && hot.S && BY_KEY[hot.PRESET_KEY]) ? hot : load();
+    if (saved) {
+      PRESET_KEY = saved.PRESET_KEY;
+      S = Object.assign(toState(E.inputs(BY_KEY[PRESET_KEY].inputs)), saved.S);
+      Object.assign(UI, saved.UI || {});
+      for (const k of Object.keys(NUM)) WIN[k] = windowFor(k, S);
+      writeRail(); renderPresetInfo(); syncFieldSelects(); $("#mirror").checked = UI.mirror;
+      changed({ immediate: true });
+    } else {
+      applyPreset(DEFAULT_KEY, { quiet: true });
+      syncFieldSelects();
+    }
+    const fromHash = location.hash.slice(1);
+    setTab(TABS.includes(fromHash) ? fromHash : (UI.tab || "view-3d"), true);
+    if (window.claude && window.claude.hot && window.claude.hot.snapshot) {
+      window.claude.hot.snapshot(() => ({ S, PRESET_KEY, UI: { tab: UI.tab, field: UI.field, mirror: UI.mirror, live: UI.live } }));
+    }
+  }
+
+  // chart library: cdnjs first, jsDelivr as a fallback; the solver and numbers work without it
+  function loadScript(src) {
+    return new Promise((resolve, reject) => { const s = document.createElement("script"); s.src = src; s.onload = resolve; s.onerror = reject; document.head.appendChild(s); });
+  }
+  loadScript("https://cdnjs.cloudflare.com/ajax/libs/plotly.js/2.35.2/plotly.min.js")
+    .catch(() => loadScript("https://cdn.jsdelivr.net/npm/plotly.js-dist-min@2.35.2/plotly.min.js"))
+    .then(() => { PLOTLY = window.Plotly || null; }, () => { window.__plotlyFailed = true; })
+    .finally(() => { if (!PLOTLY) window.__plotlyFailed = true; markDirty(...TABS); renderActive(); });
+
+  startWorker();
+  const hot = window.claude && window.claude.hot;
+  if (hot && hot.ready) hot.ready((data) => start(data)); else start(hot && hot.data ? hot.data : null);
+})();
+</script>

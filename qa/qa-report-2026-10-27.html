@@ -1,0 +1,957 @@
+<title>EJC Slope Stability QA</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:ital,wght@0,400;0,500;0,600;1,400&family=Barlow+Condensed:wght@500;600&family=IBM+Plex+Mono:wght@400;500&family=STIX+Two+Text:ital,wght@0,400;0,600;1,400&display=swap">
+<style>
+/* Layout: an engineering QA record. A drawing-style title block and a verdict strip lead; the findings log, the
+   value-by-value table and the evidence follow in one reading column, with tables and charts using the full width.
+   Tokens follow the EJC web app, so the record reads as part of the same project. */
+:root {
+  --page: #f2f1ed; --surface: #fcfcfb; --sunken: #f6f5f1;
+  --ink: #0b0b0b; --ink-2: #52514e; --muted: #76746e; --rule: #e1e0d9; --line: #c3c2b7;
+  --accent: #1c5cab; --on-accent: #ffffff; --accent-wash: #e8f0fb;
+  --good: #0ca30c; --good-wash: #e7f5e7;
+  --warning: #b57f00; --warning-wash: #fdf4de;
+  --critical: #d03b3b; --critical-wash: #fbeaea;
+  --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a;
+  --grid: #e1e0d9; --axis: #c3c2b7; --band: #ebeae4; --shadow: rgba(11, 11, 11, 0.12);
+  --font-display: "Barlow Condensed", "Arial Narrow", "Roboto Condensed", "STIX Two Text", system-ui, sans-serif;
+  --font-body: "Barlow", "STIX Two Text", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-data: "IBM Plex Mono", "STIX Two Text", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --page: #0e0e0d; --surface: #1a1a19; --sunken: #141413;
+    --ink: #f0efec; --ink-2: #c3c2b7; --muted: #918f87; --rule: #2c2c2a; --line: #44433f;
+    --accent: #6da7ec; --on-accent: #0b1a2c; --accent-wash: #172739;
+    --good: #0ca30c; --good-wash: #12291a; --warning: #fab219; --warning-wash: #30260f; --critical: #e06060; --critical-wash: #331818;
+    --s1: #3987e5; --s2: #d95926; --s3: #199e70;
+    --grid: #2c2c2a; --axis: #44433f; --band: #242422; --shadow: rgba(0, 0, 0, 0.5);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --page: #0e0e0d; --surface: #1a1a19; --sunken: #141413;
+  --ink: #f0efec; --ink-2: #c3c2b7; --muted: #918f87; --rule: #2c2c2a; --line: #44433f;
+  --accent: #6da7ec; --on-accent: #0b1a2c; --accent-wash: #172739;
+  --good: #0ca30c; --good-wash: #12291a; --warning: #fab219; --warning-wash: #30260f; --critical: #e06060; --critical-wash: #331818;
+  --s1: #3987e5; --s2: #d95926; --s3: #199e70;
+  --grid: #2c2c2a; --axis: #44433f; --band: #242422; --shadow: rgba(0, 0, 0, 0.5);
+  color-scheme: dark;
+}
+html { -webkit-text-size-adjust: 100%; }
+body { background: var(--page); color: var(--ink); font: 400 16px/1.55 var(--font-body); }
+.page { max-width: 1120px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 32px 72px; display: grid; gap: 60px; }
+h1, h2, h3 { margin: 0; text-wrap: balance; font-weight: 600; }
+p, ul, ol, figure { margin: 0; }
+a { color: var(--accent); text-underline-offset: 2px; }
+code { font: 0.86em var(--font-data); background: var(--sunken); border: 1px solid var(--rule); border-radius: 3px; padding: 0 4px; overflow-wrap: anywhere; }
+sub, sup { line-height: 0; }
+b, strong { font-weight: 600; }
+:is(a, button, input, summary):focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
+
+/* masthead */
+.masthead { display: grid; gap: 18px; }
+.eyebrow { font: 600 0.8rem/1.2 var(--font-display); letter-spacing: 0.09em; text-transform: uppercase; color: var(--muted); }
+h1 { font: 600 clamp(2.4rem, 6vw, 3.6rem)/0.98 var(--font-display); letter-spacing: -0.005em; }
+.lead { font-size: 1.125rem; line-height: 1.5; color: var(--ink-2); max-width: 64ch; }
+.titleblock { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); margin: 0; }
+.titleblock > div { background: var(--surface); padding: 10px 12px 11px; display: grid; gap: 3px; align-content: start; min-width: 0; }
+.titleblock dt { font: 600 0.7rem/1.2 var(--font-display); letter-spacing: 0.09em; text-transform: uppercase; color: var(--muted); }
+.titleblock dd { margin: 0; font-size: 0.875rem; line-height: 1.4; overflow-wrap: break-word; }
+@media (max-width: 900px) { .titleblock { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 520px) { .titleblock { grid-template-columns: minmax(0, 1fr); } }
+.toc { display: flex; flex-wrap: wrap; gap: 4px 18px; font-size: 0.9375rem; }
+.toc a { text-decoration: none; } .toc a:hover { text-decoration: underline; }
+.status-note { background: var(--good-wash); border-radius: 8px; padding: 10px 14px; font-size: 0.9375rem; max-width: 86ch; }
+
+/* sections */
+section { display: grid; gap: 20px; min-width: 0; scroll-margin-top: 16px; }
+.shead { border-top: 2px solid var(--ink); padding-top: 12px; display: grid; gap: 8px; }
+h2 { font: 600 clamp(1.7rem, 3.4vw, 2.1rem)/1.05 var(--font-display); }
+h3 { font: 600 1.125rem/1.3 var(--font-body); }
+.sub-h { display: grid; gap: 10px; min-width: 0; }
+.prose { max-width: 70ch; display: grid; gap: 12px; }
+.prose ul, .prose ol { padding-left: 1.2em; display: grid; gap: 6px; }
+.muted { color: var(--muted); }
+.cap { font-size: 0.8125rem; color: var(--muted); max-width: 80ch; }
+.block { display: grid; gap: 14px; min-width: 0; }
+
+/* chips */
+.chip { display: inline-flex; align-items: center; gap: 5px; padding: 1px 9px 1px 7px; border-radius: 999px; font: 600 0.75rem/1.6 var(--font-body);
+  white-space: nowrap; background: var(--sunken); color: var(--ink); border: 1px solid var(--rule); }
+.chip .g { font-size: 0.72rem; line-height: 1; color: var(--muted); }
+.chip.ok { background: var(--good-wash); border-color: transparent; } .chip.ok .g { color: var(--good); }
+.chip.warn { background: var(--warning-wash); border-color: transparent; } .chip.warn .g { color: var(--warning); }
+.chip.crit { background: var(--critical-wash); border-color: transparent; } .chip.crit .g { color: var(--critical); }
+.chip.info { background: var(--accent-wash); border-color: transparent; } .chip.info .g { color: var(--accent); }
+
+/* verdict */
+.verdicts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+@media (max-width: 980px) { .verdicts { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 540px) { .verdicts { grid-template-columns: minmax(0, 1fr); } }
+.vcard { background: var(--surface); border: 1px solid var(--rule); border-radius: 8px; padding: 14px 16px 15px; display: grid; gap: 8px; align-content: start; min-width: 0; }
+.vcard .top { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+.vcard h3 { font: 600 0.82rem/1.2 var(--font-display); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-2); }
+.vcard .big { font: 600 2.6rem/1 var(--font-display); }
+.vcard .big small { font-size: 1.25rem; color: var(--muted); font-weight: 500; }
+.vcard p { font-size: 0.9375rem; line-height: 1.45; }
+.vcard a { font-size: 0.875rem; }
+
+/* findings */
+.findings { list-style: none; padding: 0; border-top: 1px solid var(--rule); }
+.finding { display: grid; grid-template-columns: 148px minmax(0, 1fr); gap: 8px 24px; padding: 18px 0 20px; border-bottom: 1px solid var(--rule); }
+.finding .meta { display: flex; flex-direction: column; gap: 7px; align-items: flex-start; }
+.finding .fid { font: 500 1.1rem/1 var(--font-data); }
+.finding .body { display: grid; gap: 8px; max-width: 74ch; min-width: 0; }
+.finding .body ul { padding-left: 1.2em; display: grid; gap: 6px; }
+.finding .act { color: var(--ink-2); }
+.finding .act b { color: var(--ink); }
+@media (max-width: 640px) { .finding { grid-template-columns: minmax(0, 1fr); } .finding .meta { flex-direction: row; flex-wrap: wrap; align-items: center; } }
+
+/* tables */
+.tablewrap { overflow-x: auto; border: 1px solid var(--rule); border-radius: 6px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: 0.875rem; line-height: 1.4; }
+th, td { padding: 7px 10px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--rule); }
+thead th { font: 600 0.74rem/1.25 var(--font-display); letter-spacing: 0.07em; text-transform: uppercase; color: var(--muted); background: var(--sunken); vertical-align: bottom; }
+tbody tr:last-child td { border-bottom: 0; }
+td.num, th.num { text-align: right; }
+td.num { font: 0.8125rem/1.4 var(--font-data); white-space: nowrap; }
+td.ref { white-space: nowrap; color: var(--ink-2); }
+td.note { color: var(--ink-2); min-width: 16ch; }
+tr.flag td { background: var(--warning-wash); }
+tr.group td { background: var(--sunken); font: 600 0.74rem/1.25 var(--font-display); letter-spacing: 0.07em; text-transform: uppercase; color: var(--ink-2); }
+.wide-cell { min-width: 22ch; }
+details.data { display: grid; gap: 10px; }
+details.data > summary { cursor: pointer; color: var(--accent); font-weight: 500; font-size: 0.9375rem; width: fit-content; }
+details.data[open] > summary { margin-bottom: 10px; }
+
+/* controls */
+.controls { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.seg button { font: 500 0.875rem/1 var(--font-body); padding: 8px 12px; background: var(--surface); color: var(--ink-2); border: 0; cursor: pointer; }
+.seg button + button { border-left: 1px solid var(--line); }
+.seg button[aria-pressed="true"] { background: var(--accent); color: var(--on-accent); }
+.search { font: 0.9375rem var(--font-body); padding: 7px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink); width: min(300px, 100%); min-width: 0; }
+.count { font-size: 0.875rem; color: var(--muted); }
+
+/* callout */
+.confirmed { background: var(--surface); border: 1px solid var(--rule); border-radius: 8px; padding: 14px 18px; display: grid; gap: 8px; max-width: 86ch; }
+.confirmed ul { padding-left: 1.2em; display: grid; gap: 5px; font-size: 0.9375rem; }
+
+/* charts */
+.legend { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 0.875rem; color: var(--ink-2); }
+.legend > span { display: inline-flex; align-items: center; gap: 7px; }
+.sw { display: inline-block; width: 16px; height: 3px; border-radius: 2px; flex: none; }
+.sw.dot { width: 10px; height: 10px; border-radius: 50%; }
+.sw.dia { width: 9px; height: 9px; border-radius: 1px; transform: rotate(45deg); }
+.sw.s1 { background: var(--s1); } .sw.s2 { background: var(--s2); } .sw.s3 { background: var(--s3); }
+.sw.bandsw { width: 16px; height: 12px; border-radius: 2px; background: var(--band); border: 1px solid var(--rule); }
+.sw.refsw { width: 16px; height: 0; border-top: 1px dashed var(--ink-2); border-radius: 0; }
+.panels { display: grid; gap: 22px; min-width: 0; }
+.panels.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+@media (max-width: 720px) { .panels.two { grid-template-columns: minmax(0, 1fr); } }
+.panel { min-width: 0; display: grid; gap: 4px; }
+.panel-title { font-size: 0.875rem; font-weight: 600; color: var(--ink); }
+.panel-title span { font-weight: 400; color: var(--muted); }
+.host { min-width: 0; }
+.multiples { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 18px 20px; }
+@media (max-width: 980px) { .multiples { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 460px) { .multiples { grid-template-columns: minmax(0, 1fr); } }
+svg.chart { display: block; max-width: 100%; height: auto; overflow: visible; touch-action: pan-y; }
+svg.chart text { font-family: var(--font-body); }
+.chart .grid { stroke: var(--grid); stroke-width: 1; }
+.chart .axis { stroke: var(--axis); stroke-width: 1; }
+.chart .tick { fill: var(--muted); font: 11px var(--font-data); }
+.chart .lab { fill: var(--ink-2); font-size: 12px; }
+.chart .lab-strong { fill: var(--ink); font-size: 12.5px; font-weight: 600; }
+.chart .grp { fill: var(--muted); font: 600 11px var(--font-display); letter-spacing: 0.07em; text-transform: uppercase; }
+.chart .grp2 { fill: var(--muted); font-size: 12px; font-weight: 600; }
+.chart .dlabel { fill: var(--ink-2); font-size: 12px; font-weight: 500; }
+.chart .val { fill: var(--ink-2); font: 11px var(--font-data); paint-order: stroke; stroke: var(--page); stroke-width: 4px; stroke-linejoin: round; }
+.chart .line { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.chart .line.s1 { stroke: var(--s1); } .chart .line.s2 { stroke: var(--s2); } .chart .line.s3 { stroke: var(--s3); }
+.chart .dot { stroke: var(--surface); stroke-width: 2; }
+.chart .dot.s1 { fill: var(--s1); } .chart .dot.s2 { fill: var(--s2); } .chart .dot.s3 { fill: var(--s3); }
+.chart .band { fill: var(--band); }
+.chart .zero { stroke: var(--line); stroke-width: 1; }
+.chart .ref { stroke: var(--ink-2); stroke-width: 1; stroke-dasharray: 4 4; fill: none; }
+.chart .conn { stroke: var(--line); stroke-width: 2; }
+.chart .cross { stroke: var(--ink-2); stroke-width: 1; stroke-dasharray: 3 3; }
+.chart .hit { fill: transparent; cursor: crosshair; }
+.chart .hot { fill: transparent; cursor: pointer; }
+.tip { position: fixed; z-index: 20; pointer-events: none; background: var(--surface); color: var(--ink); border: 1px solid var(--line); border-radius: 6px;
+  box-shadow: 0 6px 20px var(--shadow); padding: 8px 10px; font-size: 0.8125rem; line-height: 1.35; max-width: min(340px, calc(100vw - 16px)); display: grid; gap: 3px; }
+.tip .th { font-weight: 600; }
+.tip .tr { display: grid; grid-template-columns: 12px minmax(0, 1fr) auto; gap: 8px; align-items: center; }
+.tip .tr b { font: 500 0.8125rem var(--font-data); }
+.tip .sw { width: 10px; }
+
+/* actions */
+.actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+@media (max-width: 900px) { .actions { grid-template-columns: minmax(0, 1fr); } }
+.actions > div { background: var(--surface); border: 1px solid var(--rule); border-radius: 8px; padding: 14px 16px 16px; display: grid; gap: 10px; align-content: start; min-width: 0; }
+.actions ol { padding-left: 1.3em; display: grid; gap: 7px; font-size: 0.9375rem; }
+.actions .who { font-size: 0.875rem; color: var(--muted); }
+footer { font-size: 0.8125rem; color: var(--muted); border-top: 1px solid var(--rule); padding-top: 14px; }
+</style>
+
+<div class="page">
+  <header class="masthead">
+    <p class="eyebrow">QA/QC record · GENG5512 Engineering Research Project</p>
+    <h1>EJC Slope Stability QA</h1>
+    <p class="lead">An independent check of the EJC slope-stability web app against the thesis it implements, exact solutions, randomised tests and published case studies.</p>
+    <dl class="titleblock">
+      <div><dt>Software under test</dt><dd><code>webapp/engine.js</code>, commit 2512eca, branch claude/awesome-ride-ukq1wd of the private ejc-slope-stability repository</dd></div>
+      <div><dt>Reference</dt><dd>S. Mahat (24886066), <i>Developing a fully 3D limit equilibrium method, using a 3D Hoek-Brown failure criterion, to analyse rock slope stability, and comparison to 2D methods</i>. Supervisor Prof. A. Schwartzkopff</dd></div>
+      <div><dt>Checked</dt><dd>27 October 2026. Node 22.22; Python 3.13 with numpy, scipy and mpmath at 50 digits</dd></div>
+      <div><dt>Scope</dt><dd>The calculation engine: Hungr 3D columns and Bishop 2D slices with EJC, GHB and Mohr-Coulomb strength. The page's plots were tested when the app was built.</dd></div>
+    </dl>
+    <p class="status-note"><b>Status after the QA/QC, 27 October 2026:</b> findings S1, S2 and S3 are fixed on branch claude/awesome-ride-ukq1wd (commit 38a3a2e), and the QA scripts are in the repository under <code>qa/</code>. The numbers on this page are those of the QA run before the fixes.</p>
+    <nav class="toc" aria-label="Contents">
+      <a href="#verdict">Verdict</a><a href="#findings">Findings</a><a href="#thesis">Thesis reproduction</a><a href="#checks">Independent checks</a>
+      <a href="#benchmarks">Published benchmarks</a><a href="#real-life">Real-life scenarios</a><a href="#actions">Actions</a><a href="#method">Method and files</a>
+    </nav>
+  </header>
+
+  <section id="verdict" aria-labelledby="verdict-h">
+    <div class="shead"><h2 id="verdict-h">Verdict</h2></div>
+    <div class="prose">
+      <p>The app reproduces the thesis. Every factor of safety the thesis reports is matched to its printed precision, and the solver converges to exact solutions where they exist. The QA found one minor software bug and two gaps in what the app reports; none of them changes a factor of safety. The main risks for real-life use lie in the analysis set-up: the prescribed sphere is not the critical surface, and two published benchmarks are still unresolved.</p>
+    </div>
+    <div class="verdicts">
+      <article class="vcard">
+        <div class="top"><h3>Thesis reproduction</h3><span class="chip ok"><span class="g" aria-hidden="true">✓</span>Pass</span></div>
+        <p class="big">183<small> / 193</small></p>
+        <p>values match at the printed precision. The other 10: one software bug that changes no FoS, eight wording, rounding, truncation or residual-scale items in the thesis, and one result the thesis left open.</p>
+        <a href="#thesis">Value-by-value table</a>
+      </article>
+      <article class="vcard">
+        <div class="top"><h3>Independent checks</h3><span class="chip ok"><span class="g" aria-hidden="true">✓</span>Pass</span></div>
+        <p class="big">0<small> failures</small></p>
+        <p>in 1,600 randomised runs re-checked from first principles. The solver converges to exact φ = 0 solutions and Taylor's chart, and 50-digit local states agree to 3 × 10<sup>−14</sup>.</p>
+        <a href="#checks">Checks</a>
+      </article>
+      <article class="vcard">
+        <div class="top"><h3>Published benchmarks</h3><span class="chip warn"><span class="g" aria-hidden="true">!</span>Pass, 2 open</span></div>
+        <p class="big">16<small> / 24</small></p>
+        <p>D'Esterre circles within 0.2% of Slide2, and the Carranza-Torres &amp; Hormazábal FoS reproduced (2.00 against 2.01). Open: D'Esterre's 1:3.5 slope and Law's wet case.</p>
+        <a href="#benchmarks">Benchmarks</a>
+      </article>
+      <article class="vcard">
+        <div class="top"><h3>Real-life use</h3><span class="chip crit"><span class="g" aria-hidden="true">▲</span>Needs attention</span></div>
+        <p class="big">−9 to −16<small>%</small></p>
+        <p>lower FoS on the critical surface than on the thesis's prescribed sphere. The wet critical FoS falls to about 1.0 in 2D.</p>
+        <a href="#real-life">Scenarios</a>
+      </article>
+    </div>
+  </section>
+
+  <section id="findings" aria-labelledby="findings-h">
+    <div class="shead"><h2 id="findings-h">Findings</h2>
+      <p class="prose muted">Thirteen findings, most important first. The ID gives the area: S software, T thesis text, B benchmarks, R real-life use. The software fixes are small and can be made on the branch on request.</p></div>
+    <ol class="findings">
+      <li class="finding">
+        <div class="meta"><span class="fid">R1</span><span class="chip crit"><span class="g" aria-hidden="true">▲</span>High</span><span class="chip">Real-life use</span></div>
+        <div class="body">
+          <h3>The prescribed sphere is not the critical surface</h3>
+          <p>A Nelder–Mead search over centre and radius, run with the app's own solver, finds lower factors of safety near the thesis's main sphere in every case: 13% lower in dry 2D, 16% in dry 3D, 9.5% in wet 2D and 15% in wet 3D. The critical wet 2D FoS is 0.99 for EJC (1.00 at 640 slices) and 0.94 for GHB. On these critical surfaces the 3D/2D ratio is 1.067 dry and 1.088 wet, against 1.105 and 1.159 on the main sphere. The same search lands within 4 m of the Carranza-Torres &amp; Hormazábal circle, so the solver behaves correctly. The main sphere is simply not critical, and the thesis already names a critical-surface search as required before design use.</p>
+          <p class="act"><b>Action.</b> Report FoS on the critical surface, or state on every result that it applies to the prescribed sphere only. A search study could be added to the app.</p>
+        </div>
+      </li>
+      <li class="finding">
+        <div class="meta"><span class="fid">R2</span><span class="chip crit"><span class="g" aria-hidden="true">▲</span>High</span><span class="chip">Real-life use</span></div>
+        <div class="body">
+          <h3>Blast damage and pore pressure dominate the result</h3>
+          <p>The benchmark uses D = 0. Hoek, Carranza-Torres &amp; Corkum (2002) suggest D = 1.0 for large open-pit slopes under production blasting and 0.7 where excavation is mechanical. With a taken from GSI, the app's 3D FoS on the main sphere falls from 2.62 at D = 0 to 1.73 at D = 0.7 and 1.27 at D = 1. The app applies D to the whole mass, while Hoek &amp; Brown (2019) advise applying it only within the blast-damaged zone, so D = 1 throughout is a lower bound. Pore pressure is the other large lever: 3D FoS falls from 2.62 at r<sub>u</sub> = 0 to 1.06 at r<sub>u</sub> = 0.4.</p>
+          <p class="act"><b>Action.</b> Run D and drawdown as explicit sensitivity cases for any real pit, ideally on the critical surface.</p>
+        </div>
+      </li>
+      <li class="finding">
+        <div class="meta"><span class="fid">S3</span><span class="chip warn"><span class="g" aria-hidden="true">●</span>Medium</span><span class="chip">Software</span><span class="chip ok"><span class="g" aria-hidden="true">✓</span>Fixed</span></div>
+        <div class="body">
+          <h3>Accepted results can have most bases in tension, and the summary does not say so</h3>
+          <p>At r<sub>u</sub> = 0.5 on the thesis slope the run is accepted with FoS 0.56 (3D) and 0.41 (2D), yet 82% of 3D bases and every 2D base carry tensile effective normal stress. On the thesis's wet 80×80 mesh, 30% of bases are tensile at an accepted FoS of 1.28. The acceptance checks test the numerics, so they pass. The summary panel does not report the tensile count; it appears only as a colour in the 3D view and in the CSV export.</p>
+          <p class="act"><b>Action.</b> Show the number and share of tensile bases in the summary and flag results above a chosen share. For wet cases, pair the FoS with the C0 and T0 runs, as the thesis does in Table 5.7.</p>
+          <p class="act"><b>Fixed (commit 38a3a2e).</b> The summary of both apps now lists the tensile bases in 3D and 2D, with a note when there are any and a warning above a quarter of the bases.</p>
+        </div>
+      </li>
+      <li class="finding">
+        <div class="meta"><span class="fid">B1</span><span class="chip warn"><span class="g" aria-hidden="true">●</span>Medium</span><span class="chip">Benchmark</span></div>
+        <div class="body">
+          <h3>D'Esterre's 1:3.5 slope: the Slide2 values behave like Ordinary-method results</h3>
+          <p>On the 16 circles on the 1:1.5 and 1:2.5 slopes, the app's Bishop FoS is within 0.2% of Slide2. On the 1:3.5 slope it is 3.4% to 8.2% higher on 7 of 8 circles. Moving the circle does not close the gap: the app's own critical circle nearby is still 3.2% to 6.6% higher. On the same slices, the Ordinary method of slices reproduces the four dry 1:3.5 values within 0.5%, and three of the four r<sub>u</sub> = 0.5 values within 0.6% (with N′ = (W − ub) cos α). The 1:3.5 values may therefore come from a different method column in D'Esterre's tables.</p>
+          <p class="act"><b>Action.</b> Check D'Esterre's Slide2 files before using the 1:3.5 rows as Bishop references. Until then, treat them as unconfirmed.</p>
+        </div>
+      </li>
+      <li class="finding">
+        <div class="meta"><span class="fid">B2</span><span class="chip warn"><span class="g" aria-hidden="true">●</span>Medium</span><span class="chip">Benchmark</span></div>
+        <div class="body">
+          <h3>Law's case 4 (wet) is 9% to 14% below Law and Slide2</h3>
+          <p>The app gives 0.951 (640 slices) against Law's Excel 1.05 to 1.06 and Slide2 1.11. The three dry Law cases are within 2% of Slide2 and within 1% of Law's Excel. The app's wet pore pressure equals r<sub>u</sub> = γ<sub>w</sub>/γ = 0.363 exactly; matching Slide2's 1.11 would need r<sub>u</sub> ≈ 0.31, and Law's 1.05 about 0.33. Law and Slide2 model a 12-bench profile with the water table on the benched surface, while the app uses the overall 50° profile. That difference is the most likely cause, but it cannot be confirmed without Law's model.</p>
+          <p class="act"><b>Action.</b> Obtain Law's Slide2 model, or rebuild the benched profile, before using case 4 as a wet benchmark.</p>
+        </div>
+      </li>
+      <li class="finding">
+        <div class="meta"><span class="fid">R3</span><span class="chip warn"><span class="g" aria-hidden="true">●</span>Medium</span><span class="chip">Real-life use</span></div>
+        <div class="body">
+          <h3>Mechanisms outside the model</h3>
+          <p>The app has no seismic (pseudo-static) load, tension crack, surcharge or other external load, structurally controlled failure (joints, faults, anisotropy), non-spherical surface, multiple materials, or transient and perched groundwater. The tensile contact treatment is uncalibrated, as §5.8 of the thesis says.</p>
+          <p class="act"><b>Action.</b> State these exclusions wherever results are quoted, and check structurally controlled mechanisms separately.</p>
+        </div>
+      </li>
+      <li class="finding">
+        <div class="meta"><span class="fid">S1</span><span class="chip"><span class="g" aria-hidden="true">○</span>Low</span><span class="chip">Software bug</span><span class="chip ok"><span class="g" aria-hidden="true">✓</span>Fixed</span></div>
+        <div class="body">
+          <h3>The original-closure minimum at ν = 0.49 is 2.2 MPa high</h3>
+          <p>The app returns σ′<sub>n,min</sub> = 59,953.87 MPa at σ′<sub>3</sub> = 58,770.58 MPa. The exact boundary minimum, solved at 50 digits, is 59,951.66 MPa at σ′<sub>3</sub> = 58,768.41 MPa, so the app is 0.004% high. The thesis value, 59,952 MPa, is correct. The cause is in <code>originalClosureMinimum</code>: the golden-section refinement can end on a midpoint just outside the admissible boundary, which is then discarded, and the result falls back to the nearest grid point (about 8 MPa apart at this stress). At ν = 0.271 and 0.45 the final midpoint happened to be admissible and the results are exact. No factor of safety uses this function.</p>
+          <p class="act"><b>Action.</b> Keep the admissible end of the final bracket when the midpoint is rejected, in <code>engine.js</code> and <code>engine.py</code>, and add a ν = 0.49 regression test.</p>
+          <p class="act"><b>Fixed (commit 38a3a2e).</b> The search now keeps the best admissible point of its final bracket. At ν = 0.49 it returns 59,951.6628 MPa, and it matches the 50-digit edge minima at every ν of Table 5.2 to about 10<sup>−13</sup>. Both engines have regression tests, and Table 5.2 at ν = 0.49 is now a verification row.</p>
+        </div>
+      </li>
+      <li class="finding">
+        <div class="meta"><span class="fid">S2</span><span class="chip"><span class="g" aria-hidden="true">○</span>Low</span><span class="chip">Software</span><span class="chip ok"><span class="g" aria-hidden="true">✓</span>Fixed</span></div>
+        <div class="body">
+          <h3>The R ≤ z<sub>c</sub> refusal does not mention the base-circle option</h3>
+          <p>The default grid refuses circles whose lowest point is above the toe level with “require R &gt; z_c”. Base-circle mode solves them: a 20 m, 60° test slope with a face circle gives an accepted FoS of 1.476. The other refusal, for circles that cross the toe level behind the toe, already suggests base-circle mode. Taylor's 60° toe circle needs it, and there the app gives 1.9434659 against the exact 1.9434661.</p>
+          <p class="act"><b>Action.</b> Add “use the base-circle option” to the R ≤ z<sub>c</sub> message.</p>
+          <p class="act"><b>Fixed (commit 38a3a2e).</b> The message now ends “for a face circle, with its lowest point above the toe level, use the base-circle option”, and the base-circle hint mentions face circles.</p>
+        </div>
+      </li>
+      <li class="finding">
+        <div class="meta"><span class="fid">T1</span><span class="chip"><span class="g" aria-hidden="true">○</span>Low</span><span class="chip">Thesis text</span></div>
+        <div class="body">
+          <h3>Route 1 residuals are half of r<sub>EJC</sub></h3>
+          <p>The residuals −0.63, −1.09 and −1.80 MPa in Table 5.1, and the 0.63–1.80 MPa in the Project Summary, §4.3 and §6, equal σ′<sub>1</sub> − σ′<sub>1,EJC</sub> from eq. 2.8 at the state's σ′<sub>2</sub> and σ′<sub>3</sub>. That is exactly half of r<sub>EJC</sub> in eqs A.1 and B.27, which the §4.6 acceptance test uses. In r<sub>EJC</sub> form they are −1.26, −2.17 and −3.59 MPa. The conclusion that Route 1 fails is unchanged.</p>
+          <p class="act"><b>Action.</b> Say which form is reported, or report r<sub>EJC</sub>.</p>
+        </div>
+      </li>
+      <li class="finding">
+        <div class="meta"><span class="fid">T2</span><span class="chip"><span class="g" aria-hidden="true">○</span>Low</span><span class="chip">Thesis text</span></div>
+        <div class="body">
+          <h3>The stated EJC tolerance differs from the listed code</h3>
+          <p>§4.6 requires the unsquared EJC to hold to 10<sup>−8</sup> MPa. The VBA in Appendix D uses 10<sup>−8</sup> · max(1, σ<sub>ci</sub>), which is 7.8 × 10<sup>−7</sup> MPa at σ<sub>ci</sub> = 77.7 MPa, and the Python listing uses 10<sup>−9</sup> · max(1, σ<sub>ci</sub>, |σ′<sub>1</sub>|). Recorded residuals, below 3 × 10<sup>−14</sup> MPa, pass all three, so no result changes. The app applies 10<sup>−8</sup> MPa as §4.6 states.</p>
+          <p class="act"><b>Action.</b> Align §4.6 and the code.</p>
+        </div>
+      </li>
+      <li class="finding">
+        <div class="meta"><span class="fid">T3</span><span class="chip"><span class="g" aria-hidden="true">○</span>Low</span><span class="chip">Thesis text</span></div>
+        <div class="body">
+          <h3>Five small wording and rounding items</h3>
+          <ul>
+            <li>§5.5 says F<sub>M</sub> is “approximately 0.14–0.27%” below F<sub>H</sub>. Table 5.5 and the recomputation give 0.14–0.26%, with a largest difference of 0.263%.</li>
+            <li>Fig. 5.8 shows −24.23% for C0 against EJC (wet 3D). That comes from the rounded FoS 0.9640 and 1.2723; unrounded values give −24.25%.</li>
+            <li>Table C.2's 2D values, 2.447910895 and 1.098069496, look truncated. The app gives 2.4479108955 and 1.0980694965; the 3D values agree to every printed digit.</li>
+            <li>§5.1 says local residuals were “below 10<sup>−15</sup> of column weight”. The app gets 6 × 10<sup>−16</sup> dry and up to 5.7 × 10<sup>−15</sup> wet on the native path. Both are rounding error, so “of order 10<sup>−15</sup>” is safer.</li>
+            <li>§5.4 gives the tangent shear-strength gain as “about 5.9–6.6%”. At the accepted 20×20 and 40-slice states the app gives 5.95–6.43%.</li>
+          </ul>
+          <p class="act"><b>Action.</b> Adjust the wording.</p>
+        </div>
+      </li>
+      <li class="finding">
+        <div class="meta"><span class="fid">B3</span><span class="chip"><span class="g" aria-hidden="true">○</span>Low</span><span class="chip">Benchmark</span></div>
+        <div class="body">
+          <h3>3D comparisons with Slide3 are context only</h3>
+          <p>The app's 3D FoS (80×80) is <span id="b3-slide3">0.7% to 12.8%</span> above Slide3 and <span id="b3-sheet">−16% to +17%</span> from D'Esterre's spreadsheet. The 3D formulations, surfaces and end conditions differ, so these are not like-for-like checks of the code.</p>
+        </div>
+      </li>
+      <li class="finding">
+        <div class="meta"><span class="fid">T4</span><span class="chip info"><span class="g" aria-hidden="true">i</span>Info</span><span class="chip">New result</span></div>
+        <div class="body">
+          <h3>Wet T0 on the 80×80 mesh has no accepted FoS</h3>
+          <p>Table 5.7 marks this cell “Not verified”. A direct 80×80 solve gives no accepted FoS: the trial F becomes non-positive at iteration 10, the same outcome as the 20×20 and 2D wet T0 rows. The direct solve also confirms the interpolated wet C0 value of 0.952 and the growth of the cut-off set from 367 to 491 bases.</p>
+          <p class="act"><b>Action.</b> Table 5.7 can now read “No accepted FoS” for this cell. The app follows the thesis formulation, so this is a rerun, not an independent model.</p>
+        </div>
+      </li>
+    </ol>
+  </section>
+
+  <section id="thesis" aria-labelledby="thesis-h">
+    <div class="shead"><h2 id="thesis-h">Thesis reproduction</h2></div>
+    <div class="prose">
+      <p>Every value in the thesis that the app can compute was recomputed with <code>webapp/engine.js</code>: 193 values from the Project Summary, Chapters 2, 4 and 5, and Appendices A to C. A value matches when it lies within half a unit of its last printed digit; counts and statuses must match exactly. The app has no Route 1, so the Route 1 columns of Table 5.1 come from an independent rebuild of eqs 4.8, 4.9 and 4.5, which reproduces φ′<sub>i</sub>, c′<sub>i</sub> and τ<sub>s</sub> exactly. The Excel workbook was not available, so the comparison is against the printed values.</p>
+    </div>
+    <div class="confirmed">
+      <h3>Also confirmed</h3>
+      <ul>
+        <li>Table 5.2 at ν = 0.49: the analytical 59,952 MPa is right (59,951.66 MPa at 50 digits).</li>
+        <li>The Appendix A.5 and B.5 states agree with the Wolfram listing in D.1 to about 10<sup>−14</sup>; the B.5 state is identical to every digit.</li>
+        <li>Root order: across 176,231 scanned states, both roots of the squared EJC were never admissible at once, so trying the minus root first (Appendix D) or the plus root first (the app) cannot change a result.</li>
+        <li>The native iteration path converges in 34 and 63 iterations for the dry and wet baselines, as §5.1 and Appendix C.2 report.</li>
+      </ul>
+    </div>
+    <div class="block">
+      <div class="controls">
+        <div class="seg" role="group" aria-label="Rows to show">
+          <button type="button" id="show-diff" aria-pressed="true">Not matching (10)</button>
+          <button type="button" id="show-all" aria-pressed="false">All 193</button>
+        </div>
+        <input class="search" id="thesis-q" type="search" placeholder="Filter, e.g. Table 5.3 or wet" aria-label="Filter the values">
+        <span class="count" id="thesis-count"></span>
+      </div>
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>Ref.</th><th class="wide-cell">Quantity</th><th class="num">Thesis</th><th class="num">App</th><th>Result</th><th>Note</th></tr></thead>
+          <tbody id="thesis-rows"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section id="checks" aria-labelledby="checks-h">
+    <div class="shead"><h2 id="checks-h">Independent checks</h2>
+      <p class="prose muted">These checks do not rely on the thesis numbers. They test the solver against exact solutions, a classical chart, a second implementation and high-precision arithmetic.</p></div>
+
+    <div class="sub-h">
+      <h3>Exact solutions for φ = 0</h3>
+      <div class="prose"><p>For a purely cohesive material, Bishop's method is exact moment equilibrium on a circle, and on a sphere the moment form F<sub>M</sub> is exact. The Hungr form F<sub>H</sub> has its own continuum limit. All three were integrated directly from the geometry by adaptive quadrature, with no app code, for three surfaces: the thesis's main sphere, the Carranza-Torres &amp; Hormazábal circle, and D'Esterre's deepest base circle (1:3.5, c4). The error falls as the mesh is refined, with the scatter that §5.6 describes as columns enter and leave the active domain. At the finest meshes 2D is within 0.007% (10,000 slices) and 3D within 0.08% (320 × 320).</p></div>
+    </div>
+    <figure class="block">
+      <div class="legend" aria-hidden="true"><span><i class="sw s1"></i>Thesis main sphere</span><span><i class="sw s2"></i>Carranza-Torres circle</span><span><i class="sw s3"></i>D'Esterre 1:3.5 base circle</span></div>
+      <div class="panels two host" id="chart-exact"></div>
+      <figcaption class="cap">Absolute error of the app against the exact solution, by mesh size (log scales). Hover for signed values.</figcaption>
+    </figure>
+    <details class="data">
+      <summary>Show the data</summary>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Surface</th><th>Form</th><th class="num">Mesh</th><th class="num">App</th><th class="num">Exact</th><th class="num">Error</th></tr></thead>
+        <tbody id="exact-rows"></tbody>
+      </table></div>
+    </details>
+
+    <div class="sub-h">
+      <h3>Taylor's critical toe circles</h3>
+      <div class="prose"><p>The critical toe circle of a φ = 0 slope was found by minimising the exact solution. Its stability number N = c/(γHF) reproduces Taylor's chart, and the app matches the exact FoS on that circle within 0.014%.</p></div>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Slope angle</th><th class="num">Taylor's N</th><th class="num">N here</th><th class="num">Exact FoS</th><th class="num">App, 5,120 slices</th><th class="num">Difference</th><th>Note</th></tr></thead>
+        <tbody id="taylor-rows"></tbody>
+      </table></div>
+    </div>
+
+    <div class="sub-h">
+      <h3>Randomised tests</h3>
+      <div class="prose"><p>Random inputs in two ranges, 400 input sets each, every set solved in 3D and 2D: 1,600 runs in all. The realistic range covers slope heights of 2–20 m and 50–600 m, β 25–70°, σ<sub>ci</sub> 10–250 MPa and GSI 15–95 across EJC, GHB, σ′<sub>2</sub> = σ′<sub>3</sub> and Mohr-Coulomb, with dry, water-table and r<sub>u</sub> conditions and all tension and iteration options. The extreme range widens these to H 0.5–1,000 m, β 10–89°, σ<sub>ci</sub> 1–300 MPa, a 0.3–1.0, r<sub>u</sub> up to 0.99 and meshes down to 2. Each run was solved by the app (JavaScript) and by the Python engine. Every accepted result was then re-checked from its returned arrays with numpy: column geometry, the unsquared EJC, closure and stress order at each base, local vertical equilibrium (eq. 4.12), global F<sub>H</sub> or F<sub>M</sub> (eqs 4.14, 4.15) and Bishop (eq. 4.16).</p></div>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Range</th><th class="num">Runs</th><th class="num">Accepted</th><th class="num">Withheld</th><th class="num">Refused inputs</th><th class="num">JS vs Python, worst FoS</th><th class="num">Re-check failures</th><th class="num">Worst local residual</th><th class="num">Worst EJC residual</th></tr></thead>
+        <tbody id="random-rows"></tbody>
+      </table></div>
+      <p class="cap">Refused inputs are circles the grid does not support, mostly face circles (see S2). Withheld runs stop with a stated reason: no admissible state, non-positive m<sub>α</sub> or trial F, or a failed final check. No run crashed or returned a non-finite FoS. Limits: local residual 10<sup>−9</sup>, EJC 10<sup>−8</sup> MPa.</p>
+    </div>
+
+    <div class="sub-h">
+      <h3>50-digit local strength</h3>
+      <div class="prose"><p>313 accepted local states from 150 random strength sets (EJC with both closures, and GHB) were solved again at 50 digits by direct root finding on the closure. The worst relative differences are 2.6 × 10<sup>−14</sup> in φ′<sub>i</sub>, 3.4 × 10<sup>−15</sup> in c′<sub>i</sub> and 8.4 × 10<sup>−16</sup> in τ<sub>s</sub>. In 136 cases neither method found a state. In one case only the app did; that state is genuine, since at 50 digits it satisfies the closure and lands on the target σ′<sub>n</sub>. The reference scan missed it because the root lies between its last inadmissible and first admissible grid points.</p></div>
+    </div>
+
+    <div class="sub-h">
+      <h3>Metamorphic checks</h3>
+      <div class="prose"><ul>
+        <li>Scaling the slope, sphere and σ<sub>ci</sub> together leaves FoS unchanged to 1.1 × 10<sup>−15</sup> (EJC and GHB, dry and wet, 3D and 2D).</li>
+        <li>With φ = 0, pore pressure has no effect: dry, water-table and r<sub>u</sub> runs give identical FoS.</li>
+        <li>With φ = 0, FoS is proportional to c: doubling and quadrupling c give ratios of 2.000000000000000 and 4.000000000000000.</li>
+      </ul></div>
+    </div>
+  </section>
+
+  <section id="benchmarks" aria-labelledby="benchmarks-h">
+    <div class="shead"><h2 id="benchmarks-h">Published benchmarks</h2>
+      <p class="prose muted">The app was run on the exact circles of three published studies. These compare the code with other software and other analysts, so agreement is expected only where the models are the same.</p></div>
+
+    <div class="sub-h">
+      <h3>D'Esterre (2024): 24 circles against Slide2</h3>
+      <div class="prose"><p>A 2.1 m slope at 1:1.5, 1:2.5 and 1:3.5, four c′–φ′ pairs, r<sub>u</sub> = 0 and 0.5, Mohr-Coulomb strength, Slide2 with Bishop's method. The app used 640 slices. The Ordinary-method values use the app's own slices, weights and pore pressures with N′ = (W − ub) cos α; they test finding B1.</p></div>
+    </div>
+    <figure class="block">
+      <div class="legend" aria-hidden="true"><span><i class="sw dot s1"></i>Bishop, the app</span><span><i class="sw dia s2"></i>Ordinary method, same slices</span><span><i class="sw bandsw"></i>Within ±0.5%</span></div>
+      <div class="host" id="chart-desterre"></div>
+      <figcaption class="cap">Difference from D'Esterre's Slide2 FoS on each published circle. Hover a mark for the values.</figcaption>
+    </figure>
+    <details class="data">
+      <summary>Show the 24 cases</summary>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Case</th><th class="num">Slide2</th><th class="num">App, Bishop</th><th class="num">Diff.</th><th class="num">Ordinary, same slices</th><th class="num">Diff.</th><th class="num">App, nearby critical circle</th><th class="num">Diff.</th><th class="num">Slide3</th><th class="num">App 3D, 80×80</th><th class="num">Diff.</th></tr></thead>
+        <tbody id="desterre-rows"></tbody>
+      </table></div>
+    </details>
+
+    <div class="sub-h">
+      <h3>Law (2024): the Chile slope with GHB</h3>
+      <div class="prose"><p>Law analysed the Carranza-Torres &amp; Hormazábal slope with GHB in Excel and in Slide2, on a 12-bench profile (30 m benches, 16 m berms, 71° faces). The app uses the overall 50° profile with 640 slices.</p></div>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Case</th><th class="wide-cell">Circle and conditions</th><th class="num">App 2D</th><th class="num">Slide2</th><th class="num">Law Excel, instantaneous</th><th class="num">Law Excel, HB 1997</th><th class="num">App 3D, 80×80</th></tr></thead>
+        <tbody id="law-rows"></tbody>
+      </table></div>
+      <p class="cap">* Slide2's dry critical FoS, found on the case 3 circle rather than this one.</p>
+    </div>
+
+    <div class="sub-h">
+      <h3>Carranza-Torres &amp; Hormazábal (2020)</h3>
+      <div class="prose"><p>The published Bishop FoS is 2.01 on the circle centred at (207.28, 586.53) m with R = 622.08 m. The app gives <span id="ct-vals">2.0039 with 40 slices, 2.0027 with 640 and 2.0028 with 5,120</span>. A critical-circle search started from four circles (one of them the published circle) converges to a centre at (210.8, 586.2) m with R = 621.7 m and FoS 2.0025, within 4 m of the published circle.</p></div>
+    </div>
+  </section>
+
+  <section id="real-life" aria-labelledby="real-life-h">
+    <div class="shead"><h2 id="real-life-h">Real-life scenarios</h2>
+      <p class="prose muted">The thesis evaluates one prescribed sphere with fixed inputs. These runs show how the answer moves when the set-up changes the way it would for a real pit.</p></div>
+
+    <div class="sub-h">
+      <h3>Critical surfaces</h3>
+      <div class="prose"><p>Nelder–Mead over centre and radius with the app's solver (20×20 columns, 40 slices). The 2D searches start from the thesis's main sphere and three other circles; the 3D searches start from the 2D critical circle and the main sphere. Fine-mesh values (640 slices, 80×80 columns) confirm the minima.</p></div>
+    </div>
+    <figure class="block">
+      <div class="legend" aria-hidden="true"><span><i class="sw dot s1"></i>Thesis main sphere</span><span><i class="sw dia s2"></i>Critical surface</span><span><i class="sw refsw"></i>FoS = 1</span></div>
+      <div class="host" id="chart-crit"></div>
+      <figcaption class="cap">Factor of safety on the prescribed sphere and on the critical surface found by the search.</figcaption>
+    </figure>
+    <div class="tablewrap"><table>
+      <thead><tr><th>Strength</th><th>Water</th><th>Method</th><th class="num">Main sphere</th><th class="num">Critical</th><th class="num">Change</th><th class="num">Critical, fine mesh</th><th class="num">Critical surface x<sub>c</sub>, z<sub>c</sub>, R (m)</th></tr></thead>
+      <tbody id="crit-rows"></tbody>
+    </table></div>
+    <p class="cap" id="crit-ratio"></p>
+
+    <div class="sub-h">
+      <h3>One input at a time</h3>
+      <div class="prose"><p>The thesis slope and main sphere with EJC (Moscarda closure), a from GSI, 20×20 columns and 40 slices, changing one input at a time. All 96 runs were accepted, and every response moves in the physically expected direction. The dashed vertical line marks the thesis value. Very high GSI gives very high FoS because the whole mass is treated as one isotropic material; a real slope that strong would fail along its structure (R3).</p></div>
+    </div>
+    <figure class="block">
+      <div class="legend" aria-hidden="true"><span><i class="sw s1"></i>3D Hungr</span><span><i class="sw s2"></i>2D Bishop</span><span><i class="sw refsw"></i>FoS = 1 and thesis value</span></div>
+      <div class="multiples" id="chart-sweeps"></div>
+      <figcaption class="cap">FoS against each input. Hover a panel for values and the share of bases in tension.</figcaption>
+    </figure>
+    <details class="data">
+      <summary>Show the data</summary>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Input</th><th class="num">Value</th><th class="num">3D FoS</th><th class="num">2D FoS</th><th class="num">3D / 2D</th><th class="num">Tensile bases, 3D</th><th class="num">Tensile bases, 2D</th></tr></thead>
+        <tbody id="sweep-rows"></tbody>
+      </table></div>
+    </details>
+  </section>
+
+  <section id="actions" aria-labelledby="actions-h">
+    <div class="shead"><h2 id="actions-h">Recommended actions</h2></div>
+    <div class="actions">
+      <div>
+        <h3>In the app</h3>
+        <p class="who">Small changes; they can be made on the branch on request.</p>
+        <ol>
+          <li>Fix S1 and add a ν = 0.49 regression test, in <code>engine.js</code> and <code>engine.py</code>. <b>Done</b> (38a3a2e).</li>
+          <li>Mention base-circle mode in the R ≤ z<sub>c</sub> message (S2). <b>Done</b> (38a3a2e).</li>
+          <li>Show the tensile-base count and share in the summary, and flag high shares (S3). <b>Done</b> (38a3a2e).</li>
+          <li>Optionally, add a critical-surface search study (R1).</li>
+        </ol>
+      </div>
+      <div>
+        <h3>In the thesis</h3>
+        <p class="who">Wording and presentation; no result changes.</p>
+        <ol>
+          <li>State the residual form used in Table 5.1 and the text (T1).</li>
+          <li>Align the §4.6 tolerance with Appendix D (T2).</li>
+          <li>Correct the five small items in T3.</li>
+          <li>Update the wet T0 80×80 cell of Table 5.7 (T4).</li>
+          <li>Consider reporting the critical-surface FoS and its 3D/2D ratio, which is lower than on the main sphere (R1).</li>
+        </ol>
+      </div>
+      <div>
+        <h3>Before any design use</h3>
+        <p class="who">What a real slope assessment would still need.</p>
+        <ol>
+          <li>Analyse the critical surface (R1).</li>
+          <li>Run D, applied to a damaged zone, and drawdown as sensitivities (R2).</li>
+          <li>Add seismic, tension-crack and structural checks (R3).</li>
+          <li>Confirm the D'Esterre 1:3.5 and Law case 4 sources before relying on them as references (B1, B2).</li>
+        </ol>
+      </div>
+    </div>
+  </section>
+
+  <section id="method" aria-labelledby="method-h">
+    <div class="shead"><h2 id="method-h">Method and files</h2></div>
+    <div class="prose">
+      <p>All runs used the shipped <code>webapp/engine.js</code> (commit 2512eca) under Node 22.22. The Python engine (<code>ejc_app/engine.py</code>), numpy 2.5, scipy 1.18 and mpmath 1.4 ran under Python 3.13. The scripts are in the repository under <code>qa/</code>, with a README on how to run them; their results go to <code>qa/out/</code>.</p>
+    </div>
+    <div class="tablewrap"><table>
+      <thead><tr><th>Script</th><th>What it checks</th></tr></thead>
+      <tbody>
+        <tr><td><code>qa_thesis.js</code></td><td>Recomputes every thesis value with the app's engine.</td></tr>
+        <tr><td><code>compare_thesis.py</code></td><td>Compares the 193 values with the thesis at the printed precision.</td></tr>
+        <tr><td><code>qa_extra.py</code></td><td>Table 5.2 at ν = 0.49 at 50 digits, tangent gain by σ′<sub>n</sub>, root order, and the Route 1 rebuild.</td></tr>
+        <tr><td><code>qa_analytic.py</code></td><td>Exact φ = 0 solutions, Taylor's circles and the metamorphic checks.</td></tr>
+        <tr><td><code>qa_random.py</code></td><td>1,600 randomised runs: JavaScript against Python, the independent re-check and 50-digit local strength.</td></tr>
+        <tr><td><code>qa_industry.js</code></td><td>The D'Esterre, Law and Carranza-Torres cases.</td></tr>
+        <tr><td><code>qa_desterre_search.js</code>, <code>qa_desterre_oms.js</code></td><td>D'Esterre critical circles and the Ordinary-method test.</td></tr>
+        <tr><td><code>qa_search.js</code></td><td>Critical-surface searches on the thesis slope.</td></tr>
+        <tr><td><code>qa_scenarios.js</code></td><td>The one-at-a-time sweeps.</td></tr>
+      </tbody>
+    </table></div>
+    <p class="cap">JavaScript engines can differ in the last digits of residuals (Chromium 1.7 × 10<sup>−15</sup> against Node 7.9 × 10<sup>−16</sup> for the same run), and one of the 1,600 random runs took a different number of iterations in JavaScript and Python with the same FoS. Results agree to about 10<sup>−15</sup> either way.</p>
+    <footer>Prepared with Claude Code, 27 October 2026. Private record for the thesis author.</footer>
+  </section>
+</div>
+<div class="tip" id="tip" role="tooltip" hidden></div>
+
+<script id="data" type="application/json">{"rows":[{"where":"Summary","item":"finest 3D above 2D, dry (%)","thesis":"11.0","app":"11.0154","match":true,"kind":"Match","note":""},{"where":"Summary","item":"finest 3D above 2D, wet (%)","thesis":"17.0","app":"17.0357","match":true,"kind":"Match","note":""},{"where":"Fig. 2.2","item":"Mohr-Coulomb example: σ′<sub>1<\/sub> (MPa)","thesis":"168.282","app":"168.282016","match":true,"kind":"Match","note":""},{"where":"Fig. 2.2","item":"Mohr-Coulomb example: τ<sub>s<\/sub> at tangency (MPa)","thesis":"58.579","app":"58.578834","match":true,"kind":"Match","note":""},{"where":"Fig. 2.2","item":"Mohr-Coulomb example: circle centre (MPa)","thesis":"100.641","app":"100.641005","match":true,"kind":"Match","note":""},{"where":"Fig. 2.5","item":"Lode parameter b of the closure state (p′ = 1.810 MPa)","thesis":"0.266","app":"0.265997","match":true,"kind":"Match","note":""},{"where":"Fig. 2.5","item":"EJC principal-difference gain at fixed σ′<sub>3<\/sub> (%)","thesis":"11.5","app":"11.4724","match":true,"kind":"Match","note":""},{"where":"Fig. 2.5","item":"EJC radial increase, p′ = 1.810 MPa (%)","thesis":"1.7","app":"1.673","match":true,"kind":"Match","note":""},{"where":"Fig. 2.5","item":"EJC radial increase, p′ = 2.906 MPa (%)","thesis":"2.3","app":"2.3096","match":true,"kind":"Match","note":""},{"where":"Table 4.1","item":"m<sub>b<\/sub>","thesis":"1.26006","app":"1.26005645","match":true,"kind":"Match","note":""},{"where":"Table 4.1","item":"s","thesis":"0.0015893","app":"0.0015893273","match":true,"kind":"Match","note":""},{"where":"Table 4.1","item":"a from GSI","thesis":"0.509923","app":"0.509922905","match":true,"kind":"Match","note":""},{"where":"Fig. 4.2","item":"entry x (m)","thesis":"−311.4","app":"−311.4292","match":true,"kind":"Match","note":""},{"where":"Fig. 4.2","item":"entry z (m)","thesis":"360","app":"360","match":true,"kind":"Match","note":""},{"where":"Fig. 4.2","item":"exit x (m)","thesis":"−20.4","app":"−20.4057","match":true,"kind":"Match","note":""},{"where":"Fig. 4.2","item":"exit z (m)","thesis":"24.3","app":"24.3186","match":true,"kind":"Match","note":""},{"where":"Fig. 4.2, §5","item":"active half-columns, 20×20","thesis":"76","app":"76","match":true,"kind":"Match","note":""},{"where":"§5","item":"active slices, 40","thesis":"30","app":"30","match":true,"kind":"Match","note":""},{"where":"Fig. 4.2, §5.8","item":"dry bases with σ′<sub>n<\/sub> &lt; 0 (20×20)","thesis":"6","app":"6","match":true,"kind":"Match","note":""},{"where":"§5.1","item":"native path FoS 3D dry","thesis":"2.706024342","app":"2.706024342432","match":true,"kind":"Match","note":""},{"where":"§5.1","item":"native path FoS 3D wet","thesis":"1.272331405","app":"1.272331405181","match":true,"kind":"Match","note":""},{"where":"§5.1","item":"relative local residual (max of dry/wet, native path)","thesis":"< 1 × 10⁻¹⁵","app":"5.7 × 10⁻¹⁵","match":false,"kind":"Thesis wording","note":"Rounding-level either way; the limit is 10<sup>−9<\/sup>."},{"where":"§5.1","item":"unsquared-EJC residual (MPa)","thesis":"< 3 × 10⁻¹⁴","app":"3.6 × 10⁻¹⁵","match":true,"kind":"Match","note":""},{"where":"§5.1","item":"σ′<sub>2<\/sub> = σ′<sub>3<\/sub> route vs GHB, worst relative FoS difference (8 cases)","thesis":"≤ 1.4 × 10⁻¹²","app":"2.2 × 10⁻¹⁶","match":true,"kind":"Match","note":""},{"where":"§5.1","item":"Carranza-Torres circle, 2D (GHB)","thesis":"2.004","app":"2.003873","match":true,"kind":"Match","note":""},{"where":"§5.1","item":"Carranza-Torres circle, 3D (GHB)","thesis":"2.142","app":"2.141937","match":true,"kind":"Match","note":""},{"where":"§5.1, C.2","item":"native path iterations, 3D dry","thesis":"34","app":"34","match":true,"kind":"Match","note":""},{"where":"§5.1, C.2","item":"native path iterations, 3D wet","thesis":"63","app":"63","match":true,"kind":"Match","note":""},{"where":"§5.1, A.5","item":"fixture φ′<sub>i<\/sub> (°)","thesis":"55.0720","app":"55.0720172","match":true,"kind":"Match","note":""},{"where":"§5.1, A.5","item":"fixture c′<sub>i<\/sub> (kPa)","thesis":"2,079.5","app":"2079.5128","match":true,"kind":"Match","note":""},{"where":"Table 5.1","item":"R2 φ′<sub>i<\/sub> at 50 kPa (°)","thesis":"67.45","app":"67.44917","match":true,"kind":"Match","note":""},{"where":"Table 5.1","item":"R2 c′<sub>i<\/sub> at 50 kPa","thesis":"362.5","app":"362.4708","match":true,"kind":"Match","note":""},{"where":"Table 5.1","item":"R2 τ<sub>s<\/sub> at 50 kPa","thesis":"482.9","app":"482.8792","match":true,"kind":"Match","note":""},{"where":"Table 5.1","item":"R2 φ′<sub>i<\/sub> at 400 kPa (°)","thesis":"59.90","app":"59.89885","match":true,"kind":"Match","note":""},{"where":"Table 5.1","item":"R2 c′<sub>i<\/sub> at 400 kPa","thesis":"487.2","app":"487.1667","match":true,"kind":"Match","note":""},{"where":"Table 5.1","item":"R2 τ<sub>s<\/sub> at 400 kPa","thesis":"1,177.2","app":"1177.1712","match":true,"kind":"Match","note":""},{"where":"Table 5.1","item":"R2 φ′<sub>i<\/sub> at 1600 kPa (°)","thesis":"50.21","app":"50.20528","match":true,"kind":"Match","note":""},{"where":"Table 5.1","item":"R2 c′<sub>i<\/sub> at 1600 kPa","thesis":"935.3","app":"935.263","match":true,"kind":"Match","note":""},{"where":"Table 5.1","item":"R2 τ<sub>s<\/sub> at 1600 kPa","thesis":"2,856.0","app":"2856.0026","match":true,"kind":"Match","note":""},{"where":"Table 5.1","item":"R1 φ′<sub>i<\/sub> at 50 kPa (independent rebuild)","thesis":"68.61","app":"68.60731","match":true,"kind":"Match","note":""},{"where":"Table 5.1","item":"R1 c′<sub>i<\/sub> at 50 kPa (independent rebuild)","thesis":"282.7","app":"282.7288","match":true,"kind":"Match","note":""},{"where":"Table 5.1","item":"R1 τ<sub>s<\/sub> at 50 kPa (independent rebuild)","thesis":"410.4","app":"410.3617","match":true,"kind":"Match","note":""},{"where":"Table 5.1","item":"R1 EJC residual at 50 kPa (MPa)","thesis":"−0.63","app":"−1.26471","match":false,"kind":"Residual scale","note":"Printed value is σ′<sub>1<\/sub> − σ′<sub>1,EJC<\/sub> (eq. 2.8), half of r<sub>EJC<\/sub> (eq. B.27)."},{"where":"Table 5.1","item":"R1 φ′<sub>i<\/sub> at 400 kPa (independent rebuild)","thesis":"61.32","app":"61.3163","match":true,"kind":"Match","note":""},{"where":"Table 5.1","item":"R1 c′<sub>i<\/sub> at 400 kPa (independent rebuild)","thesis":"278.6","app":"278.5699","match":true,"kind":"Match","note":""},{"where":"Table 5.1","item":"R1 τ<sub>s<\/sub> at 400 kPa (independent rebuild)","thesis":"1,009.7","app":"1009.6785","match":true,"kind":"Match","note":""},{"where":"Table 5.1","item":"R1 EJC residual at 400 kPa (MPa)","thesis":"−1.09","app":"−2.17206","match":false,"kind":"Residual scale","note":"Printed value is σ′<sub>1<\/sub> − σ′<sub>1,EJC<\/sub> (eq. 2.8), half of r<sub>EJC<\/sub> (eq. B.27)."},{"where":"Table 5.1","item":"R1 φ′<sub>i<\/sub> at 1600 kPa (independent rebuild)","thesis":"51.81","app":"51.81133","match":true,"kind":"Match","note":""},{"where":"Table 5.1","item":"R1 c′<sub>i<\/sub> at 1600 kPa (independent rebuild)","thesis":"451.2","app":"451.2368","match":true,"kind":"Match","note":""},{"where":"Table 5.1","item":"R1 τ<sub>s<\/sub> at 1600 kPa (independent rebuild)","thesis":"2,485.3","app":"2485.3018","match":true,"kind":"Match","note":""},{"where":"Table 5.1","item":"R1 EJC residual at 1600 kPa (MPa)","thesis":"−1.80","app":"−3.5901","match":false,"kind":"Residual scale","note":"Printed value is σ′<sub>1<\/sub> − σ′<sub>1,EJC<\/sub> (eq. 2.8), half of r<sub>EJC<\/sub> (eq. B.27)."},{"where":"Fig. 5.1","item":"dry central section: min φ′<sub>i<\/sub> (°)","thesis":"55.6","app":"55.5885","match":true,"kind":"Match","note":""},{"where":"Fig. 5.1","item":"dry central section: max φ′<sub>i<\/sub> (°)","thesis":"72.4","app":"72.3876","match":true,"kind":"Match","note":""},{"where":"Fig. 5.1","item":"dry central section: min c′<sub>i<\/sub> (kPa)","thesis":"356","app":"356.281","match":true,"kind":"Match","note":""},{"where":"Fig. 5.1","item":"dry central section: max c′<sub>i<\/sub> (kPa)","thesis":"639","app":"638.936","match":true,"kind":"Match","note":""},{"where":"§5.3","item":"original closure σ′<sub>3,min<\/sub> (MPa)","thesis":"34.376","app":"34.375976","match":true,"kind":"Match","note":""},{"where":"§5.3","item":"original closure σ′<sub>n,min<\/sub> (MPa)","thesis":"52.97","app":"52.96638","match":true,"kind":"Match","note":""},{"where":"§5.3","item":"gravity cap dry (MPa)","thesis":"1.61","app":"1.60817","match":true,"kind":"Match","note":""},{"where":"§5.3","item":"gravity cap wet (MPa)","thesis":"1.02","app":"1.02387","match":true,"kind":"Match","note":""},{"where":"§5.3","item":"required / dry maximum","thesis":"32.9","app":"32.9358","match":true,"kind":"Match","note":""},{"where":"§5.3","item":"wet columns below threshold, ν = 0.05","thesis":"67/76","app":"67/76","match":true,"kind":"Match","note":""},{"where":"Table 5.2","item":"min σ′<sub>n<\/sub> at ν = 0.05 (MPa)","thesis":"0.92","app":"0.91586","match":true,"kind":"Match","note":""},{"where":"Table 5.2","item":"min σ′<sub>n<\/sub> at ν = 0.1 (MPa)","thesis":"3.43","app":"3.42933","match":true,"kind":"Match","note":""},{"where":"Table 5.2","item":"min σ′<sub>n<\/sub> at ν = 0.2 (MPa)","thesis":"19.23","app":"19.2256","match":true,"kind":"Match","note":""},{"where":"Table 5.2","item":"min σ′<sub>n<\/sub> at ν = 0.271 (MPa)","thesis":"52.97","app":"52.96638","match":true,"kind":"Match","note":""},{"where":"Table 5.2","item":"min σ′<sub>n<\/sub> at ν = 0.35 (MPa)","thesis":"177.8","app":"177.8162","match":true,"kind":"Match","note":""},{"where":"Table 5.2","item":"min σ′<sub>n<\/sub> at ν = 0.45 (MPa)","thesis":"2,188","app":"2187.81","match":true,"kind":"Match","note":""},{"where":"Table 5.2","item":"min σ′<sub>n<\/sub> at ν = 0.49 (MPa), software search","thesis":"59,952","app":"59953.869","match":false,"kind":"Software bug","note":"Finding S1. The thesis value is right: the exact boundary minimum is 59,951.66 MPa."},{"where":"Table 5.2","item":"min σ′<sub>n<\/sub> at ν = 0.49 (MPa), exact boundary (independent)","thesis":"59,952","app":"59951.663","match":true,"kind":"Match","note":""},{"where":"Table 5.2","item":"dry columns below threshold, ν = 0.05","thesis":"43/76","app":"43/76","match":true,"kind":"Match","note":""},{"where":"Table 5.2","item":"dry columns below threshold, ν = 0.1","thesis":"76/76","app":"76/76","match":true,"kind":"Match","note":""},{"where":"Table 5.2","item":"dry columns below threshold, ν = 0.2","thesis":"76/76","app":"76/76","match":true,"kind":"Match","note":""},{"where":"Table 5.2","item":"dry columns below threshold, ν = 0.271","thesis":"76/76","app":"76/76","match":true,"kind":"Match","note":""},{"where":"Table 5.2","item":"dry columns below threshold, ν = 0.35","thesis":"76/76","app":"76/76","match":true,"kind":"Match","note":""},{"where":"Table 5.2","item":"dry columns below threshold, ν = 0.45","thesis":"76/76","app":"76/76","match":true,"kind":"Match","note":""},{"where":"Table 5.2","item":"dry columns below threshold, ν = 0.49","thesis":"76/76","app":"76/76","match":true,"kind":"Match","note":""},{"where":"Fig. 5.2","item":"end of the original branch (M = 1), σ′<sub>3<\/sub> (MPa)","thesis":"128.013","app":"128.012985","match":true,"kind":"Match","note":""},{"where":"Table 5.3","item":"Dry, a = 0.5: HB 3D","thesis":"2.554","app":"2.553668","match":true,"kind":"Match","note":""},{"where":"Table 5.3","item":"Dry, a = 0.5: HB 2D","thesis":"2.310","app":"2.310255","match":true,"kind":"Match","note":""},{"where":"Table 5.3","item":"Dry, a = 0.5: EJC 3D","thesis":"2.706","app":"2.706024","match":true,"kind":"Match","note":""},{"where":"Table 5.3","item":"Dry, a = 0.5: EJC 2D","thesis":"2.448","app":"2.447911","match":true,"kind":"Match","note":""},{"where":"Table 5.3","item":"Dry, a = 0.5: EJC 3D/2D","thesis":"1.105","app":"1.105442","match":true,"kind":"Match","note":""},{"where":"Table 5.3","item":"Wet, a = 0.5: HB 3D","thesis":"1.200","app":"1.200122","match":true,"kind":"Match","note":""},{"where":"Table 5.3","item":"Wet, a = 0.5: HB 2D","thesis":"1.036","app":"1.035871","match":true,"kind":"Match","note":""},{"where":"Table 5.3","item":"Wet, a = 0.5: EJC 3D","thesis":"1.272","app":"1.272331","match":true,"kind":"Match","note":""},{"where":"Table 5.3","item":"Wet, a = 0.5: EJC 2D","thesis":"1.098","app":"1.098069","match":true,"kind":"Match","note":""},{"where":"Table 5.3","item":"Wet, a = 0.5: EJC 3D/2D","thesis":"1.159","app":"1.158698","match":true,"kind":"Match","note":""},{"where":"Table 5.3","item":"Dry, a = 0.509923: HB 3D","thesis":"2.476","app":"2.476038","match":true,"kind":"Match","note":""},{"where":"Table 5.3","item":"Dry, a = 0.509923: HB 2D","thesis":"2.242","app":"2.242063","match":true,"kind":"Match","note":""},{"where":"Table 5.3","item":"Dry, a = 0.509923: EJC 3D","thesis":"2.624","app":"2.623905","match":true,"kind":"Match","note":""},{"where":"Table 5.3","item":"Dry, a = 0.509923: EJC 2D","thesis":"2.376","app":"2.375733","match":true,"kind":"Match","note":""},{"where":"Table 5.3","item":"Dry, a = 0.509923: EJC 3D/2D","thesis":"1.104","app":"1.104461","match":true,"kind":"Match","note":""},{"where":"Table 5.3","item":"Wet, a = 0.509923: HB 3D","thesis":"1.158","app":"1.158427","match":true,"kind":"Match","note":""},{"where":"Table 5.3","item":"Wet, a = 0.509923: HB 2D","thesis":"1.000","app":"1.000466","match":true,"kind":"Match","note":""},{"where":"Table 5.3","item":"Wet, a = 0.509923: EJC 3D","thesis":"1.228","app":"1.228328","match":true,"kind":"Match","note":""},{"where":"Table 5.3","item":"Wet, a = 0.509923: EJC 2D","thesis":"1.061","app":"1.060695","match":true,"kind":"Match","note":""},{"where":"Table 5.3","item":"Wet, a = 0.509923: EJC 3D/2D","thesis":"1.158","app":"1.15804","match":true,"kind":"Match","note":""},{"where":"Table 5.4","item":"3D EJC vs 2D EJC, dry (%)","thesis":"+10.5","app":"10.5442","match":true,"kind":"Match","note":""},{"where":"Table 5.4","item":"3D EJC vs 2D EJC, wet (%)","thesis":"+15.9","app":"15.8698","match":true,"kind":"Match","note":""},{"where":"Table 5.4","item":"3D EJC vs 3D HB, dry (%)","thesis":"+6.0","app":"5.9662","match":true,"kind":"Match","note":""},{"where":"Table 5.4","item":"3D EJC vs 3D HB, wet (%)","thesis":"+6.0","app":"6.0169","match":true,"kind":"Match","note":""},{"where":"Table 5.4","item":"wet vs dry, EJC 3D (%)","thesis":"−53.0","app":"−52.9815","match":true,"kind":"Match","note":""},{"where":"Table 5.4","item":"wet vs dry, EJC 2D (%)","thesis":"−55.1","app":"−55.1426","match":true,"kind":"Match","note":""},{"where":"Table 5.4","item":"a = 0.509923 vs 0.5, 3D dry (%)","thesis":"−3.0","app":"−3.0347","match":true,"kind":"Match","note":""},{"where":"Table 5.4","item":"a = 0.509923 vs 0.5, 3D wet (%)","thesis":"−3.5","app":"−3.4585","match":true,"kind":"Match","note":""},{"where":"§5.4","item":"EJC over GHB, lowest of 8 (%)","thesis":"5.96","app":"5.95847","match":true,"kind":"Match","note":""},{"where":"§5.4","item":"EJC over GHB, highest of 8 (%)","thesis":"6.03","app":"6.03409","match":true,"kind":"Match","note":""},{"where":"§5.4","item":"(1 − ν + ν²)<sup>−1/2<\/sup> gain at ν = 0.271 (%)","thesis":"11.6","app":"11.6332","match":true,"kind":"Match","note":""},{"where":"§5.4","item":"cohesion share of wet 3D resistance (%)","thesis":"77","app":"76.504","match":true,"kind":"Match","note":"The thesis says “about 77%”."},{"where":"§5.4","item":"cohesion share of dry 3D resistance (%)","thesis":"45","app":"44.932","match":true,"kind":"Match","note":""},{"where":"§5.4","item":"tangent shear-strength gain EJC over GHB","thesis":"about 5.9–6.6%","app":"5.95–6.43%","match":true,"kind":"Match","note":"5.95–6.07% at σ′<sub>n<\/sub> &gt; 0 and 5.95–6.43% over all accepted 20×20 and 40-slice states; inside the thesis range."},{"where":"Table 5.5","item":"20×20 dry: F<sub>H<\/sub>","thesis":"2.7060","app":"2.7060243","match":true,"kind":"Match","note":""},{"where":"Table 5.5","item":"20×20 dry: F<sub>M<\/sub>","thesis":"2.7022","app":"2.7021893","match":true,"kind":"Match","note":""},{"where":"Table 5.5","item":"20×20 dry: difference (%)","thesis":"−0.14","app":"−0.14172","match":true,"kind":"Match","note":""},{"where":"Table 5.5","item":"20×20 wet: F<sub>H<\/sub>","thesis":"1.2723","app":"1.2723314","match":true,"kind":"Match","note":""},{"where":"Table 5.5","item":"20×20 wet: F<sub>M<\/sub>","thesis":"1.2695","app":"1.2694781","match":true,"kind":"Match","note":""},{"where":"Table 5.5","item":"20×20 wet: difference (%)","thesis":"−0.22","app":"−0.22426","match":true,"kind":"Match","note":""},{"where":"Table 5.5","item":"240×240 dry: F<sub>H<\/sub>","thesis":"2.7112","app":"2.7112235","match":true,"kind":"Match","note":""},{"where":"Table 5.5","item":"240×240 dry: F<sub>M<\/sub>","thesis":"2.7068","app":"2.7068306","match":true,"kind":"Match","note":""},{"where":"Table 5.5","item":"240×240 dry: difference (%)","thesis":"−0.16","app":"−0.16203","match":true,"kind":"Match","note":""},{"where":"Table 5.5","item":"240×240 wet: F<sub>H<\/sub>","thesis":"1.2776","app":"1.27757","match":true,"kind":"Match","note":""},{"where":"Table 5.5","item":"240×240 wet: F<sub>M<\/sub>","thesis":"1.2742","app":"1.2742106","match":true,"kind":"Match","note":""},{"where":"Table 5.5","item":"240×240 wet: difference (%)","thesis":"−0.26","app":"−0.26296","match":true,"kind":"Match","note":""},{"where":"§5.5","item":"F<sub>M<\/sub> below F<sub>H<\/sub>, range in the text","thesis":"0.14–0.27%","app":"0.142–0.263%","match":false,"kind":"Thesis wording","note":"Largest difference is 0.263%, so Table 5.5's −0.26% is right and the text's 0.27% is high."},{"where":"Table 5.6","item":"3D 120/160/240 dry variation (%)","thesis":"0.04","app":"0.03761","match":true,"kind":"Match","note":""},{"where":"Table 5.6","item":"3D 120/160/240 wet variation (%)","thesis":"0.08","app":"0.07805","match":true,"kind":"Match","note":""},{"where":"Table 5.6","item":"2D 1280/2560/5120 dry variation (%)","thesis":"0.02","app":"0.0213","match":true,"kind":"Match","note":""},{"where":"Table 5.6","item":"2D 1280/2560/5120 wet variation (%)","thesis":"0.05","app":"0.04892","match":true,"kind":"Match","note":""},{"where":"Table 5.6","item":"finest dry 3D (240×240)","thesis":"2.7112","app":"2.7112235","match":true,"kind":"Match","note":""},{"where":"Table 5.6","item":"finest wet 3D (240×240)","thesis":"1.2776","app":"1.27757","match":true,"kind":"Match","note":""},{"where":"Table 5.6","item":"finest dry 2D (5120)","thesis":"2.4422","app":"2.4422059","match":true,"kind":"Match","note":""},{"where":"Table 5.6","item":"finest wet 2D (5120)","thesis":"1.0916","app":"1.0916067","match":true,"kind":"Match","note":""},{"where":"§5.6","item":"active half-columns, 10×10","thesis":"17","app":"17","match":true,"kind":"Match","note":""},{"where":"§5.6","item":"3D 40/60/80 dry variation (%)","thesis":"0.26","app":"0.25546","match":true,"kind":"Match","note":""},{"where":"§5.6","item":"3D 40/60/80 wet variation (%)","thesis":"0.53","app":"0.52864","match":true,"kind":"Match","note":""},{"where":"§5.6","item":"10×10 below finest, dry (%)","thesis":"−2.6","app":"−2.5526","match":true,"kind":"Match","note":""},{"where":"§5.6","item":"10×10 below finest, wet (%)","thesis":"−4.4","app":"−4.4259","match":true,"kind":"Match","note":""},{"where":"§5.6","item":"finest 3D/2D ratio, dry","thesis":"1.110","app":"1.110154","match":true,"kind":"Match","note":""},{"where":"§5.6","item":"finest 3D/2D ratio, wet","thesis":"1.170","app":"1.170357","match":true,"kind":"Match","note":""},{"where":"§5.6","item":"20×20 baseline within finest 3D","thesis":"about 0.6%","app":"−0.19% dry, −0.41% wet","match":true,"kind":"Match","note":""},{"where":"Table 5.7","item":"3D 20×20 dry none","thesis":"2.706","app":"2.706024","match":true,"kind":"Match","note":""},{"where":"Table 5.7","item":"3D 20×20 dry C0","thesis":"2.637","app":"2.637135","match":true,"kind":"Match","note":""},{"where":"Table 5.7","item":"3D 20×20 dry T0","thesis":"2.597","app":"2.597232","match":true,"kind":"Match","note":""},{"where":"Table 5.7","item":"3D 20×20 wet none","thesis":"1.272","app":"1.272331","match":true,"kind":"Match","note":""},{"where":"Table 5.7","item":"3D 20×20 wet C0","thesis":"0.964","app":"0.963803","match":true,"kind":"Match","note":""},{"where":"Table 5.7","item":"3D 20×20 wet T0","thesis":"No accepted FoS","app":"REJECTED","match":true,"kind":"Match","note":"Non-positive or non-finite trial F at iteration 9."},{"where":"Table 5.7","item":"3D 80×80 dry none","thesis":"2.712","app":"2.7116","match":true,"kind":"Match","note":""},{"where":"Table 5.7","item":"3D 80×80 dry C0","thesis":"2.640","app":"2.639934","match":true,"kind":"Match","note":""},{"where":"Table 5.7","item":"3D 80×80 dry T0","thesis":"2.590","app":"2.590204","match":true,"kind":"Match","note":""},{"where":"Table 5.7","item":"3D 80×80 wet none","thesis":"1.278","app":"1.277852","match":true,"kind":"Match","note":""},{"where":"Table 5.7","item":"3D 80×80 wet C0","thesis":"0.952","app":"0.952406","match":true,"kind":"Match","note":"thesis value from interpolated local strengths; the direct solve agrees"},{"where":"Table 5.7","item":"3D 80×80 wet T0","thesis":"Not verified","app":"REJECTED","match":false,"kind":"New result","note":"A direct solve gives no accepted FoS, as for the other wet T0 rows. Non-positive or non-finite trial F at iteration 10."},{"where":"Table 5.7","item":"2D 40 slices dry none","thesis":"2.448","app":"2.447911","match":true,"kind":"Match","note":""},{"where":"Table 5.7","item":"2D 40 slices dry C0","thesis":"2.430","app":"2.43037","match":true,"kind":"Match","note":""},{"where":"Table 5.7","item":"2D 40 slices dry T0","thesis":"2.429","app":"2.428723","match":true,"kind":"Match","note":""},{"where":"Table 5.7","item":"2D 40 slices wet none","thesis":"1.098","app":"1.098069","match":true,"kind":"Match","note":""},{"where":"Table 5.7","item":"2D 40 slices wet C0","thesis":"0.978","app":"0.978391","match":true,"kind":"Match","note":""},{"where":"Table 5.7","item":"2D 40 slices wet T0","thesis":"No accepted FoS","app":"REJECTED","match":true,"kind":"Match","note":"Non-positive or non-finite trial F at iteration 16."},{"where":"§5.8","item":"dry columns with σ′<sub>3<\/sub> &lt; 0","thesis":"23","app":"23","match":true,"kind":"Match","note":""},{"where":"§5.8","item":"wet columns with σ′<sub>3<\/sub> &lt; 0","thesis":"61","app":"61","match":true,"kind":"Match","note":""},{"where":"§5.8","item":"σ′<sub>n<\/sub> &lt; 0 at 240×240, dry (%)","thesis":"8.9","app":"8.8755","match":true,"kind":"Match","note":""},{"where":"§5.8","item":"σ′<sub>n<\/sub> &lt; 0 at 240×240, wet (%)","thesis":"30.0","app":"29.9982","match":true,"kind":"Match","note":""},{"where":"§5.8","item":"lower normal-stress limit (kPa)","thesis":"−98","app":"−97.916","match":true,"kind":"Match","note":""},{"where":"§5.8","item":"γ<sub>w<\/sub>/γ (%)","thesis":"36","app":"36.333","match":true,"kind":"Match","note":""},{"where":"§5.8","item":"80×80 wet: tensile bases at baseline","thesis":"367","app":"367","match":true,"kind":"Match","note":""},{"where":"§5.8","item":"80×80 wet: cut-off set after C0","thesis":"491","app":"491","match":true,"kind":"Match","note":""},{"where":"§5.8","item":"dry C0 reduction, 20×20 (%)","thesis":"−2.5","app":"−2.5458","match":true,"kind":"Match","note":"The thesis gives 2.5–2.6% for the two meshes."},{"where":"§5.8","item":"dry C0 reduction, 80×80 (%)","thesis":"−2.6","app":"−2.643","match":true,"kind":"Match","note":""},{"where":"§5.8","item":"dry T0 reduction, 20×20 (%)","thesis":"−4.0","app":"−4.0204","match":true,"kind":"Match","note":""},{"where":"§5.8","item":"dry T0 reduction, 80×80 (%)","thesis":"−4.5","app":"−4.4769","match":true,"kind":"Match","note":""},{"where":"§5.8, C.3","item":"wet bases with σ′<sub>n<\/sub> &lt; 0 (20×20)","thesis":"23","app":"23","match":true,"kind":"Match","note":""},{"where":"Fig. 5.8","item":"EJC vs GHB, wet 3D (%)","thesis":"+6.02","app":"6.01685","match":true,"kind":"Match","note":""},{"where":"Fig. 5.8","item":"C0 vs EJC, wet 3D (%)","thesis":"−24.23","app":"−24.24908","match":false,"kind":"Rounding","note":"−24.23% comes from the rounded FoS 0.9640 and 1.2723."},{"where":"App. A.5","item":"original-closure fixture σ′<sub>1<\/sub>","thesis":"38.47780945","app":"38.47780945392","match":true,"kind":"Match","note":""},{"where":"App. A.5","item":"original-closure fixture σ′<sub>2<\/sub>","thesis":"11.52220834","app":"11.52220834048","match":true,"kind":"Match","note":""},{"where":"App. A.5","item":"original-closure fixture σ′<sub>3<\/sub>","thesis":"2.50000089","app":"2.50000088972","match":true,"kind":"Match","note":""},{"where":"App. A.5","item":"original-closure fixture M","thesis":"10.10323687","app":"10.10323687405","match":true,"kind":"Match","note":""},{"where":"App. A.5","item":"original-closure fixture φ′<sub>i<\/sub>","thesis":"55.07201723","app":"55.07201722875","match":true,"kind":"Match","note":""},{"where":"App. A.5","item":"original-closure fixture τ<sub>s<\/sub>","thesis":"10.29948167","app":"10.29948167416","match":true,"kind":"Match","note":""},{"where":"App. A.5","item":"original-closure fixture c′<sub>i<\/sub>","thesis":"2.07951285","app":"2.07951284988","match":true,"kind":"Match","note":""},{"where":"App. A.5","item":"original-closure minimum σ′<sub>n<\/sub> (MPa)","thesis":"52.966376","app":"52.966375532","match":true,"kind":"Match","note":""},{"where":"App. A.5","item":"dry overburden bound (MPa)","thesis":"1.608168","app":"1.60816842","match":true,"kind":"Match","note":""},{"where":"App. B.5","item":"Moscarda fixture at 0.400 MPa: σ′<sub>1<\/sub>","thesis":"4.77780254","app":"4.77780254084","match":true,"kind":"Match","note":""},{"where":"App. B.5","item":"Moscarda fixture at 0.400 MPa: σ′<sub>2<\/sub>","thesis":"1.31740324","app":"1.31740324175","match":true,"kind":"Match","note":""},{"where":"App. B.5","item":"Moscarda fixture at 0.400 MPa: σ′<sub>3<\/sub>","thesis":"0.08346403","app":"0.08346403389","match":true,"kind":"Match","note":""},{"where":"App. B.5","item":"Moscarda fixture at 0.400 MPa: M","thesis":"13.83034792","app":"13.83034792091","match":true,"kind":"Match","note":""},{"where":"App. B.5","item":"Moscarda fixture at 0.400 MPa: φ′<sub>i<\/sub>","thesis":"59.89885488","app":"59.89885488349","match":true,"kind":"Match","note":""},{"where":"App. B.5","item":"Moscarda fixture at 0.400 MPa: τ<sub>s<\/sub>","thesis":"1.17717117","app":"1.17717116713","match":true,"kind":"Match","note":""},{"where":"App. B.5","item":"Moscarda fixture at 0.400 MPa: c′<sub>i<\/sub>","thesis":"0.48716674","app":"0.48716674158","match":true,"kind":"Match","note":""},{"where":"Table C.2","item":"3D FoS dry","thesis":"2.706024342","app":"2.706024342432","match":true,"kind":"Match","note":""},{"where":"Table C.2","item":"2D FoS dry","thesis":"2.447910895","app":"2.44791089551","match":false,"kind":"Truncated","note":"Agrees to 8 decimals; the app's value rounds to 2.447910896, so the printed digit looks truncated."},{"where":"Table C.2","item":"3D FoS wet","thesis":"1.272331405","app":"1.272331405186","match":true,"kind":"Match","note":""},{"where":"Table C.2","item":"2D FoS wet","thesis":"1.098069496","app":"1.09806949653","match":false,"kind":"Truncated","note":"Agrees to 8 decimals; the app's value rounds to 1.098069497, so the printed digit looks truncated."}],"exact":[{"name":"Thesis main sphere","d2":{"exact":0.18917291862520147,"pts":[[40,0.190263799149005,0.5766578703396918],[160,0.1879514328607283,-0.6456980065382645],[640,0.1889152962694223,-0.13618352862101446],[2560,0.18915394595477766,-0.010029274042866465],[10000,0.18918264615341254,0.005142135714653051]]},"fh":{"exact":0.2584309516519239,"pts":[[20,0.2553545337478,-1.1904216133783785],[40,0.2604746093661431,0.7907944853957405],[80,0.2584778570492208,0.0181500694855119],[160,0.2578833728347237,-0.21188592685978946],[320,0.2586295566851833,0.07685032771416189]]},"fm":{"exact":0.2572296263026023,"pts":[[20,0.25436043743910597,-1.1154192869374469],[40,0.259213388985551,0.7712030342162057],[80,0.2572595256982269,0.011623620519274347],[160,0.25669412105134015,-0.20818179420445393],[320,0.25742444095597483,0.07573569816694548]]}},{"name":"Carranza-Torres circle","d2":{"exact":0.09122850428797762,"pts":[[40,0.09175697368807986,0.5792810089640943],[160,0.09181099584802856,0.638497325586096],[640,0.09119765989553043,-0.03381003852680475],[2560,0.09119786100606833,-0.03358959148618279],[10000,0.09122217343370811,-0.006939557234786342]]},"fh":{"exact":0.1232575376556771,"pts":[[20,0.12411098808809844,0.692412365729278],[40,0.12322310368723909,-0.027936602574518687],[80,0.12343350924334047,0.14276740474481464],[160,0.1232251231382615,-0.026298202959518235],[320,0.1232517208228384,-0.004719251211182662]]},"fm":{"exact":0.1216772763770495,"pts":[[20,0.12250325013608797,0.6788233461759718],[40,0.12168450779111405,0.00594310974066925],[80,0.12184796864406992,0.14028278089615043],[160,0.12164285591193137,-0.028288326418046683],[320,0.12167152830013767,-0.004724034826375512]]}},{"name":"D'Esterre 1:3.5 base circle","d2":{"exact":1.0887783610405457,"pts":[[40,1.0869687321236297,-0.1662072816350446],[160,1.0886784669452318,-0.00917487882643453],[640,1.0887724797928247,-0.0005401694166184967],[2560,1.0887779451302906,-3.819971722274218e-05],[10000,1.088778331178581,-2.7427037307958813e-06]]},"fh":{"exact":1.3497367391372934,"pts":[[20,1.3458965058769712,-0.284517206131385],[40,1.350691243327495,0.07071780462992727],[80,1.3519273603086055,0.16229988469544931],[160,1.3501604088372057,0.03138906185387036],[320,1.350012867449158,0.020457938489637506]]},"fm":{"exact":1.3027715093585666,"pts":[[20,1.2993974602104383,-0.2589900933425704],[40,1.3044178650130756,0.12637332354001884],[80,1.304577749388545,0.13864595725368023],[160,1.3033390106271268,0.043561074561693225],[320,1.3030565534308232,0.02187982084418394]]}}],"taylor":[{"beta":90.0,"N":0.261005482258606,"exact":1.4190137585056735,"app":1.419132862202539,"diff":0.008393413816576434,"note":""},{"beta":75.0,"N":0.21908028322834147,"exact":1.6905691599108592,"app":1.6907992474556355,"diff":0.013610064008773293,"note":""},{"beta":60.0,"N":0.1905720806053127,"exact":1.943466058585107,"app":1.943465937,"diff":-6.256096229950714e-06,"note":"Default grid refuses it (centre 0.14 m behind the toe); base-circle option used."}],"random":{"realistic":{"cases":800,"statuses":{"ACCEPTED":334,"REJECTED":6},"input_errors":460,"unexpected_errors":[],"bad_fos":[],"parity_fail":[],"worst_fos_rel":8.619514567238225e-16,"iter_mismatch":0,"recheck_worst":{"geo":4.2120465186577254e-14,"local":1.3179273907664013e-11,"glob":6.650531084868777e-13,"ejc":5.684341886080802e-14,"closure":0,"ordering":0,"sn_match":9.991070470949381e-13,"bishop":5.471772718633024e-13},"recheck_fail":[],"js_seconds":14.092997789382935,"py_seconds":79.19537711143494},"extreme":{"cases":800,"statuses":{"ACCEPTED":310,"REJECTED":56,"NOT CONVERGED":2},"input_errors":432,"unexpected_errors":[],"bad_fos":[],"parity_fail":[],"worst_fos_rel":6.128224522833122e-16,"iter_mismatch":1,"recheck_worst":{"geo":2.5779553708683336e-14,"local":9.479648951291313e-13,"glob":9.270624273546834e-13,"ejc":1.1368683772161603e-13,"closure":0,"ordering":0,"sn_match":2.50938159140901e-12,"bishop":1.0141707300370892e-12},"recheck_fail":[],"js_seconds":66.6223316192627,"py_seconds":156.35444736480713},"local_50_digit":{"states":313,"worst_rel":{"phi":2.620717141136723e-14,"c":3.4057166269832707e-15,"tau":8.372346456124878e-16,"s1":1.023501933885329e-15,"s3":2.6454109756849982e-14,"M":3.3328030189381635e-15},"outcomes":{"1":313,"both_none":136,"engine_only":1},"seconds":133.7799608707428}},"desterre":[{"id":"DE-1.5-c1-ru0","slope":"1:1.5","ru":0,"c":7.2,"phi":30,"slide2":2.61,"slide3":2.96,"sheet3d":3.62,"bishop":2.61126522106368,"oms":2.507675966840773,"oms_ul":2.507675966840773,"app_min":2.606166959984566,"shift":0.10011530555473884,"app3":3.03406620953026},{"id":"DE-1.5-c2-ru0","slope":"1:1.5","ru":0,"c":14.4,"phi":25,"slide2":3.6,"slide3":4.16,"sheet3d":4.64,"bishop":3.5975467037870397,"oms":3.486477765438831,"oms_ul":3.486477765438831,"app_min":3.596268649569721,"shift":0.07870205165484571,"app3":4.380544085571792},{"id":"DE-1.5-c3-ru0","slope":"1:1.5","ru":0,"c":21.6,"phi":20,"slide2":4.51,"slide3":5.25,"sheet3d":5.52,"bishop":4.511047193050505,"oms":4.419257425915561,"oms_ul":4.419257425915561,"app_min":4.505843681051775,"shift":0.1340128373211572,"app3":5.599803866373134},{"id":"DE-1.5-c4-ru0","slope":"1:1.5","ru":0,"c":28.7,"phi":15,"slide2":5.33,"slide3":5.94,"sheet3d":6.11,"bishop":5.324621201304505,"oms":5.204629519668039,"oms_ul":5.204629519668039,"app_min":5.324401751927467,"shift":0.030645169323017127,"app3":6.447841426302322},{"id":"DE-2.5-c1-ru0","slope":"1:2.5","ru":0,"c":7.2,"phi":30,"slide2":3.43,"slide3":3.89,"sheet3d":3.62,"bishop":3.428768928804493,"oms":3.280338713839142,"oms_ul":3.280338713839142,"app_min":3.420225871637215,"shift":0.5213646969002667,"app3":3.916204605520928},{"id":"DE-2.5-c2-ru0","slope":"1:2.5","ru":0,"c":14.4,"phi":25,"slide2":4.41,"slide3":5.04,"sheet3d":4.61,"bishop":4.411459088433885,"oms":4.221996313182755,"oms_ul":4.221996313182755,"app_min":4.399812190545883,"shift":0.42209707548271225,"app3":5.152246658683783},{"id":"DE-2.5-c3-ru0","slope":"1:2.5","ru":0,"c":21.6,"phi":20,"slide2":5.22,"slide3":5.94,"sheet3d":5.4,"bishop":5.214286075044741,"oms":4.9853782117947745,"oms_ul":4.9853782117947745,"app_min":5.214209543483036,"shift":0.02976737593481396,"app3":6.1620717493876125},{"id":"DE-2.5-c4-ru0","slope":"1:2.5","ru":0,"c":28.7,"phi":15,"slide2":5.92,"slide3":6.75,"sheet3d":6.08,"bishop":5.9117969823307845,"oms":5.714460137533111,"oms_ul":5.714460137533111,"app_min":5.9044235421562705,"shift":0.313389616786031,"app3":7.007156404143686},{"id":"DE-3.5-c1-ru0","slope":"1:3.5","ru":0,"c":7.2,"phi":30,"slide2":3.91,"slide3":4.66,"sheet3d":4.2,"bishop":4.231180243146933,"oms":3.903213033588139,"oms_ul":3.903213033588139,"app_min":4.168603270563622,"shift":1.24270212615067,"app3":4.700020793980866},{"id":"DE-3.5-c2-ru0","slope":"1:3.5","ru":0,"c":14.4,"phi":25,"slide2":4.8,"slide3":5.82,"sheet3d":5.14,"bishop":5.185856014530238,"oms":4.77718730200747,"oms_ul":4.77718730200747,"app_min":5.094667741122803,"shift":1.1257797508586593,"app3":5.93947038173306},{"id":"DE-3.5-c3-ru0","slope":"1:3.5","ru":0,"c":21.6,"phi":20,"slide2":5.5,"slide3":6.64,"sheet3d":5.87,"bishop":5.860576333213456,"oms":5.50421727454399,"oms_ul":5.50421727454399,"app_min":5.830989022668976,"shift":0.4895323822755977,"app3":6.8149085757675145},{"id":"DE-3.5-c4-ru0","slope":"1:3.5","ru":0,"c":28.7,"phi":15,"slide2":6.16,"slide3":7.31,"sheet3d":6.45,"bishop":6.433103707110691,"oms":6.131521666551683,"oms_ul":6.131521666551683,"app_min":6.423181177224804,"shift":0.03532576428790135,"app3":7.519059688187527},{"id":"DE-1.5-c1-ru0.5","slope":"1:1.5","ru":0.5,"c":7.2,"phi":30,"slide2":1.79,"slide3":1.99,"sheet3d":2.57,"bishop":1.789209978622974,"oms":1.8752718660545549,"oms_ul":1.6296524408191282,"app_min":1.788674771191897,"shift":0.014198621707448778,"app3":2.166962339288373},{"id":"DE-1.5-c2-ru0.5","slope":"1:1.5","ru":0.5,"c":14.4,"phi":25,"slide2":2.86,"slide3":3.19,"sheet3d":3.77,"bishop":2.857253249154896,"oms":2.9244872062931195,"oms_ul":2.7308886018060368,"app_min":2.851584280606266,"shift":0.27742407342460507,"app3":3.5883408181087635},{"id":"DE-1.5-c3-ru0.5","slope":"1:1.5","ru":0.5,"c":21.6,"phi":20,"slide2":3.86,"slide3":4.23,"sheet3d":4.8,"bishop":3.8526395982635884,"oms":3.865932416231957,"oms_ul":3.6869845322940513,"app_min":3.8516409451747466,"shift":0.08736342905319622,"app3":4.695446542969668},{"id":"DE-1.5-c4-ru0.5","slope":"1:1.5","ru":0.5,"c":28.7,"phi":15,"slide2":4.77,"slide3":5.06,"sheet3d":5.57,"bishop":4.760794029309766,"oms":4.735293586769223,"oms_ul":4.589519164005577,"app_min":4.759075118393888,"shift":0.15139219742451854,"app3":5.70744161373256},{"id":"DE-2.5-c1-ru0.5","slope":"1:2.5","ru":0.5,"c":7.2,"phi":30,"slide2":2.32,"slide3":2.64,"sheet3d":2.78,"bishop":2.321903766258543,"oms":2.304006168364884,"oms_ul":2.0839560142498286,"app_min":2.3199527639679065,"shift":0.22312040916157555,"app3":2.7233242863886784},{"id":"DE-2.5-c2-ru0.5","slope":"1:2.5","ru":0.5,"c":14.4,"phi":25,"slide2":3.37,"slide3":3.77,"sheet3d":4.01,"bishop":3.3645722149564214,"oms":3.2911465041506553,"oms_ul":3.0639310231030743,"app_min":3.364294138501696,"shift":0.07068740079404043,"app3":3.9878763527419663},{"id":"DE-2.5-c3-ru0.5","slope":"1:2.5","ru":0.5,"c":21.6,"phi":20,"slide2":4.3,"slide3":4.81,"sheet3d":4.93,"bishop":4.299644858009459,"oms":4.214661449091676,"oms_ul":4.0225317501518765,"app_min":4.2897186716505304,"shift":0.4329696200168735,"app3":5.1044102071946265},{"id":"DE-2.5-c4-ru0.5","slope":"1:2.5","ru":0.5,"c":28.7,"phi":15,"slide2":5.14,"slide3":5.7,"sheet3d":5.8,"bishop":5.135102110659165,"oms":5.0218742825177,"oms_ul":4.822387020557913,"app_min":5.123326210604528,"shift":0.4638450800507679,"app3":6.153211511648389},{"id":"DE-3.5-c1-ru0.5","slope":"1:3.5","ru":0.5,"c":7.2,"phi":30,"slide2":2.66,"slide3":3.06,"sheet3d":3.47,"bishop":2.767406843448936,"oms":2.6545772832323147,"oms_ul":2.4008597050438842,"app_min":2.760095930114541,"shift":0.14486709916409843,"app3":3.1399474527676943},{"id":"DE-3.5-c2-ru0.5","slope":"1:3.5","ru":0.5,"c":14.4,"phi":25,"slide2":3.64,"slide3":4.21,"sheet3d":4.68,"bishop":3.803523211986962,"oms":3.6196580699155425,"oms_ul":3.326948500122839,"app_min":3.7820342427507443,"shift":0.37346528720853545,"app3":4.410666008390132},{"id":"DE-3.5-c3-ru0.5","slope":"1:3.5","ru":0.5,"c":21.6,"phi":20,"slide2":4.52,"slide3":5.19,"sheet3d":5.52,"bishop":4.673697479046365,"oms":4.498515216777549,"oms_ul":4.2458453007875185,"app_min":4.66499418617082,"shift":0.19682939925409304,"app3":5.461600834720963},{"id":"DE-3.5-c4-ru0.5","slope":"1:3.5","ru":0.5,"c":28.7,"phi":15,"slide2":5.48,"slide3":6.09,"sheet3d":6.21,"bishop":5.446398609348002,"oms":5.302023248484704,"oms_ul":5.102790565820325,"app_min":5.441463631406188,"shift":0.39872525025841044,"app3":6.45667903446274}],"law":[{"id":"Law-1","water":"dry","reported":{"Carranza_2020":2.01,"Law_Excel_HB1997":2.02,"Law_Excel_instantaneous":2.02,"Law_text":"2.018"},"app2_40":2.003873410889918,"app2_640":2.0027242755123975,"app3_20":2.1419373949952405,"app3_80":2.141129474804846},{"id":"Law-2","water":"dry","reported":{"Carranza_2020_at_a0.5":2.01,"Law_Excel_HB1997":2.02,"Law_Excel_instantaneous":1.97,"Slide2_critical":1.99},"app2_40":1.9523711145734715,"app2_640":1.9512604756793395,"app3_20":2.0846626587732735,"app3_80":2.08389203881732},{"id":"Law-3","water":"dry","reported":{"Law_Excel_HB1997":2.02,"Law_Excel_instantaneous":1.96,"Slide2":1.99},"app2_40":1.9529914210551769,"app2_640":1.952816315812676,"app3_20":2.0858762842087675,"app3_80":2.0831462942949814},{"id":"Law-4","water":"wet","reported":{"Law_Excel_HB1997":1.06,"Law_Excel_instantaneous":1.05,"Slide2":1.11},"app2_40":0.9504688664208697,"app2_640":0.9510735301223724,"app3_20":1.0011800946955154,"app3_80":1.0010888638874866}],"ct":{"published":2.01,"app2_40":2.003873410889918,"app2_640":2.0027242755123975,"app2_5120":2.0027623900775606},"crit":[{"model":"EJC","water":"dry","dim":2,"main":2.447910895514997,"crit":2.1212321903385516,"fine":2.125435166039018,"circle":[210.82148600051337,586.1718257966453,621.7140416661508],"diff":-13.345204099339492},{"model":"EJC","water":"dry","dim":3,"main":2.706024342431667,"crit":2.2634928273109396,"fine":2.2660695064895178,"circle":[195.30595667479275,591.1494097236694,622.3547086640237],"diff":-16.35356741554893},{"model":"EJC","water":"wet","dim":2,"main":1.0980694965345024,"crit":0.9942560221767648,"fine":1.0029056611149278,"circle":[328.2813618276342,634.2118428658154,712.718392131253],"diff":-9.454180694880609},{"model":"EJC","water":"wet","dim":3,"main":1.2723314051856023,"crit":1.082117256352139,"fine":1.0884322854220212,"circle":[304.24439439025525,641.1532319027972,708.8485900348851],"diff":-14.950047452905213},{"model":"GHB","water":"dry","dim":2,"main":2.3102550278328824,"crit":2.0025443615916756,"fine":2.0065092262551443,"circle":[210.82148600051337,586.1718257966453,621.7140416661508],"diff":-13.319337585420277},{"model":"GHB","water":"dry","dim":3,"main":2.553668420403125,"crit":2.1367586252027095,"fine":2.139178513648302,"circle":[195.2340628359969,591.1786502084115,622.3560869495514],"diff":-16.325917330120777},{"model":"GHB","water":"wet","dim":2,"main":1.0358708327248627,"crit":0.9373044224107041,"fine":0.9458504111613766,"circle":[323.33009954529655,631.0989493198631,707.7330265998427],"diff":-9.51531862856677},{"model":"GHB","water":"wet","dim":3,"main":1.2001218450498823,"crit":1.0223732077847179,"fine":1.030539114309796,"circle":[319.86474050871607,669.1784523942276,740.9904921714357],"diff":-14.810882578158257}],"ratios":{"EJC_dry":1.06706509434485,"EJC_wet":1.0883688227334205,"GHB_dry":1.0670218678723087,"GHB_wet":1.0907589715145276},"sweeps":[{"key":"gsi","name":"GSI","unit":"","bench":42,"mono":true,"pts":[{"x":20,"f3":1.5983395009648753,"f2":1.5032909740356915,"t3":0.039473684210526314,"t2":0.03333333333333333},{"x":30,"f3":2.0052134129393338,"f2":1.8635849707551426,"t3":0.05263157894736842,"t2":0.03333333333333333},{"x":42,"f3":2.623905702100769,"f2":2.3757333974770436,"t3":0.07894736842105263,"t2":0.03333333333333333},{"x":55,"f3":3.83712296830699,"f2":3.310153903063784,"t3":0.13157894736842105,"t2":0.06666666666666667},{"x":70,"f3":7.218623085057858,"f2":5.8199707747568725,"t3":0.19736842105263158,"t2":0.13333333333333333},{"x":85,"f3":16.305095990018437,"f2":12.540359298032817,"t3":0.25,"t2":0.13333333333333333}]},{"key":"sigma_ci","name":"σ<sub>ci<\/sub>","unit":"MPa","bench":77.7,"mono":true,"pts":[{"x":10,"f3":1.2596846073470678,"f2":1.1792363350078479,"t3":0.02631578947368421,"t2":0.03333333333333333},{"x":25,"f3":1.7051108072553984,"f2":1.5862100110646236,"t3":0.05263157894736842,"t2":0.03333333333333333},{"x":50,"f3":2.191479967037168,"f2":2.011768658033899,"t3":0.05263157894736842,"t2":0.03333333333333333},{"x":77.7,"f3":2.623905702100769,"f2":2.3757333974770436,"t3":0.07894736842105263,"t2":0.03333333333333333},{"x":120,"f3":3.2067603678613446,"f2":2.8508999118724216,"t3":0.10526315789473684,"t2":0.06666666666666667},{"x":200,"f3":4.213102011505654,"f2":3.6458633312132105,"t3":0.13157894736842105,"t2":0.06666666666666667}]},{"key":"mi","name":"m<sub>i<\/sub>","unit":"","bench":10,"mono":true,"pts":[{"x":4,"f3":2.511374372970495,"f2":2.168788537305346,"t3":0.13157894736842105,"t2":0.06666666666666667},{"x":7,"f3":2.543900718675805,"f2":2.2665175050393933,"t3":0.09210526315789473,"t2":0.06666666666666667},{"x":10,"f3":2.623905702100769,"f2":2.3757333974770436,"t3":0.07894736842105263,"t2":0.03333333333333333},{"x":17,"f3":2.821789120408085,"f2":2.6019328744709473,"t3":0.05263157894736842,"t2":0.03333333333333333},{"x":25,"f3":3.0210249976033783,"f2":2.8122036362575304,"t3":0.05263157894736842,"t2":0.03333333333333333},{"x":32,"f3":3.17194576374104,"f2":2.966634736246029,"t3":0.05263157894736842,"t2":0.03333333333333333}]},{"key":"D","name":"D","unit":"","bench":0,"mono":true,"pts":[{"x":0,"f3":2.623905702100769,"f2":2.3757333974770436,"t3":0.07894736842105263,"t2":0.03333333333333333},{"x":0.3,"f3":2.2520645550026344,"f2":2.0621717457721025,"t3":0.06578947368421052,"t2":0.03333333333333333},{"x":0.5,"f3":1.9976129754042797,"f2":1.8402631275089971,"t3":0.05263157894736842,"t2":0.03333333333333333},{"x":0.7,"f3":1.7280548387039567,"f2":1.5988307087742688,"t3":0.05263157894736842,"t2":0.03333333333333333},{"x":0.85,"f3":1.5087773568853189,"f2":1.398243751134004,"t3":0.05263157894736842,"t2":0.03333333333333333},{"x":1,"f3":1.26753314989316,"f2":1.174111225949786,"t3":0.05263157894736842,"t2":0.03333333333333333}]},{"key":"gamma","name":"γ","unit":"kN/m³","bench":27,"mono":true,"pts":[{"x":22,"f3":2.8746949198324363,"f2":2.5819981780973746,"t3":0.09210526315789473,"t2":0.06666666666666667},{"x":24,"f3":2.7635023889421038,"f2":2.490923538496487,"t3":0.09210526315789473,"t2":0.03333333333333333},{"x":26,"f3":2.6673450862282624,"f2":2.411684931188713,"t3":0.09210526315789473,"t2":0.03333333333333333},{"x":27,"f3":2.623905702100769,"f2":2.3757333974770436,"t3":0.07894736842105263,"t2":0.03333333333333333},{"x":28,"f3":2.5831383444608975,"f2":2.3419013475381774,"t3":0.07894736842105263,"t2":0.03333333333333333},{"x":30,"f3":2.5086044101521905,"f2":2.2798075675601046,"t3":0.07894736842105263,"t2":0.03333333333333333}]},{"key":"Hw","name":"H<sub>w<\/sub>","unit":"m","bench":360,"mono":true,"pts":[{"x":0,"f3":2.623905702100769,"f2":2.3757333974770436,"t3":0.07894736842105263,"t2":0.03333333333333333},{"x":72,"f3":2.5710053656521,"f2":2.291459464208766,"t3":0.09210526315789473,"t2":0.03333333333333333},{"x":144,"f3":2.2710186394064653,"f2":1.9973107067295108,"t3":0.09210526315789473,"t2":0.1},{"x":216,"f3":1.8234158677001453,"f2":1.621323063039813,"t3":0.15789473684210525,"t2":0.1},{"x":288,"f3":1.4116817970028006,"f2":1.2690564644780717,"t3":0.2631578947368421,"t2":0.1},{"x":360,"f3":1.2283284566414843,"f2":1.0606956189918606,"t3":0.3026315789473684,"t2":0.2}]},{"key":"ru","name":"r<sub>u<\/sub>","unit":"","bench":0,"mono":true,"pts":[{"x":0,"f3":2.623905702100769,"f2":2.3757333974770436,"t3":0.07894736842105263,"t2":0.03333333333333333},{"x":0.1,"f3":2.27111376335684,"f2":2.044753363263438,"t3":0.10526315789473684,"t2":0.06666666666666667},{"x":0.2,"f3":1.898451425705954,"f2":1.6943275935235385,"t3":0.14473684210526316,"t2":0.06666666666666667},{"x":0.3,"f3":1.4995421387191132,"f2":1.3178897444038418,"t3":0.21052631578947367,"t2":0.13333333333333333},{"x":0.4,"f3":1.0623607685561984,"f2":0.9024923153739651,"t3":0.35526315789473684,"t2":0.23333333333333334},{"x":0.5,"f3":0.5555582457265641,"f2":0.4102650270453617,"t3":0.8157894736842105,"t2":1}]},{"key":"scale","name":"H","unit":"m","bench":360,"mono":true,"pts":[{"x":100,"f3":5.167467704815382,"f2":4.383276308526285,"t3":0.14473684210526316,"t2":0.1},{"x":200,"f3":3.464401177132342,"f2":3.0568699343176524,"t3":0.10526315789473684,"t2":0.06666666666666667},{"x":300,"f3":2.8452782098146385,"f2":2.557958969207575,"t3":0.09210526315789473,"t2":0.06666666666666667},{"x":360,"f3":2.623905702100769,"f2":2.3757333974770436,"t3":0.07894736842105263,"t2":0.03333333333333333},{"x":450,"f3":2.389237677975982,"f2":2.179680635631564,"t3":0.06578947368421052,"t2":0.03333333333333333},{"x":600,"f3":2.133399426190939,"f2":1.9619321817774316,"t3":0.05263157894736842,"t2":0.03333333333333333}]}],"metamorphic":{"scale ejc_moscarda dry 3D":{"values":[2.7060243424316672,2.706024342431667,2.706024342431666],"rel_spread":4.923339412213105e-16},"scale ejc_moscarda dry 2D":{"values":[2.447910895514996,2.447910895514997,2.4479108955149966],"rel_spread":3.6283118855650514e-16},"scale ghb dry 3D":{"values":[2.553668420403125,2.553668420403125,2.553668420403125],"rel_spread":0.0},"scale ghb dry 2D":{"values":[2.310255027832881,2.3102550278328824,2.3102550278328824],"rel_spread":5.766755676319907e-16},"scale ejc_moscarda wet 3D":{"values":[1.2723314051856018,1.2723314051856023,1.2723314051856018],"rel_spread":3.4903579998112267e-16},"scale ejc_moscarda wet 2D":{"values":[1.0980694965345013,1.0980694965345024,1.0980694965345017],"rel_spread":1.0110680864271439e-15},"scale ghb wet 3D":{"values":[1.2001218450498827,1.2001218450498823,1.2001218450498827],"rel_spread":3.700367689179129e-16},"scale ghb wet 2D":{"values":[1.0358708327248616,1.0358708327248627,1.0358708327248625],"rel_spread":1.0717774741322817e-15},"phi0 water 3D":{"values":[0.38303180062169995,0.38303180062169995,0.38303180062169995],"rel_spread":0.0},"phi0 water 2D":{"values":[0.28539569872350745,0.28539569872350745,0.28539569872350745],"rel_spread":0.0},"phi0 linear in c":{"values":[0.1276772668739,0.2553545337478,1.0214181349912],"ratios":[2.0,4.0]}}}</script>
+<script>
+(function () {
+  "use strict";
+  const D = JSON.parse(document.getElementById("data").textContent);
+  const $ = (s) => document.querySelector(s);
+  const NS = "http://www.w3.org/2000/svg";
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+  const neg = (s) => String(s).replace(/-/g, "−");
+  const fx = (v, d) => neg(v.toFixed(d));
+  const signed = (v, d) => (v > 0 ? "+" : "") + fx(v, d);
+  const pc = (v, d = 1) => signed(Math.abs(v) < 0.5 * 10 ** -d ? 0 : v, d) + "%";
+  const err = (e) => (e > 0 ? "+" : e < 0 ? "−" : "") + Math.abs(e).toPrecision(2) + "%";
+  const sci = (v) => { const e = Math.floor(Math.log10(v)), m = v / 10 ** e; return `${m.toFixed(1)} × 10<sup>${neg(String(e))}</sup>`; };
+  const SUP = { "-": "⁻", 0: "⁰", 1: "¹", 2: "²", 3: "³", 4: "⁴", 5: "⁵", 6: "⁶", 7: "⁷", 8: "⁸", 9: "⁹" };
+  const supText = (n) => String(n).split("").map((c) => SUP[c]).join("");
+  const nf = (n) => n.toLocaleString("en-GB");
+
+  function el(tag, attrs, parent) {
+    const e = document.createElementNS(NS, tag);
+    if (attrs) for (const k in attrs) e.setAttribute(k, attrs[k]);
+    if (parent) parent.appendChild(e);
+    return e;
+  }
+  function text(parent, x, y, s, cls, anchor) {
+    const t = el("text", { x: x, y: y, dy: "0.34em", class: cls || "", "text-anchor": anchor || "start" }, parent);
+    t.textContent = s;
+    return t;
+  }
+  const lin = (d0, d1, r0, r1) => (v) => r0 + ((v - d0) / (d1 - d0)) * (r1 - r0);
+  const logs = (d0, d1, r0, r1) => { const a = Math.log10(d0), b = Math.log10(d1); return (v) => r0 + ((Math.log10(v) - a) / (b - a)) * (r1 - r0); };
+  function niceTicks(lo, hi, n) {
+    const step0 = (hi - lo) / n, mag = 10 ** Math.floor(Math.log10(step0)), r = step0 / mag;
+    const step = (r >= 7.5 ? 10 : r >= 3.5 ? 5 : r >= 1.5 ? 2 : 1) * mag;
+    const out = [];
+    for (let v = Math.ceil(lo / step - 1e-9) * step; v <= hi + step * 1e-9; v += step) out.push(+v.toFixed(10));
+    return out;
+  }
+  const svgOf = (parent, w, h, label) => el("svg", { viewBox: `0 0 ${w} ${h}`, width: w, height: h, class: "chart", role: "img", "aria-label": label }, parent);
+  const diamond = (parent, cx, cy, r, cls) => el("path", { d: `M${cx} ${cy - r}L${cx + r} ${cy}L${cx} ${cy + r}L${cx - r} ${cy}Z`, class: cls }, parent);
+
+  // tooltip ----------------------------------------------------------------------------------------------------
+  const tip = $("#tip");
+  function showTip(html, x, y) {
+    tip.innerHTML = html;
+    tip.hidden = false;
+    const r = tip.getBoundingClientRect();
+    let l = x + 14, t = y + 14;
+    if (l + r.width > innerWidth - 8) l = x - r.width - 14;
+    if (t + r.height > innerHeight - 8) t = y - r.height - 14;
+    tip.style.left = Math.max(8, l) + "px";
+    tip.style.top = Math.max(8, t) + "px";
+  }
+  const hideTip = () => { tip.hidden = true; };
+  const tipRow = (cls, label, value) => `<div class="tr"><i class="sw ${cls}"></i><span>${label}</span><b>${value}</b></div>`;
+  function hover(target, html) {
+    const on = (ev) => showTip(html(), ev.clientX, ev.clientY);
+    target.addEventListener("pointerenter", on);
+    target.addEventListener("pointermove", on);
+    target.addEventListener("pointerdown", on);
+    target.addEventListener("pointerleave", (ev) => { if (ev.pointerType !== "touch") hideTip(); });
+  }
+  // touch: a tap shows the values and they stay until the next tap elsewhere or a scroll
+  document.addEventListener("pointerdown", (ev) => { if (!(ev.target instanceof Element && ev.target.closest(".hit, .hot"))) hideTip(); });
+  addEventListener("scroll", hideTip, { passive: true });
+  const leave = (cross) => (ev) => { if (ev.pointerType === "touch") return; cross.setAttribute("visibility", "hidden"); hideTip(); };
+
+  // thesis table -----------------------------------------------------------------------------------------------
+  let onlyDiff = true;
+  function chipFor(r) {
+    if (r.match) return `<span class="chip ok"><span class="g" aria-hidden="true">✓</span>Match</span>`;
+    const cls = r.kind === "Software bug" ? "warn" : r.kind === "New result" ? "info" : "";
+    const g = r.kind === "Software bug" ? "!" : r.kind === "New result" ? "i" : "○";
+    return `<span class="chip ${cls}"><span class="g" aria-hidden="true">${g}</span>${esc(r.kind)}</span>`;
+  }
+  function renderThesis() {
+    const q = $("#thesis-q").value.trim().toLowerCase();
+    const plain = (s) => s.replace(/<[^>]+>/g, "").toLowerCase();
+    const list = D.rows.filter((r) => (!onlyDiff || !r.match) &&
+      (!q || `${r.where} ${plain(r.item)} ${r.kind} ${r.thesis} ${r.app}`.toLowerCase().includes(q)));
+    $("#thesis-rows").innerHTML = list.length ? list.map((r) => `<tr class="${r.match ? "" : "flag"}"><td class="ref">${esc(r.where)}</td>` +
+      `<td>${r.item}</td><td class="num">${esc(r.thesis)}</td><td class="num">${esc(r.app)}</td>` +
+      `<td>${chipFor(r)}</td><td class="note">${r.note}</td></tr>`).join("")
+      : `<tr><td colspan="6" class="note">No values match this filter.</td></tr>`;
+    $("#thesis-count").textContent = `Showing ${list.length} of ${D.rows.length} values`;
+  }
+  $("#show-diff").textContent = `Not matching (${D.rows.filter((r) => !r.match).length})`;
+  $("#show-all").textContent = `All ${D.rows.length}`;
+  $("#show-diff").addEventListener("click", () => { onlyDiff = true; $("#show-diff").setAttribute("aria-pressed", "true"); $("#show-all").setAttribute("aria-pressed", "false"); renderThesis(); });
+  $("#show-all").addEventListener("click", () => { onlyDiff = false; $("#show-all").setAttribute("aria-pressed", "true"); $("#show-diff").setAttribute("aria-pressed", "false"); renderThesis(); });
+  $("#thesis-q").addEventListener("input", renderThesis);
+
+  // static tables ----------------------------------------------------------------------------------------------
+  function renderTables() {
+    const forms = [["d2", "2D Bishop"], ["fh", "3D F<sub>H</sub>"], ["fm", "3D F<sub>M</sub>"]];
+    let h = "";
+    for (const c of D.exact) for (const [k, name] of forms) for (const [n, v, e] of c[k].pts)
+      h += `<tr><td>${esc(c.name)}</td><td>${name}</td><td class="num">${k === "d2" ? nf(n) : n + " × " + n}</td><td class="num">${v.toFixed(7)}</td><td class="num">${c[k].exact.toFixed(7)}</td><td class="num">${err(e)}</td></tr>`;
+    $("#exact-rows").innerHTML = h;
+
+    const chartN = { 90: "0.261", 75: "0.219", 60: "0.191" };
+    $("#taylor-rows").innerHTML = D.taylor.map((t) => `<tr><td>${t.beta}°</td><td class="num">${chartN[t.beta] || "–"}</td><td class="num">${t.N.toFixed(4)}</td>` +
+      `<td class="num">${t.exact.toFixed(6)}</td><td class="num">${t.app.toFixed(6)}</td><td class="num">${err(t.diff)}</td><td class="note">${esc(t.note)}</td></tr>`).join("");
+
+    $("#random-rows").innerHTML = [["Realistic", D.random.realistic], ["Extreme", D.random.extreme]].map(([name, s]) => {
+      const st = s.statuses, acc = st.ACCEPTED || 0, wh = (st.REJECTED || 0) + (st["NOT CONVERGED"] || 0);
+      return `<tr><td>${name}</td><td class="num">${nf(s.cases)}</td><td class="num">${acc}</td><td class="num">${wh}</td><td class="num">${s.input_errors}</td>` +
+        `<td class="num">${sci(s.worst_fos_rel)}</td><td class="num">${s.recheck_fail.length}</td><td class="num">${sci(s.recheck_worst.local)}</td><td class="num">${sci(s.recheck_worst.ejc)} MPa</td></tr>`;
+    }).join("");
+
+    let dh = "", grp = "";
+    for (const r of D.desterre) {
+      const g = `Slope ${r.slope}, r<sub>u</sub> = ${r.ru}`;
+      if (g !== grp) { dh += `<tr class="group"><td colspan="11">${g}</td></tr>`; grp = g; }
+      const d = (v) => pc((v / r.slide2 - 1) * 100);
+      dh += `<tr class="${Math.abs(r.bishop / r.slide2 - 1) > 0.005 ? "flag" : ""}"><td>c′ ${r.c} kPa, φ′ ${r.phi}°</td><td class="num">${r.slide2.toFixed(2)}</td>` +
+        `<td class="num">${r.bishop.toFixed(3)}</td><td class="num">${d(r.bishop)}</td><td class="num">${r.oms.toFixed(3)}</td><td class="num">${d(r.oms)}</td>` +
+        `<td class="num">${r.app_min.toFixed(3)}</td><td class="num">${d(r.app_min)}</td><td class="num">${r.slide3.toFixed(2)}</td><td class="num">${r.app3.toFixed(3)}</td>` +
+        `<td class="num">${pc((r.app3 / r.slide3 - 1) * 100)}</td></tr>`;
+    }
+    $("#desterre-rows").innerHTML = dh;
+    const d3 = D.desterre.map((r) => (r.app3 / r.slide3 - 1) * 100), dsh = D.desterre.map((r) => (r.app3 / r.sheet3d - 1) * 100);
+    $("#b3-slide3").textContent = `${fx(Math.min(...d3), 1)}% to ${fx(Math.max(...d3), 1)}%`;
+    $("#b3-sheet").textContent = `${signed(Math.round(Math.min(...dsh)), 0)}% to ${signed(Math.round(Math.max(...dsh)), 0)}%`;
+
+    const lawDesc = { "Law-1": "Published circle; dry, a = 0.5", "Law-2": "Published circle; dry, a = 0.509923",
+      "Law-3": "Slide2 dry critical circle; a = 0.509923", "Law-4": "Slide2 saturated critical circle; water table on the surface, a = 0.509923" };
+    $("#law-rows").innerHTML = D.law.map((r) => {
+      const rep = r.reported, s2 = rep.Slide2 !== undefined ? rep.Slide2.toFixed(2) : rep.Slide2_critical !== undefined ? rep.Slide2_critical.toFixed(2) + "*" : "–";
+      const rel = (v) => (v === undefined ? "" : ` <span class="muted">(${pc((r.app2_640 / v - 1) * 100)})</span>`);
+      return `<tr class="${r.id === "Law-4" ? "flag" : ""}"><td>${r.id}</td><td>${lawDesc[r.id]}</td><td class="num">${r.app2_640.toFixed(4)}</td>` +
+        `<td class="num">${s2}${rel(rep.Slide2)}</td><td class="num">${rep.Law_Excel_instantaneous.toFixed(2)}${rel(rep.Law_Excel_instantaneous)}</td>` +
+        `<td class="num">${rep.Law_Excel_HB1997.toFixed(2)}</td><td class="num">${r.app3_80.toFixed(4)}</td></tr>`;
+    }).join("");
+    $("#ct-vals").textContent = `${D.ct.app2_40.toFixed(4)} with 40 slices, ${D.ct.app2_640.toFixed(4)} with 640 and ${D.ct.app2_5120.toFixed(4)} with 5,120`;
+
+    $("#crit-rows").innerHTML = D.crit.map((r) => `<tr><td>${r.model}</td><td>${r.water === "dry" ? "Dry" : "Wet"}</td><td>${r.dim === 2 ? "2D Bishop" : "3D Hungr"}</td>` +
+      `<td class="num">${r.main.toFixed(4)}</td><td class="num">${r.crit.toFixed(4)}</td><td class="num">${pc(r.diff)}</td><td class="num">${r.fine.toFixed(4)}</td>` +
+      `<td class="num">${r.circle.map((v) => v.toFixed(1)).join(", ")}</td></tr>`).join("");
+    const rt = D.ratios;
+    $("#crit-ratio").innerHTML = `3D/2D ratio of the minima: EJC ${rt.EJC_dry.toFixed(3)} dry and ${rt.EJC_wet.toFixed(3)} wet; GHB ${rt.GHB_dry.toFixed(3)} dry and ${rt.GHB_wet.toFixed(3)} wet. On the main sphere the EJC ratios are 1.105 and 1.159 (Table 5.3). Fine mesh: 640 slices in 2D, 80×80 in 3D, on the same critical surface.`;
+
+    $("#sweep-rows").innerHTML = D.sweeps.map((s) => s.pts.map((p, k) => `<tr><td>${k === 0 ? s.name + (s.unit ? ` (${s.unit})` : "") : ""}</td><td class="num">${nf(p.x)}</td>` +
+      `<td class="num">${p.f3.toFixed(3)}</td><td class="num">${p.f2.toFixed(3)}</td><td class="num">${(p.f3 / p.f2).toFixed(3)}</td>` +
+      `<td class="num">${Math.round(p.t3 * 100)}%</td><td class="num">${Math.round(p.t2 * 100)}%</td></tr>`).join("")).join("");
+  }
+
+  // chart: convergence to the exact solution ---------------------------------------------------------------------
+  const SER = ["s1", "s2", "s3"], SHORT = ["Main sphere", "C-T circle", "D'Esterre"];
+  function chartExact(host) {
+    host.textContent = "";
+    const W = host.clientWidth;
+    if (!W) return;
+    const two = W >= 700, pw = two ? Math.floor((W - 22) / 2) : W;
+    const panels = [
+      { key: "d2", title: "2D Bishop", unit: "slices", ticks: [40, 160, 640, 2560, 10000], fmt: nf },
+      { key: "fh", title: "3D Hungr F<sub>H</sub>", unit: "columns, N × N", ticks: [20, 40, 80, 160, 320], fmt: (n) => String(n) },
+    ];
+    for (const p of panels) {
+      const fig = document.createElement("div");
+      fig.className = "panel";
+      fig.innerHTML = `<p class="panel-title">${p.title} <span>· |error| against exact, %</span></p>`;
+      host.appendChild(fig);
+      const H = 250, m = { l: 44, r: 92, t: 10, b: 40 };
+      const svg = svgOf(fig, pw, H, `${p.title.replace(/<[^>]+>/g, "")}: error against the exact solution by mesh size`);
+      const x = logs(p.ticks[0] / 1.35, p.ticks[p.ticks.length - 1] * 1.35, m.l, pw - m.r);
+      const y = logs(1e-6, 4, H - m.b, m.t);
+      for (let e = -6; e <= 0; e++) {
+        const yy = y(10 ** e);
+        el("line", { x1: m.l, x2: pw - m.r, y1: yy, y2: yy, class: "grid" }, svg);
+        text(svg, m.l - 7, yy, e === 0 ? "1" : "10" + supText(e), "tick", "end");
+      }
+      el("line", { x1: m.l, x2: pw - m.r, y1: H - m.b, y2: H - m.b, class: "axis" }, svg);
+      for (const t of p.ticks) {
+        el("line", { x1: x(t), x2: x(t), y1: H - m.b, y2: H - m.b + 4, class: "axis" }, svg);
+        text(svg, x(t), H - m.b + 15, p.fmt(t), "tick", "middle");
+      }
+      text(svg, (m.l + pw - m.r) / 2, H - 7, p.unit, "lab", "middle");
+      const ends = [];
+      D.exact.forEach((c, i) => {
+        const pts = c[p.key].pts.map(([n, v, e]) => ({ X: x(n), Y: y(Math.max(Math.abs(e), 1e-6)) }));
+        el("path", { d: pts.map((q, k) => (k ? "L" : "M") + q.X.toFixed(1) + " " + q.Y.toFixed(1)).join(""), class: "line " + SER[i] }, svg);
+        for (const q of pts) el("circle", { cx: q.X, cy: q.Y, r: 4, class: "dot " + SER[i] }, svg);
+        ends.push({ i: i, X: pts[pts.length - 1].X, Y: pts[pts.length - 1].Y });
+      });
+      ends.sort((a, b) => a.Y - b.Y);
+      for (let k = 1; k < ends.length; k++) if (ends[k].Y - ends[k - 1].Y < 14) ends[k].Y = ends[k - 1].Y + 14;
+      for (const e of ends) text(svg, e.X + 9, Math.min(e.Y, H - m.b - 4), SHORT[e.i], "dlabel");
+      const cross = el("line", { y1: m.t, y2: H - m.b, class: "cross", visibility: "hidden" }, svg);
+      const hit = el("rect", { x: m.l, y: m.t, width: pw - m.l - m.r, height: H - m.t - m.b, class: "hit" }, svg);
+      const move = (ev) => {
+        const r = svg.getBoundingClientRect(), px = (ev.clientX - r.left) * (pw / r.width);
+        let best = 0;
+        p.ticks.forEach((t, k) => { if (Math.abs(x(t) - px) < Math.abs(x(p.ticks[best]) - px)) best = k; });
+        const n = p.ticks[best];
+        cross.setAttribute("x1", x(n)); cross.setAttribute("x2", x(n)); cross.setAttribute("visibility", "visible");
+        const rows = D.exact.map((c, i) => { const q = c[p.key].pts.find((z) => z[0] === n); return tipRow(SER[i], esc(c.name), err(q[2])); }).join("");
+        showTip(`<div class="th">${p.key === "d2" ? nf(n) + " slices" : n + " × " + n + " columns"}</div>${rows}`, ev.clientX, ev.clientY);
+      };
+      hit.addEventListener("pointermove", move);
+      hit.addEventListener("pointerdown", move);
+      hit.addEventListener("pointerleave", leave(cross));
+    }
+  }
+
+  // chart: D'Esterre against Slide2 -----------------------------------------------------------------------------
+  function chartDesterre(host) {
+    host.textContent = "";
+    const W = host.clientWidth;
+    if (!W) return;
+    const slopes = [["1:1.5", "33.7°"], ["1:2.5", "21.8°"], ["1:3.5", "15.9°"]];
+    const order = [0, 0.5].flatMap((ru) => [7.2, 14.4, 21.6, 28.7].map((c) => ({ ru: ru, c: c })));
+    const wide = W >= 720, rowH = 25, grpH = 24, top = 30, bot = 30;
+    const H = top + 2 * grpH + 8 * rowH + bot;
+    const yOf = (k) => top + (k < 4 ? grpH : 2 * grpH) + k * rowH + rowH / 2;
+    const xd = [-6, 9];
+    function labels(svg) {
+      [0, 1].forEach((g) => {
+        const t = text(svg, 0, top + g * (grpH + 4 * rowH) + grpH / 2 + 2, "", "grp2");
+        t.appendChild(document.createTextNode(g ? "Wet, r" : "Dry, r"));
+        const s = el("tspan", { "baseline-shift": "sub", "font-size": "9" }, t); s.textContent = "u";
+        const s2 = el("tspan", { "baseline-shift": "0" }, t); s2.textContent = g ? " = 0.5" : " = 0";
+      });
+      order.forEach((o, k) => {
+        const phi = { 7.2: 30, 14.4: 25, 21.6: 20, 28.7: 15 }[o.c];
+        text(svg, 0, yOf(k), `c′ ${o.c} kPa, φ′ ${phi}°`, "lab");
+      });
+    }
+    function panel(svg, x0, x1, si) {
+      const x = lin(xd[0], xd[1], x0, x1);
+      const [slope, ang] = slopes[si];
+      const head = text(svg, x0, 10, `Slope ${slope}`, "lab-strong");
+      const a = el("tspan", { class: "lab" }, head); a.textContent = `  ${ang}`;
+      el("rect", { x: x(-0.5), y: top, width: x(0.5) - x(-0.5), height: H - top - bot, class: "band" }, svg);
+      for (const t of [-5, 0, 5]) {
+        el("line", { x1: x(t), x2: x(t), y1: top, y2: H - bot, class: t === 0 ? "zero" : "grid" }, svg);
+        text(svg, x(t), H - bot + 14, t === 0 ? "0" : signed(t, 0) + "%", "tick", "middle");
+      }
+      const rows = D.desterre.filter((r) => r.slope === slope);
+      order.forEach((o, k) => {
+        const r = rows.find((q) => q.ru === o.ru && q.c === o.c);
+        const yy = yOf(k), b = (r.bishop / r.slide2 - 1) * 100, om = (r.oms / r.slide2 - 1) * 100;
+        el("line", { x1: x(b), x2: x(om), y1: yy, y2: yy, class: "conn" }, svg);
+        diamond(svg, x(om), yy, 5.5, "dot s2");
+        el("circle", { cx: x(b), cy: yy, r: 5, class: "dot s1" }, svg);
+        const hot = el("rect", { x: x0, y: yy - rowH / 2, width: x1 - x0, height: rowH, class: "hot" }, svg);
+        hover(hot, () => `<div class="th">Slope ${slope}, c′ ${r.c} kPa, φ′ ${r.phi}°, r<sub>u</sub> ${r.ru}</div>` +
+          tipRow("", "Slide2", r.slide2.toFixed(2)) + tipRow("dot s1", "Bishop, the app", `${r.bishop.toFixed(3)} (${pc(b)})`) +
+          tipRow("dia s2", "Ordinary method", `${r.oms.toFixed(3)} (${pc(om)})`));
+      });
+    }
+    if (wide) {
+      const LW = 138, gap = 18, pw = (W - LW - 2 * gap) / 3;
+      const svg = svgOf(host, W, H, "Difference from Slide2 for the 24 D'Esterre circles, by slope");
+      labels(svg);
+      for (let s = 0; s < 3; s++) panel(svg, LW + s * (pw + gap), LW + s * (pw + gap) + pw, s);
+    } else {
+      const wrap = document.createElement("div");
+      wrap.className = "panels";
+      host.appendChild(wrap);
+      for (let s = 0; s < 3; s++) {
+        const svg = svgOf(wrap, W, H, `Difference from Slide2, slope ${slopes[s][0]}`);
+        labels(svg);
+        panel(svg, 132, W - 6, s);
+      }
+    }
+  }
+
+  // chart: prescribed sphere against the critical surface ------------------------------------------------------
+  function chartCrit(host) {
+    host.textContent = "";
+    const W = host.clientWidth;
+    if (!W) return;
+    const LW = W >= 560 ? 150 : 112, rowH = 28, grpH = 24, top = 22, bot = 30;
+    const groups = ["EJC", "GHB"];
+    const H = top + 2 * grpH + 8 * rowH + bot;
+    const svg = svgOf(host, W, H, "Factor of safety on the prescribed sphere and on the critical surface");
+    const x = lin(0.8, 2.9, LW + 8, W - 40);
+    for (const t of [1, 1.5, 2, 2.5]) {
+      el("line", { x1: x(t), x2: x(t), y1: top, y2: H - bot, class: t === 1 ? "ref" : "grid" }, svg);
+      text(svg, x(t), H - bot + 14, t.toFixed(1), "tick", "middle");
+    }
+    text(svg, x(1) + 5, top - 10, "FoS = 1", "lab");
+    let k = 0;
+    groups.forEach((g, gi) => {
+      text(svg, 0, top + gi * (grpH + 4 * rowH) + grpH / 2, g === "EJC" ? "EJC, Moscarda closure" : "GHB", "grp");
+      for (const r of D.crit.filter((q) => q.model === g)) {
+        const yy = top + (gi + 1) * grpH + k * rowH + rowH / 2;
+        text(svg, 0, yy, `${r.water === "dry" ? "Dry" : "Wet"} · ${r.dim === 2 ? "2D Bishop" : "3D Hungr"}`, "lab");
+        el("line", { x1: x(r.crit), x2: x(r.main), y1: yy, y2: yy, class: "conn" }, svg);
+        el("circle", { cx: x(r.main), cy: yy, r: 5, class: "dot s1" }, svg);
+        diamond(svg, x(r.crit), yy, 5.5, "dot s2");
+        text(svg, x(r.crit) - 9, yy, r.crit.toFixed(2), "val", "end");
+        text(svg, x(r.main) + 9, yy, r.main.toFixed(2), "val");
+        const hot = el("rect", { x: LW, y: yy - rowH / 2, width: W - LW, height: rowH, class: "hot" }, svg);
+        hover(hot, () => `<div class="th">${g}, ${r.water}, ${r.dim === 2 ? "2D Bishop" : "3D Hungr"}</div>` +
+          tipRow("dot s1", "Main sphere", r.main.toFixed(4)) + tipRow("dia s2", "Critical surface", `${r.crit.toFixed(4)} (${pc(r.diff)})`) +
+          tipRow("", "Critical, fine mesh", r.fine.toFixed(4)) + tipRow("", "x<sub>c</sub>, z<sub>c</sub>, R (m)", r.circle.map((v) => v.toFixed(1)).join(", ")));
+        k++;
+      }
+    });
+  }
+
+  // chart: one input at a time ---------------------------------------------------------------------------------
+  function chartSweeps(host) {
+    host.textContent = "";
+    for (const s of D.sweeps) {
+      const fig = document.createElement("div");
+      fig.className = "panel";
+      fig.innerHTML = `<p class="panel-title">${s.name}${s.unit ? ` <span>(${s.unit})</span>` : ""}${s.key === "scale" ? ` <span>· sphere scaled with H</span>` : ""}</p>`;
+      host.appendChild(fig);
+      const W = fig.clientWidth;
+      if (!W) continue;
+      const H = 160, m = { l: 34, r: 10, t: 8, b: 26 };
+      const svg = svgOf(fig, W, H, `FoS against ${s.name.replace(/<[^>]+>/g, "")}`);
+      const xs = s.pts.map((p) => p.x), lo = Math.min(...xs), hi = Math.max(...xs);
+      const ymax = Math.max(...s.pts.map((p) => Math.max(p.f3, p.f2)));
+      const yt = niceTicks(0, ymax, 3), ytop = Math.max(yt[yt.length - 1], ymax);
+      const x = lin(lo, hi, m.l, W - m.r), y = lin(0, ytop, H - m.b, m.t);
+      for (const t of yt) { el("line", { x1: m.l, x2: W - m.r, y1: y(t), y2: y(t), class: "grid" }, svg); text(svg, m.l - 6, y(t), String(t), "tick", "end"); }
+      el("line", { x1: m.l, x2: W - m.r, y1: y(1), y2: y(1), class: "ref" }, svg);
+      el("line", { x1: m.l, x2: W - m.r, y1: H - m.b, y2: H - m.b, class: "axis" }, svg);
+      for (const t of niceTicks(lo, hi, 4)) if (t >= lo - 1e-9 && t <= hi + 1e-9) text(svg, x(t), H - m.b + 14, nf(t), "tick", "middle");
+      if (s.bench >= lo && s.bench <= hi) el("line", { x1: x(s.bench), x2: x(s.bench), y1: m.t, y2: H - m.b, class: "ref" }, svg);
+      [["f3", "s1"], ["f2", "s2"]].forEach(([k, cls]) => {
+        el("path", { d: s.pts.map((p, i) => (i ? "L" : "M") + x(p.x).toFixed(1) + " " + y(p[k]).toFixed(1)).join(""), class: "line " + cls }, svg);
+        for (const p of s.pts) el("circle", { cx: x(p.x), cy: y(p[k]), r: 3.5, class: "dot " + cls }, svg);
+      });
+      const cross = el("line", { y1: m.t, y2: H - m.b, class: "cross", visibility: "hidden" }, svg);
+      const hit = el("rect", { x: m.l - 6, y: m.t, width: W - m.l - m.r + 12, height: H - m.t - m.b, class: "hit" }, svg);
+      const move = (ev) => {
+        const r = svg.getBoundingClientRect(), px = (ev.clientX - r.left) * (W / r.width);
+        let best = s.pts[0];
+        for (const p of s.pts) if (Math.abs(x(p.x) - px) < Math.abs(x(best.x) - px)) best = p;
+        cross.setAttribute("x1", x(best.x)); cross.setAttribute("x2", x(best.x)); cross.setAttribute("visibility", "visible");
+        showTip(`<div class="th">${s.name} = ${nf(best.x)}${s.unit ? " " + s.unit : ""}${best.x === s.bench ? " (thesis)" : ""}</div>` +
+          tipRow("s1", "3D Hungr", best.f3.toFixed(3)) + tipRow("s2", "2D Bishop", best.f2.toFixed(3)) +
+          tipRow("", "Bases in tension, 3D / 2D", `${Math.round(best.t3 * 100)}% / ${Math.round(best.t2 * 100)}%`), ev.clientX, ev.clientY);
+      };
+      hit.addEventListener("pointermove", move);
+      hit.addEventListener("pointerdown", move);
+      hit.addEventListener("pointerleave", leave(cross));
+    }
+  }
+
+  // render and keep charts sized to their containers ----------------------------------------------------------
+  renderThesis();
+  renderTables();
+  const charts = [["#chart-exact", chartExact], ["#chart-desterre", chartDesterre], ["#chart-crit", chartCrit], ["#chart-sweeps", chartSweeps]];
+  const widths = new Map();
+  function draw(sel, fn) {
+    const host = $(sel), w = host.clientWidth;
+    if (!w || widths.get(sel) === w) return;
+    widths.set(sel, w);
+    try { fn(host); } catch (e) { host.textContent = "This chart could not be drawn. The data table below has the same values."; console.error(e); }
+  }
+  charts.forEach(([sel, fn]) => draw(sel, fn));
+  if ("ResizeObserver" in window) {
+    let t = null;
+    const ro = new ResizeObserver(() => { clearTimeout(t); t = setTimeout(() => charts.forEach(([sel, fn]) => draw(sel, fn)), 120); });
+    charts.forEach(([sel]) => ro.observe($(sel)));
+  }
+})();
+</script>

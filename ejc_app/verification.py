@@ -3,7 +3,8 @@ PASS / FAIL / INFO. No Streamlit imports; used by the tests, the Verification pa
 
 Tolerances (brief section 3): FoS given to 9 decimals must match to 1e-6; values given to 3-4 decimals must match to
 rounding (|computed - target| <= half a unit in the last decimal shown); fixtures to the decimals shown.
-INFO rows are reference or "about" values that are not acceptance targets.
+INFO rows are reference or "about" values that are not acceptance targets. Without ``slow``, the fine-mesh rows are
+listed as SKIPPED (their values are in VERIFICATION.md), so every run lists the same rows.
 """
 from __future__ import annotations
 
@@ -107,6 +108,24 @@ def no_fos(group, item, r: E.LemResult, note="") -> Row:
 
 def info(group, item, computed, target="", note="") -> Row:
     return Row(group, item, target, computed, "", "reference only", "INFO", note)
+
+
+SKIP_TEXT = "skipped (slow), see VERIFICATION.md"
+
+
+def skipped(group, item, target, tolerance) -> Row:
+    return Row(group, item, target, SKIP_TEXT, "", tolerance, "SKIPPED")
+
+
+# slow rows: (item, target, decimals, run). Listed as SKIPPED when the slow targets are not run.
+CT_SLOW = [("2D EJC, 5120 slices (slow)", 2.121420, 6, lambda R: R.r2(CARRANZA, n2=5120)),
+           ("3D GHB, 320x320 (slow)", 2.140776, 6, lambda R: R.r3(CARRANZA, model="ghb", n3=320)),
+           ("3D EJC, 320x320 (slow)", 2.267835, 6, lambda R: R.r3(CARRANZA, n3=320))]
+FINEST = [("Dry: F 3D 240x240", 2.7112, 4, lambda R: R.r3(n3=240)),
+          ("Dry: F 2D 5120", 2.4422, 4, lambda R: R.r2(n2=5120)),
+          ("Wet: F 3D 240x240", 1.2776, 4, lambda R: R.r3(n3=240, wet=True)),
+          ("Wet: F 2D 5120", 1.0916, 4, lambda R: R.r2(n2=5120, wet=True))]
+COARSE_INFO = [("dry", False, "about 2.6"), ("wet", True, "about 4.4")]
 
 
 # ---------------------------------------------------------------------------------------------------------------
@@ -245,9 +264,9 @@ def verification_rows(runner: Optional[Runner] = None, slow: bool = False,
              info(g, "Published FoS (their method)", "", "2.01", "reference only")]
     if slow:
         say("Carranza-Torres fine meshes (slow)")
-        rows += [by_rounding(g, "2D EJC, 5120 slices (slow)", R.r2(CARRANZA, n2=5120).fos, 2.121420, 6),
-                 by_rounding(g, "3D GHB, 320x320 (slow)", R.r3(CARRANZA, model="ghb", n3=320).fos, 2.140776, 6),
-                 by_rounding(g, "3D EJC, 320x320 (slow)", R.r3(CARRANZA, n3=320).fos, 2.267835, 6)]
+    for item, tgt, d, fn in CT_SLOW:
+        rows.append(by_rounding(g, item, fn(R).fos, tgt, d) if slow else
+                    skipped(g, item, f"{tgt:.{d}f}", f"rounding to {d} dp"))
     g = "3 Moscarda (2025), main sphere, nu = 0.271 (reference values, not targets)"
     for case, wet, a, rep_, sheet in ((1, False, 0.5, 2.24, 2.245), (2, True, 0.5, 1.57, 1.567),
                                       (3, False, 0.509923, 2.04, 2.041), (4, True, 0.509923, 1.13, 1.132)):
@@ -267,27 +286,30 @@ def verification_rows(runner: Optional[Runner] = None, slow: bool = False,
                      f"{(w3.fos - c0w) / w3.fos * 100:.1f}" if None not in (w3.fos, c0w) else "none", "about 25"))
 
     # finest mesh
+    g = "3 Finest mesh (240x240, 5120 slices; slow)"
+    g6 = "6 Limitations statements (about)"
     if slow:
         say("finest mesh (slow)")
-        g = "3 Finest mesh (240x240, 5120 slices; slow)"
-        f3d, f2d = R.r3(n3=240), R.r2(n2=5120)
-        f3w, f2w = R.r3(n3=240, wet=True), R.r2(n2=5120, wet=True)
-        rows += [by_rounding(g, "Dry: F 3D 240x240", f3d.fos, 2.7112, 4),
-                 by_rounding(g, "Dry: F 2D 5120", f2d.fos, 2.4422, 4),
-                 by_rounding(g, "Wet: F 3D 240x240", f3w.fos, 1.2776, 4,
-                             f"{f3w.projections} projections on the path" if f3w.fos else f3w.reason[:160]),
-                 by_rounding(g, "Wet: F 2D 5120", f2w.fos, 1.0916, 4,
-                             f"{f2w.projections} projections on the path" if f2w.fos else f2w.reason[:160])]
-        g6 = "6 Limitations statements (about)"
-        c10d, c10w = R.r3(n3=10), R.r3(n3=10, wet=True)
-        for lab, c10, fin, tgt in (("dry", c10d, f3d, "about 2.6"), ("wet", c10w, f3w, "about 4.4")):
+    for item, tgt, d, fn in FINEST:
+        if slow:
+            r = fn(R)
+            note = f"{r.projections} projections on the path" if r.fos else r.reason[:160]
+            rows.append(by_rounding(g, item, r.fos, tgt, d, note))
+        else:
+            rows.append(skipped(g, item, f"{tgt:.{d}f}", f"rounding to {d} dp"))
+    for lab, wet, tgt in COARSE_INFO:
+        item = f"10x10 below 240x240, {lab} (%)"
+        if slow:
+            fin, c10 = R.r3(n3=240, wet=wet), R.r3(n3=10, wet=wet)
             val = (f"{(fin.fos - c10.fos) / fin.fos * 100:.2f}" if None not in (fin.fos, c10.fos) else "none")
-            rows.append(info(g6, f"10x10 below 240x240, {lab} (%)", val, tgt))
+            rows.append(info(g6, item, val, tgt))
+        else:
+            rows.append(skipped(g6, item, tgt, "reference only"))
     return rows
 
 
 def summary(rows: list[Row]) -> dict:
-    return {k: sum(r.status == k for r in rows) for k in ("PASS", "FAIL", "INFO")}
+    return {k: sum(r.status == k for r in rows) for k in ("PASS", "FAIL", "SKIPPED", "INFO")}
 
 
 def as_markdown(rows: list[Row]) -> str:

@@ -18,14 +18,23 @@ if st.button("Run verification", type="primary"):
 if "verification" in st.session_state:
     slow_used, rows = st.session_state.verification
     sm = V.summary(rows)
-    c = st.columns(3)
+    skip_t = sum(r.status == "SKIPPED" and r.tolerance != "reference only" for r in rows)
+    skip_i = sm["SKIPPED"] - skip_t
+    c = st.columns(4)
     c[0].metric("PASS", sm["PASS"])
     c[1].metric("FAIL", sm["FAIL"])
-    c[2].metric("INFO", sm["INFO"])
+    c[2].metric("SKIPPED (slow)", sm["SKIPPED"])
+    c[3].metric("INFO", sm["INFO"])
+    st.write(f"Targets: {sm['PASS']} PASS + {sm['FAIL']} FAIL + {skip_t} skipped = "
+             f"**{sm['PASS'] + sm['FAIL'] + skip_t}**. Reference rows: {sm['INFO']} INFO + {skip_i} skipped = "
+             f"**{sm['INFO'] + skip_i}**.")
     if sm["FAIL"]:
         st.error(f"{sm['FAIL']} target(s) do not match. They are listed in red below.")
+    elif skip_t:
+        st.success(f"Every target that was run matches. The {sm['SKIPPED']} slow rows are listed as "
+                   f"\"{V.SKIP_TEXT}\"; tick the box above to run them here.")
     else:
-        st.success("Every target matches." + ("" if slow_used else " The slow targets were not run."))
+        st.success("Every target matches.")
     df = pd.DataFrame([r.__dict__ for r in rows]).rename(columns=str.capitalize)
     st.dataframe(df.style.map(ui.color_status, subset=["Status"]), hide_index=True, width="stretch",
                  height=700)

@@ -15,6 +15,7 @@ import engine as E
 import presets as PR
 
 LIVE_MAX_N = 40          # live update only for N <= 40 (brief, page 1)
+DISCLAIMER = "Research tool for the prescribed-surface comparison in Mahat (2026) thesis; not for design."
 
 # name: (label, unit, min, max, step, format)
 NUM = {
@@ -317,4 +318,4 @@ def checks_frame(r: E.LemResult) -> pd.DataFrame:
 
 def color_status(v):
     return {"PASS": "background-color: #d4edda", "FAIL": "background-color: #f8d7da",
-            "INFO": "background-color: #e9ecef"}.get(v, "")
+            "INFO": "background-color: #e9ecef", "SKIPPED": "background-color: #fff3cd"}.get(v, "")

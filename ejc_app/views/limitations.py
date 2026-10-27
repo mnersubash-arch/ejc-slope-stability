@@ -1,6 +1,9 @@
 """Page 6: limitations (static)."""
 import streamlit as st
 
+import ui
+
+st.markdown(f"**{ui.DISCLAIMER}**")
 st.title("Limitations")
 st.markdown("""
 - **Prescribed surface.** The slip surface is a prescribed sphere, symmetric about y = 0. There is no

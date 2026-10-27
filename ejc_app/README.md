@@ -8,7 +8,8 @@ with the Extended Jiang Criterion (EJC) and the Moscarda closure, solved by Rout
 This folder stands alone. The `slope3d` package at the repository root is the earlier port of the thesis workbook
 (VBA). The two share no code; this engine's GHB results reproduce that package's closure-3 benchmarks.
 
-Results are a research tool, not a design tool. Read the Limitations page.
+Research tool for the prescribed-surface comparison in Mahat (2026) thesis; not for design. Read the
+Limitations page.
 
 ## Run
 
@@ -171,8 +172,9 @@ accepted FoS.
 
 ## Verification
 
-`python verification.py --slow` (or the Verification page) gives **78 PASS, 0 FAIL, 12 INFO**. See
-`VERIFICATION.md`. The targets are:
+`python verification.py --slow` (or the Verification page with the slow box ticked) gives **78 PASS, 0 FAIL,
+12 INFO**. See `VERIFICATION.md`. Without the slow targets, the page lists the 9 fine-mesh rows (7 targets, 2
+reference rows) as "skipped (slow), see VERIFICATION.md", so the totals still add up to 78 and 12. The targets are:
 
 - the strength fixtures;
 - the four main cases (3D and 2D, EJC and GHB);

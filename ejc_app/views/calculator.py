@@ -9,6 +9,7 @@ import engine as E
 import plots as P
 import ui
 
+st.markdown(f"**{ui.DISCLAIMER}**")
 st.title("Calculator")
 inp = ui.sidebar()
 ui.preset_box()

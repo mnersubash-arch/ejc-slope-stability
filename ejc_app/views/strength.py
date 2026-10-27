@@ -8,6 +8,10 @@ import ui
 st.title("Strength explorer")
 inp = ui.sidebar()
 mb, s, a = inp.hb
+if inp.model == "mc":
+    st.info(f"The strength explorer covers the Hoek-Brown models. The selected Mohr-Coulomb strength is the straight line "
+            f"τ = c′ + σ_n tan φ′ with c′ = {inp.c_mc:g} kPa and φ′ = {inp.phi_mc:g}°; the curves below use the rock-mass "
+            f"inputs of the sidebar.")
 st.caption(f"Rock mass from the sidebar: σ_ci = {inp.sigma_ci:g} MPa, m_b = {mb:.6f}, s = {s:.7f}, a = {a:.6f}, "
            f"ν = {inp.nu:g}. Tensile limit σ3 = {-s * inp.sigma_ci / mb * 1000:.3f} kPa.")
 c1, c2 = st.columns(2)

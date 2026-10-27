@@ -217,3 +217,75 @@ def test_coarse_mesh_underestimates():
 
 def test_mesh_error_formula():
     assert E.mesh_error([2.0, 2.1, 2.05], 2.05) == pytest.approx(0.1 / 2.05 * 100)
+
+
+# ---- additions for the Law / D'Esterre presets (all off by default) ---------------------------------------------
+import json  # noqa: E402
+import math as _m  # noqa: E402
+
+import presets as PR  # noqa: E402
+
+DATA = json.loads(PR.DATA_FILE.read_text())
+
+
+def test_mohr_coulomb_matches_slope3d_record():
+    """c' = 100 kPa, phi' = 0 on the main sphere: the slope3d package's VBA record (presets.py there)."""
+    mc = MAIN.with_(model="mc", c_mc=100.0, phi_mc=0.0)
+    a3, a2 = r3(mc), r2(mc)
+    assert a3.accepted and a2.accepted
+    assert abs(a3.fos - 0.255354533635107) <= 1e-6 and abs(a2.fos - 0.190263799071471) <= 1e-6
+    m = a3.mesh
+    assert a3.fos == pytest.approx(100.0 * m.area.sum() / (m.w * m.kap).sum(), rel=1e-12)   # phi' = 0: closed form
+    assert a3.projection_limit is None and a3.projections == 0
+
+
+def test_mohr_coulomb_strength():
+    st = MAIN.with_(model="mc", c_mc=7.2, phi_mc=30.0).strength()
+    r = E.solve_strength([-5.0, 0.0, 40.0], st)
+    assert np.allclose(r.tau, 7.2 + np.array([-5.0, 0.0, 40.0]) * _m.tan(_m.radians(30.0)))
+    assert np.allclose(r.c, 7.2) and np.allclose(np.degrees(r.phi), 30.0) and r.accepted.all()
+    assert E.solve_strength([-20.0], st).code[0] == E.SHEAR                  # tau_s < 0
+
+
+def test_ru_pore_pressure():
+    base = MAIN.with_(H=2.1, beta=33.69, xc=-1.24, zc=3.29, R=3.54, gamma=19.0, model="mc", c_mc=21.6, phi_mc=20.0,
+                      base_circle=True)
+    m = E.build_mesh(base.with_(ru=0.5), 2, 40)
+    assert np.allclose(m.u, 0.5 * 19.0 * m.h)
+    assert r2(base.with_(ru=0.0)).fos == r2(base).fos                       # r_u = 0 is dry
+    with pytest.raises(ValueError):
+        E.build_mesh(base.with_(ru=0.5, wet=True), 2, 40)
+
+
+def test_default_grid_refuses_circles_behind_the_toe():
+    c = MAIN.with_(H=2.1, beta=33.69, xc=-0.6, zc=3.66, R=3.7, gamma=19.0, model="mc", c_mc=7.2, phi_mc=30.0)
+    with pytest.raises(ValueError, match="base-circle option"):
+        E.build_mesh(c, 2, 40)
+    assert E.build_mesh(c.with_(base_circle=True), 2, 40).count > 0
+
+
+@pytest.mark.parametrize("case", DATA["DEsterre_2024"]["cases"], ids=lambda c: c["id"])
+def test_base_circle_geometry_matches_the_file(case):
+    xc, zc, R = case["x_c_engine"], case["z_c"], case["R"]
+    assert round(max(0.0, xc + _m.sqrt(R * R - zc * zc)), 2) == case["exit_ahead_of_toe_m"]
+    assert round(zc - R, 2) == case["lowest_point_z_m"]
+    p = PR.BY_KEY[f"desterre_{case['id']}"]
+    x_entry, x_exit = E.slip_extent(p.inputs)
+    m = E.build_mesh(p.inputs.with_(n2=640), 2, 640)
+    assert m.x0 == x_exit and m.x1 == x_entry
+    assert np.all(m.h > 0) and np.allclose(m.zt[m.x > 0], 0.0)              # floor slices: z_t = 0, h = -z_b
+    if case["needs_floor_columns"]:
+        assert np.sum(m.x > 0) > 0 and x_exit > 0
+
+
+@pytest.mark.parametrize("p", PR.desterre_presets(), ids=lambda p: p.key)
+def test_desterre_presets_accepted(p):
+    a3, a2 = r3(p.inputs), r2(p.inputs)
+    assert a3.accepted and a2.accepted, (a3.reason, a2.reason)
+
+
+@pytest.mark.parametrize("p", PR.law_presets(), ids=lambda p: p.key)
+def test_law_cross_check_against_reference_code(p):
+    for key, value in p.data["engine_check"].items():
+        n2 = int(key.rsplit("_", 1)[1])
+        assert rounds_to(r2(p.inputs.with_(n2=n2)).fos, value, 4)

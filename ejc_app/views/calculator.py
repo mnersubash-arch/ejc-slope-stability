@@ -75,9 +75,18 @@ ui.status_badge(r2, "2D")
 if A.inputs.tension != "none":
     st.caption(f"{A.inputs.tension}: sensitivity, not a calibrated contact law.")
 mb, s, a = A.inputs.hb
-st.caption(f"Strength: {E.MODELS[A.inputs.model]}. m_b = {mb:.6f}, s = {s:.7f}, a = {a:.6f}, ν = {A.inputs.nu:g}. "
-           f"Iteration path: {E.ITERATIONS[A.inputs.iteration]}. Sliding volume (full mass) "
-           f"{r3.mesh.volume:,.0f} m³; 2D area {r2.mesh.volume:,.1f} m²."
+if A.inputs.model == "mc":
+    strength_txt = f"c′ = {A.inputs.c_mc:g} kPa, φ′ = {A.inputs.phi_mc:g}°"
+else:
+    strength_txt = f"m_b = {mb:.6f}, s = {s:.7f}, a = {a:.6f}, ν = {A.inputs.nu:g}"
+water_txt = (f"u = r_u γ h with r_u = {A.inputs.ru:g}" if A.inputs.ru is not None else
+             "water table" if A.inputs.wet else "dry")
+st.caption(f"Strength: {E.MODELS[A.inputs.model]}. {strength_txt}. Water: {water_txt}. "
+           f"Iteration path: {E.ITERATIONS[A.inputs.iteration]}. "
+           + ("Base-circle grid (exit to entry, floor columns allowed): "
+              f"{int((r3.mesh.x > 0).sum())} floor columns, {int((r2.mesh.x > 0).sum())} floor slices. "
+              if A.inputs.base_circle else "")
+           + f"Sliding volume (full mass) {r3.mesh.volume:,.4g} m³; 2D area {r2.mesh.volume:,.4g} m²."
            + (f" Projection limit {r3.projection_limit:.4f} kPa." if r3.projection_limit is not None else ""))
 
 # ---- checks

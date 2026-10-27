@@ -19,11 +19,11 @@ DISCLAIMER = "Research tool for the prescribed-surface comparison in Mahat (2026
 
 # name: (label, unit, min, max, step, format)
 NUM = {
-    "H": ("H, slope height", "m", 10.0, 1000.0, 1.0, "%.2f"),
-    "beta": ("β, slope face angle", "deg", 10.0, 89.0, 0.5, "%.2f"),
-    "xc": ("x_c, sphere centre", "m", -1000.0, 2000.0, 0.5, "%.7f"),
-    "zc": ("z_c, sphere centre", "m", 1.0, 3000.0, 0.5, "%.7f"),
-    "R": ("R, sphere radius", "m", 1.0, 4000.0, 0.5, "%.7f"),
+    "H": ("H, slope height", "m", 0.5, 1000.0, 0.1, "%.2f"),
+    "beta": ("β, slope face angle", "deg", 10.0, 89.0, 0.5, "%.3f"),
+    "xc": ("x_c, sphere centre", "m", -1000.0, 2000.0, 0.01, "%.7f"),
+    "zc": ("z_c, sphere centre", "m", 1.0, 3000.0, 0.01, "%.7f"),
+    "R": ("R, sphere radius", "m", 1.0, 4000.0, 0.01, "%.7f"),
     "gamma": ("γ, unit weight", "kN/m³", 10.0, 40.0, 0.1, "%.2f"),
     "sigma_ci": ("σ_ci, intact UCS", "MPa", 1.0, 300.0, 0.1, "%.2f"),
     "mi": ("m_i", "-", 1.0, 40.0, 0.5, "%.2f"),
@@ -31,12 +31,17 @@ NUM = {
     "D": ("D, disturbance factor", "-", 0.0, 1.0, 0.05, "%.2f"),
     "a_value": ("a (override value)", "-", 0.30, 1.00, 0.001, "%.6f"),
     "nu": ("ν, Poisson's ratio", "-", 0.01, 0.49, 0.001, "%.3f"),
+    "c_mc": ("c′, cohesion (Mohr-Coulomb)", "kPa", 0.0, 1000.0, 0.1, "%.2f"),
+    "phi_mc": ("φ′, friction angle (Mohr-Coulomb)", "deg", 0.0, 60.0, 0.1, "%.2f"),
+    "ru_value": ("r_u, pore-pressure ratio", "-", 0.0, 0.99, 0.01, "%.3f"),
     "Hw": ("H_w, water-table height", "m", 0.0, 1000.0, 1.0, "%.1f"),
     "beta_w": ("β_w, water-table angle", "deg", 1.0, 89.0, 0.5, "%.1f"),
     "n3": ("N, 3D mesh (N x N half-model)", "-", 2, 320, 1, None),
     "n2": ("N_2D, 2D slices", "-", 2, 10000, 1, None),
 }
-STRENGTH = {"EJC": "EJC (Extended Jiang Criterion)", "GHB": "GHB (conventional generalised Hoek-Brown)"}
+STRENGTH = {"EJC": "EJC (Extended Jiang Criterion)", "GHB": "GHB (conventional generalised Hoek-Brown)",
+            "MC": "Mohr-Coulomb (constant c′, φ′)"}
+WATER = {"Dry": "Dry (u = 0)", "Wet": "Water table", "ru": "r_u (u = r_u γ h)"}
 CLOSURE = {"moscarda": "Moscarda: σ2 = ν(σ1 + σ3) (adopted)",
            "original": "Original: σ2 = σ3/ν − σ1 (admissibility check only)",
            "s2s3": "σ2 = σ3 (check: must reproduce GHB)"}
@@ -53,15 +58,18 @@ def to_state(inp: E.Inputs) -> dict:
     d = asdict(inp)
     d["a_on"] = inp.a_override is not None
     d["a_value"] = 0.5 if inp.a_override is None else float(inp.a_override)
-    d["strength"] = "GHB" if inp.model == "ghb" else "EJC"
+    d["strength"] = {"ghb": "GHB", "mc": "MC"}.get(inp.model, "EJC")
     d["closure"] = {"ejc_original": "original", "ejc_sigma2_eq_sigma3": "s2s3"}.get(inp.model, "moscarda")
-    d["water"] = "Wet" if inp.wet else "Dry"
+    d["water"] = "ru" if inp.ru is not None else ("Wet" if inp.wet else "Dry")
+    d["ru_value"] = 0.0 if inp.ru is None else float(inp.ru)
     return d
 
 
 def to_inputs(d: dict) -> E.Inputs:
     if d["strength"] == "GHB":
         model = "ghb"
+    elif d["strength"] == "MC":
+        model = "mc"
     else:
         model = {"moscarda": "ejc_moscarda", "original": "ejc_original", "s2s3": "ejc_sigma2_eq_sigma3"}[d["closure"]]
     native = d["iteration"] == "native_v15"
@@ -70,10 +78,12 @@ def to_inputs(d: dict) -> E.Inputs:
                     D=float(d["D"]), a_override=float(d["a_value"]) if d["a_on"] else None, nu=float(d["nu"]),
                     model=model, wet=d["water"] == "Wet", Hw=float(d["Hw"]), beta_w=float(d["beta_w"]),
                     n3=int(d["n3"]), n2=int(d["n2"]), form="FH" if native else d["form"],
-                    tension="none" if native else d["tension"], iteration=d["iteration"])
+                    tension="none" if native else d["tension"], iteration=d["iteration"], c_mc=float(d["c_mc"]),
+                    phi_mc=float(d["phi_mc"]), ru=float(d["ru_value"]) if d["water"] == "ru" else None,
+                    base_circle=bool(d["base_circle"]))
 
 
-WIDGET_NAMES = list(NUM) + ["a_on", "strength", "closure", "water", "form", "tension", "iteration"]
+WIDGET_NAMES = list(NUM) + ["a_on", "strength", "closure", "water", "form", "tension", "iteration", "base_circle"]
 
 
 def _wkeys(name: str) -> list[str]:
@@ -171,6 +181,17 @@ def _choice(container, name: str, label: str, options: dict, disabled=False, hor
                     horizontal=horizontal)
 
 
+def _check(container, name: str, label: str, help: str = "", disabled: bool = False):
+    k = f"w_{name}"
+    if k not in st.session_state:
+        st.session_state[k] = st.session_state.inp[name]
+
+    def cb():
+        st.session_state.inp[name] = st.session_state[k]
+
+    container.checkbox(label, key=k, on_change=cb, disabled=disabled, help=help or None)
+
+
 def _on_iteration():
     if st.session_state.inp["iteration"] == "native_v15":
         st.session_state.inp["form"] = "FH"
@@ -182,36 +203,42 @@ def _on_iteration():
 def sidebar() -> E.Inputs:
     """Draw the input sidebar and return the current inputs."""
     init_state()
+    # Each page draws its own sidebar widgets, and Streamlit resets widgets it sees for the first time on a page to
+    # their defaults. The inputs live in st.session_state.inp, so every widget is set from them before it is drawn
+    # (on_change callbacks keep st.session_state.inp up to date).
+    _write_widgets()
+    st.session_state.w_preset = st.session_state.preset
     sb = st.sidebar
     labels = {p.key: f"{p.group}: {p.label}" for p in PR.PRESETS}
-    if "w_preset" not in st.session_state:
-        st.session_state.w_preset = st.session_state.preset
     sb.selectbox("Preset", list(labels), format_func=labels.get, key="w_preset", on_change=_on_preset)
     sb.button("Reset inputs to preset", on_click=_on_reset, width="stretch")
     d = st.session_state.inp
     with sb.expander("Geometry", expanded=False):
         for n in ("H", "beta", "xc", "zc", "R"):
             _num(st, n)
+        _check(st, "base_circle", "Base circle: grid from exit to entry, floor columns allowed",
+               "Off by default (thesis grid). Needed for circles that cross the toe level behind the toe (x_c ≤ 0) or "
+               "exit on the floor ahead of the toe.")
+    hb_off = d["strength"] == "MC"
     with sb.expander("Rock mass", expanded=False):
-        for n in ("gamma", "sigma_ci", "mi", "gsi", "D"):
-            _num(st, n)
-        if "w_a_on" not in st.session_state:
-            st.session_state.w_a_on = d["a_on"]
-
-        def a_cb():
-            st.session_state.inp["a_on"] = st.session_state.w_a_on
-        st.checkbox("Override a (otherwise a from GSI, eq. 2.5)", key="w_a_on", on_change=a_cb)
-        _num(st, "a_value", disabled=not d["a_on"])
+        _num(st, "gamma")
+        for n in ("sigma_ci", "mi", "gsi", "D"):
+            _num(st, n, disabled=hb_off)
+        _check(st, "a_on", "Override a (otherwise a from GSI, eq. 2.5)", disabled=hb_off)
+        _num(st, "a_value", disabled=hb_off or not d["a_on"])
         mb, s, a = to_inputs(d).hb
-        st.caption(f"m_b = {mb:.6f}, s = {s:.7f}, a used = {a:.6f}")
+        st.caption(f"m_b = {mb:.6f}, s = {s:.7f}, a used = {a:.6f}" + (" (not used by Mohr-Coulomb)" if hb_off else ""))
     with sb.expander("Strength model", expanded=True):
         _choice(st, "strength", "Strength model", STRENGTH)
-        _choice(st, "closure", "Closure (EJC)", CLOSURE, disabled=d["strength"] == "GHB")
-        _num(st, "nu", disabled=d["strength"] == "GHB")
+        _choice(st, "closure", "Closure (EJC)", CLOSURE, disabled=d["strength"] != "EJC")
+        _num(st, "nu", disabled=d["strength"] != "EJC")
+        _num(st, "c_mc", disabled=not hb_off)
+        _num(st, "phi_mc", disabled=not hb_off)
     with sb.expander("Water", expanded=False):
-        _choice(st, "water", "Condition", {"Dry": "Dry (u = 0)", "Wet": "Wet (hydrostatic)"}, horizontal=True)
-        _num(st, "Hw", disabled=d["water"] == "Dry")
-        _num(st, "beta_w", disabled=d["water"] == "Dry")
+        _choice(st, "water", "Condition", WATER, horizontal=True)
+        _num(st, "Hw", disabled=d["water"] != "Wet")
+        _num(st, "beta_w", disabled=d["water"] != "Wet")
+        _num(st, "ru_value", disabled=d["water"] != "ru")
     with sb.expander("Mesh", expanded=True):
         _num(st, "n3")
         _num(st, "n2")
@@ -288,6 +315,8 @@ def preset_box():
         st.warning(f"**{p.label}**: {p.source} The inputs below are unchanged.")
         return
     lines = [f"**Preset: {p.group}, {p.label}.** {p.source}"]
+    if p.info:
+        lines.append(p.info)
     if p.targets:
         lines.append(f"Targets: {p.targets}")
     if p.reference:

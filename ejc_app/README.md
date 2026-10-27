@@ -17,7 +17,7 @@ Limitations page.
 cd ejc_app
 pip install -r requirements.txt
 streamlit run app.py              # opens http://localhost:8501
-pytest                            # about 70 s, includes the fine-mesh runs
+pytest                            # about 90 s, includes the fine-mesh runs
 pytest -m "not slow"              # skips the fine-mesh runs
 python verification.py --slow     # the verification table as Markdown
 ```
@@ -62,7 +62,16 @@ Every preset fills all the inputs and shows its source:
 - **Moscarda (2025), Cases 1–4.** His reported 2D FoS (2.24, 1.57, 2.04, 1.13) are shown as reference values,
   not targets. They come from his own slice model and the inherited route. ν = 0.271 is used, because his reported
   values are what his spreadsheet gives at ν = 0.271.
-- **Law (2024) and D'Esterre (2024).** Empty slots; the inputs are still to be entered from the sources.
+- **Law (2024), Cases 1–4.** GHB on the overall 50° profile, with R exactly as given (through the toe), not the
+  rounded reported R. They are cross-checked against the thesis reference code. Law's own and the Slide2 values
+  are reference only.
+- **D'Esterre (2024), 24 cases.** Three slopes (1:1.5, 1:2.5, 1:3.5; H = 2.1 m) × four c′/φ′ combinations ×
+  r_u = 0 or 0.5. They use Mohr-Coulomb, r_u and the base-circle grid. The preset information shows
+  `needs_floor_columns` (whether the circle exits ahead of the toe) and his Slide2, spreadsheet-3D and Slide3
+  values, as reference only.
+
+The Law and D'Esterre cases are read from `data/presets_law_desterre.json` (already mirrored to engine
+coordinates).
 
 ## Equations (thesis equation numbers)
 
@@ -170,11 +179,33 @@ The thesis reference code grew the set across full re-solves until no new base w
 the same values (Table 5.7): dry C0 2.637 / 2.430 and T0 2.597 / 2.429; wet C0 0.964 / 0.978; wet T0 has no
 accepted FoS.
 
+### Options for the D'Esterre (2024) presets (all off by default)
+
+These were added for the D'Esterre soil-slope cases. With them off, every thesis result is unchanged.
+
+- **Mohr-Coulomb strength** (`model="mc"`, `c_mc` kPa, `phi_mc` deg): τ_s = c′ + σ_n tan φ′.
+  - There is no projection.
+  - τ_s < 0 is allowed on the iteration path (as in the thesis workbook) but must be ≥ 0 in the final state.
+  - The EJC residual checks do not apply.
+- **Pore pressure by r_u** (`ru`): u = r_u γ h for every column or slice. It cannot be combined with the water
+  table.
+- **Base circles** (`base_circle=True`): the x grid spans the circle's exit-to-entry extent on the central section.
+  - The exit and entry are found where the ground (pit floor z_t = 0 included) is above the circle, by sampling
+    and bisection.
+  - Floor columns are allowed: x > 0, z_t = 0, h = −z_b > 0. They appear only where the circle exits ahead of
+    the toe.
+  - The cell numbering, the y grid (0 to R, Δy = R/N) and all column equations are unchanged.
+
+The default grid (x0 = x_c − √(R² − z_c²)) needs the circle to cross the toe level at or ahead of the toe. If it
+crosses more than 1e-5 R behind the toe, the grid would cut off the toe region, so the default grid now refuses
+such a circle and points to the base-circle option. The tolerance is the thesis workbook's; the Law and
+Carranza-Torres circles are 0.3–2.6 mm behind the toe, within that tolerance. No existing preset is affected.
+
 ## Verification
 
-`python verification.py --slow` (or the Verification page with the slow box ticked) gives **78 PASS, 0 FAIL,
-12 INFO**. See `VERIFICATION.md`. Without the slow targets, the page lists the 9 fine-mesh rows (7 targets, 2
-reference rows) as "skipped (slow), see VERIFICATION.md", so the totals still add up to 78 and 12. The targets are:
+`python verification.py --slow` (or the Verification page with the slow box ticked) gives **88 PASS, 0 FAIL,
+40 INFO**. See `VERIFICATION.md`. Without the slow targets, the page lists the 9 fine-mesh rows (7 targets, 2
+reference rows) as "skipped (slow), see VERIFICATION.md", so the totals still add up. The PASS/FAIL rows are:
 
 - the strength fixtures;
 - the four main cases (3D and 2D, EJC and GHB);
@@ -182,10 +213,17 @@ reference rows) as "skipped (slow), see VERIFICATION.md", so the totals still ad
 - F_M, C0/T0 and the native-path iteration counts;
 - the original-closure table (Table 5.2) and the 43-of-76 count;
 - the Carranza-Torres records at 20×20 / 40 and at 320×320 / 5120;
-- the finest meshes.
+- the finest meshes;
+- the Law (2024) presets against the thesis reference code `lem_ref.py` (GHB 2D, 40 and 640 slices, 4 decimals);
+- the Mohr-Coulomb option against the `slope3d` package's record (c′ = 100 kPa, φ′ = 0: 0.2553545 / 0.1902638).
 
-INFO rows are reference values: the published 2.01, Moscarda's reported values, and the "about" figures on the
-Limitations page.
+The first seven groups are the 78 targets of the brief and the thesis records.
+
+INFO rows are reference values, never targets:
+
+- the published 2.01;
+- the reported values of Moscarda (2025), Law (2024) and D'Esterre (2024);
+- the "about" figures on the Limitations page.
 
 ## Known limitations
 
@@ -211,6 +249,7 @@ Limitations page.
 | `engine.py` | Calculation engine (no Streamlit) |
 | `plots.py` | Plotly figures (no Streamlit) |
 | `presets.py` | Preset cases and their sources |
+| `data/presets_law_desterre.json` | Law (2024) and D'Esterre (2024) cases in engine coordinates (source of those presets) |
 | `verification.py` | Targets and the verification runner |
 | `tests/` | pytest suite: strength, LEM, targets, figures, headless pages |
 | `VERIFICATION.md` | The verification table |

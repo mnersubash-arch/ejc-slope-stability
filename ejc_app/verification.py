@@ -16,8 +16,9 @@ from typing import Callable, Optional
 import numpy as np
 
 import engine as E
+import presets as PR
 
-MAIN = E.Inputs()            # main sphere, Moscarda closure, EJC, dry, a = 0.5, 20x20 / 40, default path + projection
+MAIN = E.Inputs()           # main sphere, Moscarda closure, EJC, dry, a = 0.5, 20x20 / 40, default path + projection
 CARRANZA = MAIN.with_(xc=207.28, zc=586.53, R=622.08)
 
 
@@ -275,6 +276,38 @@ def verification_rows(runner: Optional[Runner] = None, slow: bool = False,
                          f"this engine (Route 2, 40 slices): {_fmt(ours, 4)}",
                          f"reported {rep_:.2f} (sheet at nu = 0.271: {sheet:.3f})",
                          "his own slice model and the inherited route"))
+
+    # Law (2024): GHB 2D against the thesis reference code (lem_ref.py); reported values for reference only
+    say("Law (2024)")
+    g = "3 Cross-check: Law (2024) presets, GHB 2D against the reference code lem_ref.py"
+    for p in PR.law_presets():
+        for key, value in p.data["engine_check"].items():
+            n2 = int(key.rsplit("_", 1)[1])
+            rows.append(by_rounding(g, f"{p.data['id']}: GHB 2D, {n2} slices", R.r2(p.inputs, n2=n2).fos, value, 4,
+                                    "read to 4 decimals (1.953 = 1.9530)" if value == 1.953 else ""))
+    g = "3 Law (2024), reported values (reference only, not targets)"
+    for p in PR.law_presets():
+        rows.append(info(g, f"{p.data['id']}: 2D / 3D FoS",
+                         f"this engine (GHB, 40 slices / 20x20): {_fmt(R.r2(p.inputs).fos, 4)} / "
+                         f"{_fmt(R.r3(p.inputs).fos, 4)}", PR.values_text(p.data["reported"]), "her own models"))
+
+    # Mohr-Coulomb option against the slope3d package's record (VBA engine, Appendix E sphere, c' = 100 kPa, phi' = 0)
+    say("Mohr-Coulomb")
+    g = "3 Cross-check: Mohr-Coulomb option (c' = 100 kPa, phi' = 0, main sphere, dry) against the slope3d record"
+    mc = dict(model="mc", c_mc=100.0, phi_mc=0.0)
+    rows += [by_abs(g, "F 3D, 20x20", R.r3(**mc).fos, 0.255354533635107, 1e-6, 15),
+             by_abs(g, "F 2D, 40 slices", R.r2(**mc).fos, 0.190263799071471, 1e-6, 15)]
+
+    # D'Esterre (2024): Mohr-Coulomb, r_u, base circles; reported values for reference only
+    say("D'Esterre (2024)")
+    g = "3 D'Esterre (2024): this engine against his reported values (reference only, not targets)"
+    for p in PR.desterre_presets():
+        rep = p.data["reported"]
+        rows.append(info(g, p.data["id"],
+                         f"2D {_fmt(R.r2(p.inputs).fos, 3)} (40 slices); 3D {_fmt(R.r3(p.inputs).fos, 3)} (20x20)",
+                         f"Slide2 2D {rep['Slide2_2D']}; spreadsheet 3D {rep['DEsterre_spreadsheet_3D_Hungr']}; "
+                         f"Slide3 3D {rep['Slide3_3D']}",
+                         f"needs_floor_columns {str(p.data['needs_floor_columns']).lower()}"))
 
     # statements on the Limitations page
     g = "6 Limitations statements (about)"

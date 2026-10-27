@@ -4,9 +4,17 @@ Generated with `python verification.py --slow` (the same table is on the app's V
 Default path with the Section 4.6 projection; the native v15 iteration path only where a row says so.
 Main sphere x_c = 355.7423115, z_c = 644.4192949, R = 725.2669975 m; 3D 20x20 and 2D 40 slices unless stated.
 Tolerances: FoS given to 9 decimals to 1e-6; values given to 3-6 decimals to rounding; fixtures to the decimals
-shown. INFO rows are reference values, not targets.
+shown. INFO rows are reference values (published and reported results), not targets.
 
-**Result: {'PASS': 78, 'FAIL': 0, 'INFO': 12}**
+**Result: 88 PASS, 0 FAIL, 40 INFO.**
+
+- 78 targets of the brief and the thesis records: all PASS, with the same values as before the Law/D'Esterre
+  additions (those are off by default).
+- 8 cross-checks of the Law (2024) presets against the thesis reference code `lem_ref.py` (GHB 2D, 40 and 640
+  slices, to 4 decimals).
+- 2 cross-checks of the Mohr-Coulomb option against the `slope3d` package's record (c' = 100 kPa, phi' = 0).
+- INFO: Carranza-Torres' published value, Moscarda (2025), Law (2024) and D'Esterre (2024) reported values, and
+  the "about" figures of the Limitations page.
 
 | Group | Item | Target | Computed | Difference | Tolerance | Status | Note |
 |---|---|---|---|---|---|---|---|
@@ -92,10 +100,48 @@ shown. INFO rows are reference values, not targets.
 | 3 Moscarda (2025), main sphere, nu = 0.271 (reference values, not targets) | Case 2: wet, a = 0.5, 2D FoS | reported 1.57 (sheet at nu = 0.271: 1.567) | this engine (Route 2, 40 slices): 1.0981 |  | reference only | **INFO** | his own slice model and the inherited route |
 | 3 Moscarda (2025), main sphere, nu = 0.271 (reference values, not targets) | Case 3: dry, a = 0.509923, 2D FoS | reported 2.04 (sheet at nu = 0.271: 2.041) | this engine (Route 2, 40 slices): 2.3757 |  | reference only | **INFO** | his own slice model and the inherited route |
 | 3 Moscarda (2025), main sphere, nu = 0.271 (reference values, not targets) | Case 4: wet, a = 0.509923, 2D FoS | reported 1.13 (sheet at nu = 0.271: 1.132) | this engine (Route 2, 40 slices): 1.0607 |  | reference only | **INFO** | his own slice model and the inherited route |
+| 3 Cross-check: Law (2024) presets, GHB 2D against the reference code lem_ref.py | Law-1: GHB 2D, 40 slices | 2.0039 | 2.0038734 | -2.66e-05 | rounding to 4 dp | **PASS** |  |
+| 3 Cross-check: Law (2024) presets, GHB 2D against the reference code lem_ref.py | Law-1: GHB 2D, 640 slices | 2.0027 | 2.0027243 | +2.43e-05 | rounding to 4 dp | **PASS** |  |
+| 3 Cross-check: Law (2024) presets, GHB 2D against the reference code lem_ref.py | Law-2: GHB 2D, 40 slices | 1.9524 | 1.9523711 | -2.89e-05 | rounding to 4 dp | **PASS** |  |
+| 3 Cross-check: Law (2024) presets, GHB 2D against the reference code lem_ref.py | Law-2: GHB 2D, 640 slices | 1.9513 | 1.9512605 | -3.95e-05 | rounding to 4 dp | **PASS** |  |
+| 3 Cross-check: Law (2024) presets, GHB 2D against the reference code lem_ref.py | Law-3: GHB 2D, 40 slices | 1.9530 | 1.9529914 | -8.58e-06 | rounding to 4 dp | **PASS** | read to 4 decimals (1.953 = 1.9530) |
+| 3 Cross-check: Law (2024) presets, GHB 2D against the reference code lem_ref.py | Law-3: GHB 2D, 640 slices | 1.9528 | 1.9528163 | +1.63e-05 | rounding to 4 dp | **PASS** |  |
+| 3 Cross-check: Law (2024) presets, GHB 2D against the reference code lem_ref.py | Law-4: GHB 2D, 40 slices | 0.9505 | 0.9504689 | -3.11e-05 | rounding to 4 dp | **PASS** |  |
+| 3 Cross-check: Law (2024) presets, GHB 2D against the reference code lem_ref.py | Law-4: GHB 2D, 640 slices | 0.9511 | 0.9510735 | -2.65e-05 | rounding to 4 dp | **PASS** |  |
+| 3 Law (2024), reported values (reference only, not targets) | Law-1: 2D / 3D FoS | Carranza 2020 2.01; Law Excel HB1997 2.02; Law Excel instantaneous 2.02; Law text 2.018 | this engine (GHB, 40 slices / 20x20): 2.0039 / 2.1419 |  | reference only | **INFO** | her own models |
+| 3 Law (2024), reported values (reference only, not targets) | Law-2: 2D / 3D FoS | Carranza 2020 at a0.5 2.01; Law Excel HB1997 2.02; Law Excel instantaneous 1.97; Slide2 critical 1.99 | this engine (GHB, 40 slices / 20x20): 1.9524 / 2.0847 |  | reference only | **INFO** | her own models |
+| 3 Law (2024), reported values (reference only, not targets) | Law-3: 2D / 3D FoS | Law Excel HB1997 2.02; Law Excel instantaneous 1.96; Slide2 1.99 | this engine (GHB, 40 slices / 20x20): 1.9530 / 2.0859 |  | reference only | **INFO** | her own models |
+| 3 Law (2024), reported values (reference only, not targets) | Law-4: 2D / 3D FoS | Law Excel HB1997 1.06; Law Excel instantaneous 1.05; Slide2 1.11 | this engine (GHB, 40 slices / 20x20): 0.9505 / 1.0012 |  | reference only | **INFO** | her own models |
+| 3 Cross-check: Mohr-Coulomb option (c' = 100 kPa, phi' = 0, main sphere, dry) against the slope3d record | F 3D, 20x20 | 0.255354533635107 | 0.255354533748 | +1.13e-10 | abs <= 1e-06 | **PASS** |  |
+| 3 Cross-check: Mohr-Coulomb option (c' = 100 kPa, phi' = 0, main sphere, dry) against the slope3d record | F 2D, 40 slices | 0.190263799071471 | 0.190263799149 | +7.75e-11 | abs <= 1e-06 | **PASS** |  |
+| 3 D'Esterre (2024): this engine against his reported values (reference only, not targets) | DE-1.5-c1-ru0 | Slide2 2D 2.61; spreadsheet 3D 3.62; Slide3 3D 2.96 | 2D 2.611 (40 slices); 3D 3.040 (20x20) |  | reference only | **INFO** | needs_floor_columns false |
+| 3 D'Esterre (2024): this engine against his reported values (reference only, not targets) | DE-1.5-c2-ru0 | Slide2 2D 3.6; spreadsheet 3D 4.64; Slide3 3D 4.16 | 2D 3.595 (40 slices); 3D 4.364 (20x20) |  | reference only | **INFO** | needs_floor_columns false |
+| 3 D'Esterre (2024): this engine against his reported values (reference only, not targets) | DE-1.5-c3-ru0 | Slide2 2D 4.51; spreadsheet 3D 5.52; Slide3 3D 5.25 | 2D 4.506 (40 slices); 3D 5.614 (20x20) |  | reference only | **INFO** | needs_floor_columns true |
+| 3 D'Esterre (2024): this engine against his reported values (reference only, not targets) | DE-1.5-c4-ru0 | Slide2 2D 5.33; spreadsheet 3D 6.11; Slide3 3D 5.94 | 2D 5.314 (40 slices); 3D 6.468 (20x20) |  | reference only | **INFO** | needs_floor_columns true |
+| 3 D'Esterre (2024): this engine against his reported values (reference only, not targets) | DE-2.5-c1-ru0 | Slide2 2D 3.43; spreadsheet 3D 3.62; Slide3 3D 3.89 | 2D 3.428 (40 slices); 3D 3.897 (20x20) |  | reference only | **INFO** | needs_floor_columns false |
+| 3 D'Esterre (2024): this engine against his reported values (reference only, not targets) | DE-2.5-c2-ru0 | Slide2 2D 4.41; spreadsheet 3D 4.61; Slide3 3D 5.04 | 2D 4.409 (40 slices); 3D 5.191 (20x20) |  | reference only | **INFO** | needs_floor_columns true |
+| 3 D'Esterre (2024): this engine against his reported values (reference only, not targets) | DE-2.5-c3-ru0 | Slide2 2D 5.22; spreadsheet 3D 5.4; Slide3 3D 5.94 | 2D 5.210 (40 slices); 3D 6.107 (20x20) |  | reference only | **INFO** | needs_floor_columns true |
+| 3 D'Esterre (2024): this engine against his reported values (reference only, not targets) | DE-2.5-c4-ru0 | Slide2 2D 5.92; spreadsheet 3D 6.08; Slide3 3D 6.75 | 2D 5.906 (40 slices); 3D 7.090 (20x20) |  | reference only | **INFO** | needs_floor_columns true |
+| 3 D'Esterre (2024): this engine against his reported values (reference only, not targets) | DE-3.5-c1-ru0 | Slide2 2D 3.91; spreadsheet 3D 4.2; Slide3 3D 4.66 | 2D 4.229 (40 slices); 3D 4.698 (20x20) |  | reference only | **INFO** | needs_floor_columns true |
+| 3 D'Esterre (2024): this engine against his reported values (reference only, not targets) | DE-3.5-c2-ru0 | Slide2 2D 4.8; spreadsheet 3D 5.14; Slide3 3D 5.82 | 2D 5.182 (40 slices); 3D 5.931 (20x20) |  | reference only | **INFO** | needs_floor_columns true |
+| 3 D'Esterre (2024): this engine against his reported values (reference only, not targets) | DE-3.5-c3-ru0 | Slide2 2D 5.5; spreadsheet 3D 5.87; Slide3 3D 6.64 | 2D 5.854 (40 slices); 3D 6.796 (20x20) |  | reference only | **INFO** | needs_floor_columns true |
+| 3 D'Esterre (2024): this engine against his reported values (reference only, not targets) | DE-3.5-c4-ru0 | Slide2 2D 6.16; spreadsheet 3D 6.45; Slide3 3D 7.31 | 2D 6.424 (40 slices); 3D 7.556 (20x20) |  | reference only | **INFO** | needs_floor_columns true |
+| 3 D'Esterre (2024): this engine against his reported values (reference only, not targets) | DE-1.5-c1-ru0.5 | Slide2 2D 1.79; spreadsheet 3D 2.57; Slide3 3D 1.99 | 2D 1.788 (40 slices); 3D 2.169 (20x20) |  | reference only | **INFO** | needs_floor_columns false |
+| 3 D'Esterre (2024): this engine against his reported values (reference only, not targets) | DE-1.5-c2-ru0.5 | Slide2 2D 2.86; spreadsheet 3D 3.77; Slide3 3D 3.19 | 2D 2.855 (40 slices); 3D 3.587 (20x20) |  | reference only | **INFO** | needs_floor_columns false |
+| 3 D'Esterre (2024): this engine against his reported values (reference only, not targets) | DE-1.5-c3-ru0.5 | Slide2 2D 3.86; spreadsheet 3D 4.8; Slide3 3D 4.23 | 2D 3.844 (40 slices); 3D 4.706 (20x20) |  | reference only | **INFO** | needs_floor_columns true |
+| 3 D'Esterre (2024): this engine against his reported values (reference only, not targets) | DE-1.5-c4-ru0.5 | Slide2 2D 4.77; spreadsheet 3D 5.57; Slide3 3D 5.06 | 2D 4.750 (40 slices); 3D 5.711 (20x20) |  | reference only | **INFO** | needs_floor_columns true |
+| 3 D'Esterre (2024): this engine against his reported values (reference only, not targets) | DE-2.5-c1-ru0.5 | Slide2 2D 2.32; spreadsheet 3D 2.78; Slide3 3D 2.64 | 2D 2.321 (40 slices); 3D 2.714 (20x20) |  | reference only | **INFO** | needs_floor_columns true |
+| 3 D'Esterre (2024): this engine against his reported values (reference only, not targets) | DE-2.5-c2-ru0.5 | Slide2 2D 3.37; spreadsheet 3D 4.01; Slide3 3D 3.77 | 2D 3.361 (40 slices); 3D 3.961 (20x20) |  | reference only | **INFO** | needs_floor_columns true |
+| 3 D'Esterre (2024): this engine against his reported values (reference only, not targets) | DE-2.5-c3-ru0.5 | Slide2 2D 4.3; spreadsheet 3D 4.93; Slide3 3D 4.81 | 2D 4.296 (40 slices); 3D 5.162 (20x20) |  | reference only | **INFO** | needs_floor_columns true |
+| 3 D'Esterre (2024): this engine against his reported values (reference only, not targets) | DE-2.5-c4-ru0.5 | Slide2 2D 5.14; spreadsheet 3D 5.8; Slide3 3D 5.7 | 2D 5.122 (40 slices); 3D 6.219 (20x20) |  | reference only | **INFO** | needs_floor_columns true |
+| 3 D'Esterre (2024): this engine against his reported values (reference only, not targets) | DE-3.5-c1-ru0.5 | Slide2 2D 2.66; spreadsheet 3D 3.47; Slide3 3D 3.06 | 2D 2.766 (40 slices); 3D 3.160 (20x20) |  | reference only | **INFO** | needs_floor_columns true |
+| 3 D'Esterre (2024): this engine against his reported values (reference only, not targets) | DE-3.5-c2-ru0.5 | Slide2 2D 3.64; spreadsheet 3D 4.68; Slide3 3D 4.21 | 2D 3.800 (40 slices); 3D 4.395 (20x20) |  | reference only | **INFO** | needs_floor_columns true |
+| 3 D'Esterre (2024): this engine against his reported values (reference only, not targets) | DE-3.5-c3-ru0.5 | Slide2 2D 4.52; spreadsheet 3D 5.52; Slide3 3D 5.19 | 2D 4.668 (40 slices); 3D 5.475 (20x20) |  | reference only | **INFO** | needs_floor_columns true |
+| 3 D'Esterre (2024): this engine against his reported values (reference only, not targets) | DE-3.5-c4-ru0.5 | Slide2 2D 5.48; spreadsheet 3D 6.21; Slide3 3D 6.09 | 2D 5.439 (40 slices); 3D 6.430 (20x20) |  | reference only | **INFO** | needs_floor_columns true |
 | 6 Limitations statements (about) | F_H vs F_M difference, dry / wet (%) | 0.14-0.27 | 0.142 / 0.224 |  | reference only | **INFO** |  |
 | 6 Limitations statements (about) | Wet 3D FoS drop with C0 (%) | about 25 | 24.2 |  | reference only | **INFO** |  |
-| 3 Finest mesh (240x240, 5120 slices; slow) | Dry: F 3D 240x240 | 2.7112 | 2.7112235 | +2.35e-05 | rounding to 4 dp | **PASS** |  |
-| 3 Finest mesh (240x240, 5120 slices; slow) | Dry: F 2D 5120 | 2.4422 | 2.4422059 | +5.87e-06 | rounding to 4 dp | **PASS** |  |
+| 3 Finest mesh (240x240, 5120 slices; slow) | Dry: F 3D 240x240 | 2.7112 | 2.7112235 | +2.35e-05 | rounding to 4 dp | **PASS** | 0 projections on the path |
+| 3 Finest mesh (240x240, 5120 slices; slow) | Dry: F 2D 5120 | 2.4422 | 2.4422059 | +5.87e-06 | rounding to 4 dp | **PASS** | 0 projections on the path |
 | 3 Finest mesh (240x240, 5120 slices; slow) | Wet: F 3D 240x240 | 1.2776 | 1.2775700 | -3.00e-05 | rounding to 4 dp | **PASS** | 3 projections on the path |
 | 3 Finest mesh (240x240, 5120 slices; slow) | Wet: F 2D 5120 | 1.0916 | 1.0916067 | +6.70e-06 | rounding to 4 dp | **PASS** | 7 projections on the path |
 | 6 Limitations statements (about) | 10x10 below 240x240, dry (%) | about 2.6 | 2.55 |  | reference only | **INFO** |  |

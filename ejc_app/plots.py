@@ -84,18 +84,29 @@ def _hover_rows(r: E.LemResult, k: int, two_d: bool) -> str:
     return "<br>".join(lines)
 
 
+def _frame(inp: E.Inputs, m: E.Mesh) -> tuple[float, float, float]:
+    """Plot extent (x from, x to, padding), scaled to the problem: metres for a small slope, hundreds for a pit."""
+    crest = -inp.H / math.tan(math.radians(inp.beta))
+    left, right = min(m.x1, crest), max(m.x0, 0.0)
+    pad = 0.1 * max(right - left, inp.H)
+    return left - pad, right + 2 * pad, pad
+
+
+def _slip_x(inp: E.Inputs, m: E.Mesh, n: int) -> np.ndarray:
+    """x samples of the slip surface: up to the toe, or up to the exit on the floor for a base circle."""
+    return np.linspace(m.x1, m.x0 if inp.base_circle else min(m.x0, 0.0), n)
+
+
 # ---------------------------------------------------------------------------------------------------------------
 # page 2: cross-section y = 0
 # ---------------------------------------------------------------------------------------------------------------
 def cross_section(inp: E.Inputs, r2: E.LemResult, field: str = "sigma_n", max_polygons: int = 400) -> go.Figure:
     m = r2.mesh
-    crest = -inp.H / math.tan(math.radians(inp.beta))
-    xa = min(m.x1, crest) - 40.0
-    xb = max(m.x0, 0.0) + 80.0
+    xa, xb, pad = _frame(inp, m)
     xs = np.linspace(xa, xb, 1200)
     zt = E.ground_z(xs, inp.H, inp.beta)
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=np.r_[xs, xs[::-1]], y=np.r_[zt, np.full(len(xs), min(-20.0, inp.zc - inp.R - 20))],
+    fig.add_trace(go.Scatter(x=np.r_[xs, xs[::-1]], y=np.r_[zt, np.full(len(xs), min(-pad / 2, inp.zc - inp.R - pad / 2))],
                              fill="toself", fillcolor=ROCK, line=dict(width=0), hoverinfo="skip", name="rock mass"))
     fig.add_trace(go.Scatter(x=xs, y=zt, mode="lines", line=dict(color=GROUND, width=2), name="ground surface",
                              hoverinfo="skip"))
@@ -104,7 +115,7 @@ def cross_section(inp: E.Inputs, r2: E.LemResult, field: str = "sigma_n", max_po
     cx, cz = inp.xc + inp.R * np.cos(th), inp.zc + inp.R * np.sin(th)
     fig.add_trace(go.Scatter(x=cx, y=cz, mode="lines", line=dict(color=SLIP, width=1, dash="dot"),
                              name="slip circle (full)", hoverinfo="skip", visible="legendonly"))
-    xb_ = np.linspace(m.x1, min(m.x0, 0.0), 1200)
+    xb_ = _slip_x(inp, m, 1200)
     zb_ = E.sphere_z(xb_, 0.0, inp.xc, inp.zc, inp.R)
     inside = zb_ < E.ground_z(xb_, inp.H, inp.beta)
     fig.add_trace(go.Scatter(x=xb_, y=np.where(inside, zb_, np.nan), mode="lines", line=dict(color=SLIP, width=3),
@@ -113,6 +124,9 @@ def cross_section(inp: E.Inputs, r2: E.LemResult, field: str = "sigma_n", max_po
         zw = np.minimum(E.water_z(xs, inp.Hw, inp.beta_w), zt)
         fig.add_trace(go.Scatter(x=xs, y=zw, mode="lines", line=dict(color=WATER, width=2, dash="dash"),
                                  name="water table", hoverinfo="skip"))
+    if inp.ru is not None:
+        fig.add_annotation(xref="paper", yref="paper", x=0.01, y=0.98, showarrow=False, align="left",
+                           text=f"pore pressure u = r_u γ h, r_u = {inp.ru:g}", font=dict(color=WATER))
     # slices
     vals = field_values(r2, field)
     finite = np.isfinite(vals)
@@ -178,13 +192,14 @@ def view3d(inp: E.Inputs, r3: E.LemResult, field: str = "sigma_n", mirror: bool 
     vmax = float(np.nanmax(vals)) if finite.any() else 1.0
     fig = go.Figure()
     ylo = -inp.R if mirror else 0.0
-    gx = np.linspace(m.x1 - 30, max(m.x0, 0) + 60, 90)
+    xa, xb, _ = _frame(inp, m)
+    gx = np.linspace(xa, xb, 90)
     gy = np.linspace(ylo, inp.R, 60)
     GX, GY = np.meshgrid(gx, gy)
     GZ = E.ground_z(GX, inp.H, inp.beta)
     fig.add_trace(go.Surface(x=GX, y=GY, z=GZ, colorscale=[[0, "#bdb2a5"], [1, "#bdb2a5"]], showscale=False,
                              opacity=0.35, name="ground surface", hoverinfo="skip", showlegend=True))
-    sx = np.linspace(m.x1, min(m.x0, 0.0), 90)
+    sx = _slip_x(inp, m, 90)
     sy = np.linspace(ylo, inp.R, 90)
     SX, SY = np.meshgrid(sx, sy)
     SZ = E.sphere_z(SX, SY, inp.xc, inp.zc, inp.R)
@@ -321,7 +336,8 @@ def lever_view(inp: E.Inputs, r3: E.LemResult, k: int) -> go.Figure:
     rho = f["rho"]
     th = np.linspace(np.pi, 2 * np.pi, 400)
     fig = go.Figure()
-    xs = np.linspace(min(m.x1, -inp.H / math.tan(math.radians(inp.beta))) - 30, max(m.x0, 0) + 60, 500)
+    xa, xb, _ = _frame(inp, m)
+    xs = np.linspace(xa, xb, 500)
     fig.add_trace(go.Scatter(x=xs, y=E.ground_z(xs, inp.H, inp.beta), mode="lines", line=dict(color=GROUND, width=2),
                              name="ground (any y)", hoverinfo="skip"))
     fig.add_trace(go.Scatter(x=inp.xc + rho * np.cos(th), y=inp.zc + rho * np.sin(th), mode="lines",

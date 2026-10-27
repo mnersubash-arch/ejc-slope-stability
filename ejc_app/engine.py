@@ -38,6 +38,7 @@ MODELS = {
     "ejc_original": "EJC, original closure sigma2 = sigma3/nu - sigma1 (admissibility check only)",
     "ghb": "Conventional generalised Hoek-Brown (sigma2 = sigma3)",
     "ejc_sigma2_eq_sigma3": "EJC with the closure sigma2 = sigma3 (must reproduce GHB)",
+    "mc": "Mohr-Coulomb, constant c' and phi' (D'Esterre presets)",
 }
 
 # local-state reason codes (brief §1.3 acceptance); 0 = accepted
@@ -68,7 +69,7 @@ def hoek_brown_parameters(gsi: float, mi: float, d: float) -> tuple[float, float
 
 @dataclass(frozen=True)
 class Strength:
-    """Strength model and rock-mass constants. ``sigma_ci`` in MPa."""
+    """Strength model and constants. ``sigma_ci`` in MPa; Mohr-Coulomb ``c_mc`` in kPa, ``phi_mc`` in degrees."""
 
     sigma_ci: float
     mb: float
@@ -76,10 +77,16 @@ class Strength:
     a: float
     model: str = "ejc_moscarda"
     nu: float = 0.271
+    c_mc: float = 0.0
+    phi_mc: float = 0.0
 
     def __post_init__(self):
         if self.model not in MODELS:
             raise ValueError(f"unknown strength model {self.model!r}")
+        if self.model == "mc":
+            if not (self.c_mc >= 0 and 0 <= self.phi_mc < 90):
+                raise ValueError("require c' >= 0 and 0 <= phi' < 90 deg")
+            return
         if not (self.sigma_ci > 0 and self.mb > 0 and self.s > 0 and 0 < self.a <= 1):
             raise ValueError("require sigma_ci > 0, m_b > 0, s > 0 and 0 < a <= 1")
         if self.model in ("ejc_moscarda", "ejc_original") and not 0 < self.nu < 0.5:
@@ -281,13 +288,36 @@ def admissible_sn_min(st: Strength, top: Optional[float] = None) -> float:
     return float(np.min(gs.sn[ok]) * 1000.0) if ok.any() else math.nan
 
 
+def _mohr_coulomb(sn_kpa, st: Strength) -> StrengthResult:
+    """Mohr-Coulomb with constant c' and phi': tau_s = c' + sigma_n tan(phi'). The principal stresses are those of the
+    Mohr circle tangent to that line at sigma_n (centre sigma_n + tau tan(phi'), radius tau/cos(phi'), sigma2 = sigma3)
+    and M = (1 + sin phi')/(1 - sin phi'). The EJC residuals do not apply (NaN). A state is accepted when tau_s >= 0."""
+    t = np.atleast_1d(np.asarray(sn_kpa, dtype=float))
+    n = len(t)
+    phi = np.full(n, math.radians(st.phi_mc))
+    c = np.full(n, float(st.c_mc))
+    tan_p = np.tan(phi)
+    tau = c + t * tan_p
+    with np.errstate(invalid="ignore"):
+        centre = t + tau * tan_p
+        radius = tau / np.cos(phi)
+    s3 = (centre - radius) / 1000.0
+    code = np.where(~np.isfinite(tau), DOMAIN, np.where(tau >= 0, OK, SHEAR))
+    return StrengthResult(sn_target=t, sn=t.copy(), phi=phi, c=c, tau=tau, M=(1 + np.sin(phi)) / (1 - np.sin(phi)),
+                          s1=(centre + radius) / 1000.0, s2=s3.copy(), s3=s3, f=np.full(n, np.nan),
+                          closure=np.full(n, np.nan), code=code, n_brackets=np.ones(n, dtype=int))
+
+
 def solve_strength(sn_kpa, st: Strength, n_scan: int = N_SCAN) -> StrengthResult:
     """Route 2 (brief §1.3): for each target sigma_n, scan sigma3 for the admissible interval, bracket
     sigma_n(sigma3) - sigma_n,target and bisect. The first bracket (lowest sigma3) is used; ``n_brackets`` counts all.
 
     The scan runs over sigma3 in (sigma3_t, max target], since sigma3 <= sigma_n for every admissible state; the
     points are geometric in sigma3 - sigma3_t so the tensile end is resolved. One scan serves all targets.
+    Mohr-Coulomb (``model="mc"``) needs no scan (see ``_mohr_coulomb``).
     """
+    if st.model == "mc":
+        return _mohr_coulomb(sn_kpa, st)
     target_kpa = np.atleast_1d(np.asarray(sn_kpa, dtype=float))
     t = target_kpa / 1000.0
     n = len(t)
@@ -445,6 +475,11 @@ class Inputs:
     tension: str = "none"                   # "none", "C0" or "T0" (brief §1.6 sensitivities, Table 5.7)
     iteration: str = "default"              # "default" (brief §1.4) or "native_v15" (see solve())
     safeguard: str = "project"              # "project" (thesis Section 4.6) or "none" (diagnostic only)
+    # additions for the D'Esterre (2024) presets; all off by default
+    c_mc: float = 0.0                       # Mohr-Coulomb c' (kPa), model "mc"
+    phi_mc: float = 0.0                     # Mohr-Coulomb phi' (deg), model "mc"
+    ru: Optional[float] = None              # pore-pressure ratio: u = ru gamma h (None = dry or water table)
+    base_circle: bool = False               # grid from exit to entry, floor columns allowed (see build_mesh)
 
     @property
     def hb(self) -> tuple[float, float, float]:
@@ -453,7 +488,7 @@ class Inputs:
 
     def strength(self) -> Strength:
         mb, s, a = self.hb
-        return Strength(self.sigma_ci, mb, s, a, self.model, self.nu)
+        return Strength(self.sigma_ci, mb, s, a, self.model, self.nu, self.c_mc, self.phi_mc)
 
     def with_(self, **kw) -> "Inputs":
         return replace(self, **kw)
@@ -518,21 +553,74 @@ class Mesh:
         return 2.0 * v if self.dim == 3 else v
 
 
+def slip_extent(inp: Inputs, n: int = 20001) -> tuple[float, float]:
+    """Entry and exit of the slip circle on the central section y = 0: the ends of the x-interval where the ground
+    (pit floor z_t = 0 ahead of the toe included) is above the circle. Sampled on n points over [x_c - R, x_c + R],
+    each end refined by bisection. Raises ValueError if the circle does not cut the ground."""
+    xc, zc, R = inp.xc, inp.zc, inp.R
+
+    def above(x):
+        return bool(ground_z(x, inp.H, inp.beta) - sphere_z(x, 0.0, xc, zc, R) > 0)
+
+    xs = np.linspace(xc - R, xc + R, n)
+    with np.errstate(invalid="ignore"):
+        d = ground_z(xs, inp.H, inp.beta) - sphere_z(xs, 0.0, xc, zc, R)
+    pos = np.isfinite(d) & (d > 0)
+    if not pos.any():
+        raise ValueError("the slip circle does not cut the ground: there is no sliding mass")
+
+    def refine(a, b):
+        """Boundary between a (outside the mass) and b (inside)."""
+        for _ in range(200):
+            mid = 0.5 * (a + b)
+            if mid in (a, b):
+                break
+            if above(mid):
+                b = mid
+            else:
+                a = mid
+        return 0.5 * (a + b)
+
+    first, last = int(np.argmax(pos)), n - 1 - int(np.argmax(pos[::-1]))
+    x_entry = float(xs[0]) if first == 0 else refine(float(xs[first - 1]), float(xs[first]))
+    x_exit = float(xs[-1]) if last == n - 1 else refine(float(xs[last + 1]), float(xs[last]))
+    return x_entry, x_exit
+
+
 def build_mesh(inp: Inputs, dim: int, n: int) -> Mesh:
     """Mesh (brief §1.4): x from x0 = x_c - sqrt(R^2 - z_c^2) to x1 = x_c - R, dx = (x0 - x1)/N, x_i = x0 - (i - 1/2) dx;
     3D: y from 0 to R, dy = R/N, y_j = (j - 1/2) dy. 2D (brief §1.5): y = 0, unit thickness, rho = R.
     Active: real z_b (eq. 4.10; R^2 - (x - x_c)^2 - y^2 > 0, so g_z > 0), x <= 0 and h = z_t - z_b > 0.
     Column quantities (eq. 4.11): A_h, g_z, A = A_h/g_z, W = gamma h A_h, rho = sqrt(R^2 - y^2), kappa = (x_c - x)/rho.
+
+    The default grid needs the circle to cross the toe level at or ahead of the toe (x0 >= -1e-5 R, the tolerance of
+    the thesis workbook, which admits the published circle's 2.6 mm rounding); otherwise it would cut off the toe
+    region, so it is refused.
+
+    ``base_circle=True`` (off by default): x runs from the circle's exit x0 to its entry x1 on the central section
+    (``slip_extent``), with the same cell numbering, and floor columns are allowed: x > 0 with z_t = 0 and h = -z_b > 0.
+    Pore pressure: ``ru`` gives u = ru gamma h for every column or slice; otherwise the water table (``wet``) or dry.
     """
     if dim not in (2, 3):
         raise ValueError("dim must be 2 or 3")
     if not (isinstance(n, (int, np.integer)) and n >= 1):
         raise ValueError("mesh size must be a positive integer")
-    if not (inp.R > inp.zc):
-        raise ValueError("require R > z_c (the sphere must cut the toe level)")
+    if inp.ru is not None:
+        if inp.wet:
+            raise ValueError("choose a water table (wet) or r_u, not both")
+        if not 0 <= inp.ru < 1:
+            raise ValueError("require 0 <= r_u < 1")
     xc, zc, R = inp.xc, inp.zc, inp.R
-    x0 = xc - math.sqrt(R * R - zc * zc)
-    x1 = xc - R
+    if inp.base_circle:
+        x1, x0 = slip_extent(inp)
+    else:
+        if not (R > zc):
+            raise ValueError("require R > z_c (the sphere must cut the toe level)")
+        x0 = xc - math.sqrt(R * R - zc * zc)
+        x1 = xc - R
+        if x0 < -1e-5 * R:
+            raise ValueError(f"the circle crosses the toe level {-x0:.4g} m behind the toe, so the default grid would cut "
+                             f"off the toe region; use the base-circle option")
     dx = (x0 - x1) / n
     if dim == 3:
         dy = R / n
@@ -546,7 +634,7 @@ def build_mesh(inp: Inputs, dim: int, n: int) -> Mesh:
         y = np.zeros(n)
     x = x0 - (ii - 0.5) * dx
     q = R * R - (x - xc) ** 2 - y ** 2
-    keep = (q > 0) & (x <= 0)
+    keep = (q > 0) if inp.base_circle else (q > 0) & (x <= 0)
     ii, jj, x, y, q = ii[keep], jj[keep], x[keep], y[keep], q[keep]
     zb = zc - np.sqrt(q)
     zt = ground_z(x, inp.H, inp.beta)
@@ -557,7 +645,10 @@ def build_mesh(inp: Inputs, dim: int, n: int) -> Mesh:
     g = np.sqrt(q) / R
     rho = np.sqrt(R * R - y * y) if dim == 3 else np.full(len(x), R)
     kap = (xc - x) / rho
-    if inp.wet:
+    if inp.ru is not None:
+        zw = np.full(len(x), np.nan)
+        u = inp.ru * inp.gamma * h
+    elif inp.wet:
         zw = water_z(x, inp.Hw, inp.beta_w)
         u = GAMMA_W * np.maximum(0.0, zw - zb)
     else:
@@ -648,9 +739,12 @@ def _local_sn(m: Mesh, c_e, t_e, F):
     return (m.w - m.u * m.ah - c_e * m.area * m.kap / F) / (m.area * ma), ma
 
 
-def projection_limit(st: Strength) -> float:
+def projection_limit(st: Strength) -> Optional[float]:
     """Projection limit of thesis Section 4.6 [kPa]: max(-1000 s sigma_ci/m_b, sigma_n at the admissible edge of the
-    closure). For GHB and the sigma2 = sigma3 closure the admissible range starts at the tensile limit itself."""
+    closure). For GHB and the sigma2 = sigma3 closure the admissible range starts at the tensile limit itself.
+    None for Mohr-Coulomb, whose strength exists at every sigma_n (no projection)."""
+    if st.model == "mc":
+        return None
     tensile = st.sigma3_tensile * 1000.0
     if st.model in ("ghb", "ejc_sigma2_eq_sigma3"):
         return tensile
@@ -683,6 +777,9 @@ def solve(m: Mesh, st: Strength, xc: float, gamma: float, form: str = "FH", tens
 
     In 2D (brief §1.5) the same equations hold with rho = R, g_z = cos(alpha), kappa = sin(alpha); the result is also
     checked against Bishop's expression (eq. 4.16).
+
+    Mohr-Coulomb (``model="mc"``): no projection, and tau_s < 0 is allowed on the iteration path (as in the thesis
+    workbook); tau_s >= 0 is required of the final state.
     """
     if form not in ("FH", "FM"):
         raise ValueError("form must be FH or FM")
@@ -710,8 +807,8 @@ def solve(m: Mesh, st: Strength, xc: float, gamma: float, form: str = "FH", tens
         res.reason = "Non-positive driving sum."
         return res
     sn = (gamma * m.h - m.u) * m.g ** 2
-    if safeguard == "project":
-        limit = projection_limit(st)
+    limit = projection_limit(st) if safeguard == "project" else None
+    if limit is not None:
         value = limit + max(1e-9, 0.001 * abs(limit))
         res.projection_limit, res.projection_value = limit, value
 
@@ -727,8 +824,11 @@ def solve(m: Mesh, st: Strength, xc: float, gamma: float, form: str = "FH", tens
     for it in range(1, max_iter + 1):
         stg = solve_strength(sn, st)
         res.iterations = it
-        if not stg.accepted.all():
-            bad = np.flatnonzero(~stg.accepted)
+        failed = ~stg.accepted
+        if st.model == "mc":
+            failed &= stg.code != SHEAR             # tau_s < 0 on the path: checked at the final state
+        if failed.any():
+            bad = np.flatnonzero(failed)
             res.strength, res.sn, res.rejected_index = stg, sn, bad
             res.reason = (f"{len(bad)} of {m.count} bases have no accepted local state at iteration {it}; "
                           f"first: column {int(bad[0])} at sigma_n = {sn[bad[0]]:.6g} kPa, {stg.reason(int(bad[0]))}")
@@ -793,10 +893,15 @@ def _final_checks(res: LemResult, m: Mesh, st: Strength, xc: float, F: float, sn
         Check("Convergence |dF|/F", dF, "< 1e-12", dF < TOL_DF),
         Check("Convergence max |d sigma_n| (kPa)", move, "< 1e-9", move < TOL_DSN),
         Check("Local states accepted (count rejected)", float((~acc).sum()), "0", bool(acc.all())),
-        Check("Max |f| unsquared EJC (MPa)", float(np.nanmax(np.abs(stg.f))) if finite.any() else math.nan,
-              "< 1e-8", bool(finite.all() and np.all(np.abs(stg.f) < TOL_EJC))),
-        Check("Max closure residual (MPa)", float(np.nanmax(np.abs(stg.closure))), "< 1e-8",
-              bool(np.all(np.abs(stg.closure) < TOL_CLOSURE))),
+    ]
+    if st.model != "mc":                     # EJC residuals (Mohr-Coulomb has none)
+        checks += [
+            Check("Max |f| unsquared EJC (MPa)", float(np.nanmax(np.abs(stg.f))) if finite.any() else math.nan,
+                  "< 1e-8", bool(finite.all() and np.all(np.abs(stg.f) < TOL_EJC))),
+            Check("Max closure residual (MPa)", float(np.nanmax(np.abs(stg.closure))), "< 1e-8",
+                  bool(np.all(np.abs(stg.closure) < TOL_CLOSURE))),
+        ]
+    checks += [
         Check("Ordering sigma1 >= sigma2 >= sigma3 (failures)",
               float(np.sum(~((stg.s1 >= stg.s2) & (stg.s2 >= stg.s3)))), "0",
               bool(np.all((stg.s1 >= stg.s2) & (stg.s2 >= stg.s3)))),
@@ -813,7 +918,7 @@ def _final_checks(res: LemResult, m: Mesh, st: Strength, xc: float, F: float, sn
     if res.tension in ("C0", "T0"):
         same = bool(np.array_equal(tens, tens_used))
         checks.append(Check("New tensile bases at the final state", float(np.sum(tens != tens_used)), "0", same))
-    if res.safeguard == "project":
+    if res.projection_limit is not None:
         last_proj = res.history[-1][5] if res.history else 0
         checks.append(Check("Projected bases at convergence", float(last_proj), "0", last_proj == 0))
         checks.append(Check("Min sigma_n above the projection limit (kPa)", float(np.min(sn) - res.projection_limit),

@@ -241,7 +241,7 @@ def verification_rows(runner: Optional[Runner] = None, slow: bool = False,
     rows += [by_rounding(g, "Gravity cap max(gamma h - u), dry (MPa, 3D 20x20)", float(cap_d.max()) / 1000, 1.61, 2),
              by_rounding(g, "Gravity cap max(gamma h - u), wet (MPa, 3D 20x20)", float(cap_w.max()) / 1000, 1.02, 2)]
     for nu, tgt, d in ((0.05, 0.92, 2), (0.10, 3.43, 2), (0.20, 19.23, 2), (0.271, 52.97, 2), (0.35, 177.8, 1),
-                       (0.45, 2188.0, 0)):
+                       (0.45, 2188.0, 0), (0.49, 59952.0, 0)):
         mn = m0 if nu == 0.271 else E.original_closure_minimum(77.7, mb, s, 0.5, nu)
         rows.append(by_rounding(g, f"Table 5.2: min sigma_n at nu = {nu:g} (MPa)", mn.sn_min, tgt, d))
     thr = E.original_closure_minimum(77.7, mb, s, 0.5, 0.05).sn_min * 1000.0

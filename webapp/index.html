@@ -293,7 +293,7 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
           <div data-num="zc"></div>
           <div data-num="R"></div>
           <label class="check"><input type="checkbox" id="base_circle"><span>Base circle: grid from exit to entry, floor columns allowed</span></label>
-          <p class="hint">Off by default (thesis grid). Needed for circles that cross the toe level behind the toe (x<sub>c</sub> ≤ 0) or exit on the floor ahead of the toe. Toe at the origin; the slope rises towards −x.</p>
+          <p class="hint">Off by default (thesis grid). Needed for circles that cross the toe level behind the toe (x<sub>c</sub> ≤ 0), exit on the floor ahead of the toe, or stay above the toe level (face circles, R ≤ z<sub>c</sub>). Toe at the origin; the slope rises towards −x.</p>
         </div>
       </details>
 
@@ -431,6 +431,27 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
       <section class="panel" id="panel-free-body" role="tabpanel" aria-labelledby="tab-free-body" hidden>
         <div id="fbd-msg"></div>
         <div id="fbd-body" class="stack">
+          <div class="subhead"><h3>All forces on the sliding mass</h3>
+            <div class="toolbar">
+              <div class="seg" role="radiogroup" aria-label="Free-body diagram of the whole mass">
+                <label><input type="radio" name="massview" id="massview-2" value="2" checked><span>2D central section</span></label>
+                <label><input type="radio" name="massview" id="massview-3" value="3"><span>3D full mass</span></label>
+              </div>
+            </div>
+          </div>
+          <p class="hint" id="mass-hint"></p>
+          <div id="mass-msg"></div>
+          <div id="mass-body" class="stack">
+            <div class="grid-32">
+              <div class="chart h-l" id="chart-mass"></div>
+              <div class="chart h-l" id="chart-polygon"></div>
+            </div>
+            <div class="tbl-wrap" id="mass-table"></div>
+            <div class="stack balance" id="mass-balance"></div>
+          </div>
+          <div class="subhead"><h3>One column and its matching slice</h3></div>
+          <div id="col-msg"></div>
+          <div id="col-body" class="stack">
           <div class="grid-32">
             <div class="stack">
               <h3 id="col-title">Column</h3>
@@ -453,6 +474,7 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
           <div class="grid-32" id="slice-body">
             <div class="chart h-l" id="chart-fbd2d"></div>
             <div class="stack"><div class="tbl-wrap" id="slice-table"></div><p class="balance" id="slice-balance"></p></div>
+          </div>
           </div>
         </div>
       </section>
@@ -627,7 +649,7 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
   // state
   // -------------------------------------------------------------------------------------------------------------
   let S = null, PRESET_KEY = DEFAULT_KEY, WIN = {};
-  const UI = { tab: "view-3d", field: "sigma_n", mirror: true, live: true, k3: null, k2: null, k3ij: null, k2i: null, tbl: "3" };
+  const UI = { tab: "view-3d", field: "sigma_n", mirror: true, live: true, k3: null, k2: null, k3ij: null, k2i: null, tbl: "3", mass: "2" };
   let RES = null;                         // last analysis: {key, inputs, r3, e3, r2, e2, orig, ms}
   let running = false, rerun = null, debounceT = null, lastError = null;
   const DIRTY = new Set(TABS);
@@ -933,6 +955,29 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
     "INPUT ERROR": ["critical", "✕", "Input error"] };
   const chip = (status) => { const [c, i, t] = STATUS[status] || ["neutral", "–", status]; return `<span class="chip ${c}"><i aria-hidden="true">${i}</i>${esc(t)}</span>`; };
   const note = (kind, html) => `<div class="note ${kind}"><i aria-hidden="true">${{ critical: "✕", warning: "!", info: "i", good: "✓" }[kind]}</i><div>${html}</div></div>`;
+  // Bases with tensile effective normal stress at an accepted state (QA/QC finding S3). The summary warns above a
+  // quarter of the bases: the thesis's wet baseline has 30% and C0 lowers its FoS by 24%, the dry baseline has 8% and
+  // C0 lowers it by 2.5% (thesis §5.8). The same rule is in ejc_app/ui.py.
+  const TENSILE_WARN = 0.25;
+  function tensileCount(r) {
+    if (!r || r.fos === null || !r.sn) return null;
+    let n = 0;
+    for (const v of r.sn) if (v < 0) n++;
+    return { n, total: r.sn.length };
+  }
+  const shareText = (n, total) => (n === 0 ? "0%" : (100 * n) / total < 1 ? "<1%" : `${Math.round((100 * n) / total)}%`);
+  const tensileText = (t) => (t ? `${t.n} of ${t.total} (${shareText(t.n, t.total)})` : "–");
+  function tensileNote(inp, r3, r2) {
+    if (inp.tension !== "none") return null;
+    const found = [["3D", tensileCount(r3)], ["2D", tensileCount(r2)]].filter(([, t]) => t && t.n > 0);
+    if (!found.length) return null;
+    const list = found.map(([lab, t]) => `${lab} ${tensileText(t)}`).join(", ");
+    if (found.some(([, t]) => t.n / t.total > TENSILE_WARN))
+      return note("warning", `<b>Tensile bases: ${list}.</b> More than a quarter of the bases carry tensile effective normal stress ` +
+        "(σ′<sub>n</sub> &lt; 0) and the FoS counts their resistance. Compare the C0 and T0 options before relying on it (thesis §5.8, Table 5.7).");
+    return note("info", `<b>Tensile bases: ${list}.</b> These bases carry tensile effective normal stress (σ′<sub>n</sub> &lt; 0) and the ` +
+      "FoS counts their resistance; the C0 and T0 options show how much it depends on them (thesis §5.8).");
+  }
 
   function renderSummary() {
     const errs = validate(S);
@@ -984,6 +1029,7 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
       facts.push(["Iterations 3D / 2D", pair(r3 ? r3.iterations : "–", r2 ? r2.iterations : "–")]);
       facts.push(["Active columns / slices", pair(r3 ? r3.mesh.count : "–", r2 ? r2.mesh.count : "–")]);
       facts.push(["Projections 3D / 2D", pair(r3 ? r3.projections : "–", r2 ? r2.projections : "–")]);
+      if (!orig) facts.push(["Tensile bases (σ′<sub>n</sub> &lt; 0) 3D / 2D", pair(tensileText(tensileCount(r3)), tensileText(tensileCount(r2)))]);
       if (r3) facts.push(["Sliding volume (full mass)", `${gc(r3.mesh.volume, 4)} m³`]);
       if (r2) facts.push(["2D area", `${gc(r2.mesh.volume, 4)} m²`]);
     }
@@ -1005,6 +1051,7 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
         notes.push(note(kind, `<b>${lab}: ${esc(r.status)}, no accepted FoS.</b> ${esc(r.reason)}`));
       }
     }
+    if (!orig) { const tn = tensileNote(inp, r3, r2); if (tn) notes.push(tn); }
     $("#notes").innerHTML = notes.join("");
     renderMinibar();
   }
@@ -1372,12 +1419,200 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
     return `Vertical balance (eq. 4.12) ${lhs} = <b class="mono">${e3(f.residual)} kN${twoD ? "/m" : ""}</b> (relative ${e2(f.residual_rel)}; limit 1e-9) ` +
       `<span class="res ${ok ? "pass" : "fail"}"><i aria-hidden="true">${ok ? "✓" : "✕"}</i>${ok ? "PASS" : "FAIL"}</span>`;
   }
+  // whole-mass free-body diagram (E.massForces): every force on the sliding mass, the force polygon and the balance
+  const MASS_NAMES = { W: "W, weight", N: "N′, effective normal force", U: "U, pore-water force", S: "S, mobilised shear" };
+  const massColors = (T) => ({ W: T.ink, N: T.n, U: T.water, S: T.slip });
+  const big = (v) => (Math.abs(v) >= 1e5 ? Math.round(v).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",") : gc(v, 6));   // whole kN, kN·m
+  const resChip = (ok) => `<span class="res ${ok ? "pass" : "fail"}"><i aria-hidden="true">${ok ? "✓" : "✕"}</i>${ok ? "PASS" : "FAIL"}</span>`;
+  /** Sum the element forces over groups of neighbouring slices (2D) or blocks of b x b columns (3D) so that at most
+   *  `limit` arrows of each kind are drawn. Display only: the table and the balance use every element. */
+  function massGroups(mf, m, limit) {
+    const n = mf.count, el = mf.el;
+    let size = 1, keyOf;
+    if (m.dim === 2) {
+      size = Math.max(1, Math.ceil(n / limit));
+      keyOf = (k) => String(Math.floor(k / size));
+    } else {
+      const key = (k, b) => `${Math.floor((m.i[k] - 1) / b)},${Math.floor((m.j[k] - 1) / b)}`;
+      const blocks = (b) => new Set(Array.from({ length: n }, (_, k) => key(k, b))).size;
+      while (blocks(size) > limit) size++;
+      keyOf = (k) => key(k, size);
+    }
+    const byKey = new Map();
+    for (let k = 0; k < n; k++) { const q = keyOf(k); if (!byKey.has(q)) byKey.set(q, []); byKey.get(q).push(k); }
+    const groups = [];
+    for (const ks of byKey.values()) {
+      let W = 0, cx = 0, cy = 0, cz = 0;
+      const N = [0, 0, 0], U = [0, 0, 0], S = [0, 0, 0];
+      for (const k of ks) {
+        W += el.W[k]; cx += el.W[k] * el.x[k]; cy += el.W[k] * el.y[k]; cz += el.W[k] * el.zm[k];
+        N[0] += el.N[k] * el.nx[k]; N[1] += el.N[k] * el.ny[k]; N[2] += el.N[k] * el.nz[k];
+        U[0] += el.U[k] * el.nx[k]; U[1] += el.U[k] * el.ny[k]; U[2] += el.U[k] * el.nz[k];
+        S[0] += el.S[k] * el.sx[k]; S[2] += el.S[k] * el.sz[k];
+      }
+      cx /= W; cy /= W; cz /= W;
+      let b = ks[0], best = Infinity;                 // base point: the element nearest the group's centre of gravity
+      for (const k of ks) { const d = (el.x[k] - cx) ** 2 + (el.y[k] - cy) ** 2; if (d < best) { best = d; b = k; } }
+      const name = m.dim === 2 ? (ks.length === 1 ? `slice ${ks[0]}` : `slices ${ks[0]}–${ks[ks.length - 1]}`)
+        : (ks.length === 1 ? `column ${ks[0]} (i = ${m.i[ks[0]]}, j = ${m.j[ks[0]]})` : `${ks.length} columns around i = ${m.i[b]}, j = ${m.j[b]}`);
+      groups.push({ name, W, cen: [cx, cy, cz], base: [el.x[b], el.y[b], el.zb[b]], tan: [el.sx[b], 0, el.sz[b]], nrm: [el.nx[b], el.ny[b], el.nz[b]], N, U, S });
+    }
+    return { groups, size };
+  }
+  /** Arrows of one kind for every group: [start, end] pairs in 3D, with the hover text of each. */
+  function massArrows(groups, kind, sc, off, unit) {
+    const out = [];
+    for (const g of groups) {
+      const v = kind === "W" ? [0, 0, -g.W] : g[kind], vec = v.map((c) => c * sc), mag = Math.hypot(...v);
+      if (!(mag > 0)) continue;
+      let a, b;
+      if (kind === "W") { a = g.cen; b = add3(g.cen, vec); }
+      else if (kind === "S") { a = g.base; b = add3(g.base, vec); }
+      else { const p = kind === "U" ? add3(g.base, mul3(g.tan, off)) : g.base; a = sub3(p, vec); b = p; }   // N', U end at the base
+      const tensile = kind === "N" && v[0] * g.nrm[0] + v[1] * g.nrm[1] + v[2] * g.nrm[2] < 0;   // N' pointing out of the mass
+      out.push({ a, b, text: `${g.name}<br>${kind === "N" ? "N′" : kind} = ${big(mag)} ${unit}${tensile ? " (tensile: pulls on the mass)" : ""}` });
+    }
+    return out;
+  }
+  function renderMass() {
+    const dim = UI.mass === "3" ? 3 : 2, r = dim === 3 ? RES.r3 : RES.r2, inp = RES.inputs, T = theme();
+    const err = dim === 3 ? RES.e3 : RES.e2, lab = `${dim}D`;
+    const why = err ? `${lab}: input error. ${esc(err)}` : !r || !r.mesh.count ? `${lab}: no active ${dim === 3 ? "columns" : "slices"}.`
+      : !r.tau_used ? `${lab}: ${esc(r.status)}, no final state to draw. ${esc(r.reason)}` : null;
+    $("#mass-body").hidden = !!why;
+    if (why) { msg("mass-msg", why, "warning"); $("#mass-hint").textContent = ""; return; }
+    msg("mass-msg", r.fos === null ? `${lab}: ${esc(r.status)}. The forces use the last trial F = ${fx(r.f_trial, 6)}, which is not a FoS.` : "");
+    const mf = E.massForces(inp, r), m = r.mesh, C = massColors(T), uF = dim === 3 ? "kN" : "kN/m";
+    const { groups, size } = massGroups(mf, m, dim === 3 ? 120 : 50);
+    let xlo = Infinity, xhi = -Infinity, zlo = Infinity, zhi = -Infinity, yhi = 0;
+    for (let k = 0; k < m.count; k++) {
+      xlo = Math.min(xlo, m.x[k]); xhi = Math.max(xhi, m.x[k]); zlo = Math.min(zlo, m.zb[k]); zhi = Math.max(zhi, m.zt[k]); yhi = Math.max(yhi, m.y[k]);
+    }
+    const span = Math.max(xhi - xlo + m.dx, zhi - zlo, 2 * yhi);
+    let peak = 0;
+    for (const g of groups) peak = Math.max(peak, g.W, Math.hypot(...g.N), Math.hypot(...g.U), Math.hypot(...g.S));
+    const sc = (dim === 3 ? 0.25 : 0.14) * span / peak, off = 0.025 * span;
+    const kinds = ["W", "N", "U", "S"].filter((k) => k !== "U" || mf.totals.U.x !== 0 || mf.totals.U.z !== 0);
+    const total = (k) => (k === "W" ? mf.weight : Math.hypot(mf.totals[k].x, mf.totals[k].z));
+    const legend = (k) => `${MASS_NAMES[k]} (Σ = ${big(total(k))} ${uF})`;
+    const data = [];
+    if (dim === 2) {
+      const [xa, xb] = frame(inp, m), xs = linspace(xa, xb, 400);
+      const xe = slipX(inp, m, 600).filter((x) => E.groundZ(x, inp.H, inp.beta) > E.sphereZ(x, 0, inp.xc, inp.zc, inp.R));   // ground above the arc
+      const arc = xe.map((x) => E.sphereZ(x, 0, inp.xc, inp.zc, inp.R));
+      data.push({ type: "scatter", x: xe.concat(xe.slice().reverse()), y: xe.map((x) => E.groundZ(x, inp.H, inp.beta)).concat(arc.slice().reverse()),
+        fill: "toself", fillcolor: rgba(T.rock, 0.9), line: { color: T.rockEdge, width: 1 }, mode: "lines", name: "sliding mass", hoverinfo: "skip" });
+      data.push({ type: "scatter", x: xs, y: xs.map((x) => E.groundZ(x, inp.H, inp.beta)), mode: "lines", line: { color: T.rockEdge, width: 2 }, name: "ground", hoverinfo: "skip", showlegend: false });
+      if (inp.wet) data.push({ type: "scatter", x: xs, y: xs.map((x) => Math.min(E.waterZ(x, inp.Hw, inp.beta_w), E.groundZ(x, inp.H, inp.beta))), mode: "lines",
+        line: { color: T.water, width: 1.5, dash: "dash" }, name: "water table", hoverinfo: "skip" });
+      data.push({ type: "scatter", x: xe, y: arc, mode: "lines", line: { color: T.slip, width: 2 }, name: "slip surface", hoverinfo: "skip", showlegend: false });
+      data.push({ type: "scatter", x: [inp.xc], y: [inp.zc], mode: "markers+text", marker: { symbol: "circle-x", size: 12, color: T.slip }, text: ["O, rotation axis"],
+        textposition: "middle right", textfont: { color: T.ink }, name: "centre", hovertext: [`centre (${fx(inp.xc, 2)}, ${fx(inp.zc, 2)}), R = ${fx(inp.R, 2)} m`], hoverinfo: "text", showlegend: false });
+      // initial view: the mass and its arrows (the circle centre O lies outside it; zoom out to see it)
+      let bx0 = Infinity, bx1 = -Infinity, bz0 = Infinity, bz1 = -Infinity;
+      const grow = (x, z) => { if (x === null || !isNum(z)) return; bx0 = Math.min(bx0, x); bx1 = Math.max(bx1, x); bz0 = Math.min(bz0, z); bz1 = Math.max(bz1, z); };
+      xe.forEach((x, q) => { grow(x, E.groundZ(x, inp.H, inp.beta)); grow(x, arc[q]); });
+      for (const k of kinds) {
+        const x = [], y = [], size = [], text = [];
+        for (const a of massArrows(groups, k, sc, off, uF)) {
+          x.push(a.a[0], a.b[0], null); y.push(a.a[2], a.b[2], null); size.push(0, 10, 0); text.push(a.text, a.text, "");
+          grow(a.a[0], a.a[2]); grow(a.b[0], a.b[2]);
+        }
+        data.push({ type: "scatter", mode: "lines+markers", x, y, text, hoverinfo: "text", name: legend(k), line: { color: C[k], width: 1.6 },
+          marker: { symbol: "arrow", size, angleref: "previous", color: C[k] } });
+      }
+      const px = 0.06 * (bx1 - bx0), pz = 0.06 * (bz1 - bz0);
+      plot("chart-mass", data, layout(T, { margin: { l: 10, r: 10, t: 40, b: 10 }, uirevision: `${PRESET_KEY}|mass2d`,
+        xaxis: { title: "x (m), toe at 0", range: [bx0 - px, bx1 + px] }, yaxis: { title: "z (m)", scaleanchor: "x", scaleratio: 1, range: [bz0 - pz, bz1 + pz] } }));
+    } else {
+      const bx = [], by = [], bz = [], tz = [];
+      for (let k = 0; k < m.count; k++) for (const sg of [1, -1]) { bx.push(m.x[k]); by.push(sg * m.y[k]); bz.push(m.zb[k]); tz.push(m.zt[k]); }
+      data.push({ type: "mesh3d", x: bx, y: by, z: bz, color: T.slip, opacity: 0.35, name: "slip surface", hoverinfo: "skip", showlegend: true, delaunayaxis: "z" });
+      data.push({ type: "mesh3d", x: bx, y: by, z: tz, color: T.rockEdge, opacity: 0.25, name: "ground over the mass", hoverinfo: "skip", showlegend: true, delaunayaxis: "z" });
+      for (const k of kinds) {
+        const x = [], y = [], z = [], text = [], cx = [], cy = [], cz = [], u = [], v = [], w = [];
+        for (const a of massArrows(groups, k, sc, off, uF)) for (const sg of [1, -1]) {
+          const A = [a.a[0], sg * a.a[1], a.a[2]], B = [a.b[0], sg * a.b[1], a.b[2]], d = sub3(B, A), L = Math.hypot(...d);
+          x.push(A[0], B[0], null); y.push(A[1], B[1], null); z.push(A[2], B[2], null); text.push(a.text, a.text, "");
+          cx.push(B[0]); cy.push(B[1]); cz.push(B[2]); u.push(d[0] / L); v.push(d[1] / L); w.push(d[2] / L);
+        }
+        data.push({ type: "scatter3d", mode: "lines", x, y, z, text, hoverinfo: "text", name: legend(k), legendgroup: k, line: { color: C[k], width: 3 } });
+        data.push({ type: "cone", x: cx, y: cy, z: cz, u, v, w, anchor: "tip", sizemode: "raw", sizeref: 0.035 * span, showscale: false,
+          colorscale: [[0, C[k]], [1, C[k]]], hoverinfo: "skip", showlegend: false, legendgroup: k, name: legend(k) });
+      }
+      plot("chart-mass", data, layout(T, { margin: { l: 0, r: 0, t: 40, b: 0 }, uirevision: `${PRESET_KEY}|mass3d`, scene: scene(T) }));
+    }
+    // force polygon: the totals head to tail; the dashed arrow is their resultant (zero for full equilibrium)
+    const poly = [];
+    let p = [0, 0];
+    for (const k of ["W", "U", "N", "S"]) {
+      const t = mf.totals[k];
+      if (!(Math.hypot(t.x, t.z) > 1e-12 * mf.weight)) continue;
+      const q = [p[0] + t.x, p[1] + t.z];
+      poly.push({ type: "scatter", mode: "lines+markers+text", x: [p[0], (p[0] + q[0]) / 2, q[0]], y: [p[1], (p[1] + q[1]) / 2, q[1]],
+        text: ["", `Σ${k === "N" ? "N′" : k}`, ""], textposition: "middle right", textfont: { color: T.ink, size: 13 },
+        line: { color: C[k], width: 3 }, marker: { symbol: "arrow", size: [0, 0, 14], angleref: "previous", color: C[k] },
+        hovertext: Array(3).fill(`Σ${k === "N" ? "N′" : k}: x ${big(t.x)}, z ${big(t.z)} ${uF}`), hoverinfo: "text", name: `Σ${k === "N" ? "N′" : k}`, showlegend: false });
+      p = q;
+    }
+    const net = mf.totals.net;
+    poly.push({ type: "scatter", mode: "lines+markers", x: [0, net.x], y: [0, net.z], line: { color: T.ink2, width: 2, dash: "dash" },
+      marker: { symbol: "arrow", size: [0, 12], angleref: "previous", color: T.ink2 }, name: `resultant: x ${big(net.x)}, z ${e2(net.z)} ${uF}`,
+      hovertext: Array(2).fill(`resultant of all forces: x ${big(net.x)}, z ${e3(net.z)} ${uF}`), hoverinfo: "text" });
+    plot("chart-polygon", poly, layout(T, { margin: { l: 10, r: 10, t: 40, b: 10 }, uirevision: `${PRESET_KEY}|poly${dim}`,
+      title: { text: "Force polygon (totals, head to tail)", font: { size: 13, color: T.ink2 }, x: 0.02 },
+      xaxis: { title: `horizontal x (${uF})` }, yaxis: { title: `vertical z (${uF})`, scaleanchor: "x", scaleratio: 1 },
+      legend: { orientation: "h", x: 0, y: -0.12, yanchor: "top", font: { color: T.ink2 }, bgcolor: "rgba(0,0,0,0)" } }));
+    $("#mass-hint").innerHTML = (dim === 2
+      ? "Central section y = 0, per metre. Each slice carries its weight W at its centre of gravity and, on its base, the effective normal force N′ and the pore-water force U (along the base normal, into the mass) and the mobilised shear S = τ<sub>s</sub> A / F (along the base, against the rotation about the circle centre O; zoom out to see O). A tensile N′ points out of the mass."
+      : `Full mass (both halves of the symmetric model). Each column carries its weight W at its centre of gravity and, on its base, N′, U and S as in the 2D section; the mass rotates about the axis through (x<sub>c</sub>, z<sub>c</sub>) = (${fx(inp.xc, 1)}, ${fx(inp.zc, 1)}) m, parallel to y. Drag to rotate the view.`) +
+      " All arrows share one scale; click a force in the legend to hide it." +
+      (size > 1 ? ` For display, the forces are summed over ${dim === 2 ? `groups of ${size} slices` : `blocks of ${size} × ${size} columns`}; the table uses every ${dim === 2 ? "slice" : "column"}.` : "");
+    $("#mass-table").innerHTML = massTable(mf);
+    $("#mass-balance").innerHTML = massBalance(mf);
+  }
+  function massTable(mf) {
+    const t = mf.totals, M = mf.moments, uF = mf.dim === 3 ? "kN" : "kN/m", uM = mf.dim === 3 ? "kN·m" : "kN·m/m";
+    const f = (v) => (v === 0 ? "0" : Math.abs(v) < 1e-6 * mf.weight ? e3(v) : big(v));
+    const row = (name, v, mom, dir) => `<tr><td>${name}</td><td class="n">${f(v.x)}</td><td class="n">${f(v.z)}</td><td class="n">${f(Math.hypot(v.x, v.z))}</td><td class="n">${mom}</td><td>${dir}</td></tr>`;
+    return `<table class="data"><thead><tr><th>Force on the ${mf.dim === 3 ? "full mass" : "section, per metre"}</th><th>Horizontal x (${uF})</th><th>Vertical z (${uF})</th>` +
+      `<th>Magnitude (${uF})</th><th>Moment about the axis (${uM})</th><th>Direction</th></tr></thead><tbody>` +
+      row("W, weight", t.W, big(M.W), "vertical, down, at each element's centre of gravity; drives the rotation") +
+      row("N′ = σ<sub>n</sub> A, effective normal force", t.N, "0", "normal to the slip surface, through the sphere centre") +
+      row("U = u A, pore-water force", t.U, "0", "normal to the slip surface, through the sphere centre") +
+      row("S = τ<sub>s</sub> A / F, mobilised shear", t.S, big(M.S), `along the slip surface, against the rotation (F = ${fx(mf.F, 6)})`) +
+      row("<b>Sum of all forces</b>", t.net, e3(M.net), "resultant on the mass") + "</tbody></table>";
+  }
+  function massBalance(mf) {
+    const t = mf.totals, M = mf.moments, W = mf.weight, uF = mf.dim === 3 ? "kN" : "kN/m", uM = mf.dim === 3 ? "kN·m" : "kN·m/m";
+    const el = mf.dim === 3 ? "column" : "slice", up = t.N.z + t.U.z + t.S.z;
+    const vOk = Math.abs(t.net.z) <= 1e-9 * W && mf.vertical_max_rel <= 1e-9;
+    const momentForm = mf.dim === 2 || mf.form === "FM";
+    return `<p><b>Vertical:</b> ΣW = ${big(W)} ${uF} down; the vertical parts of N′, U and S add to ${big(up)} ${uF} up. ` +
+      `Net ${e3(t.net.z)} ${uF} (${e2(Math.abs(t.net.z) / W)} of the weight): every ${el} balances vertically (eq. 4.12; largest relative residual ` +
+      `${e2(mf.vertical_max_rel)}) ${resChip(vOk)}</p>` +
+      `<p><b>Horizontal:</b> net ${big(t.net.x)} ${uF}, ${fx(100 * Math.abs(t.net.x) / W, 2)}% of the weight. ` +
+      `${mf.dim === 3 ? "Hungr's method" : "Bishop's simplified method"} does not enforce horizontal force equilibrium (thesis §5.5, §5.9), so this part stays ` +
+      `unbalanced. The forces between ${el}s act inside the mass and cancel in these sums; the method takes their vertical (shear) parts as zero.</p>` +
+      `<p><b>Moments about the rotation axis</b> (through x<sub>c</sub>, z<sub>c</sub>, parallel to y): the weight drives ${big(M.W)} ${uM} and the mobilised ` +
+      `shear resists ${big(-M.S)} ${uM}; N′ and U act through the axis. Net ${e3(M.net)} ${uM} (${e2(Math.abs(M.net) / M.W)} of the driving moment). ` +
+      (momentForm ? `${mf.dim === 2 ? "Bishop's method (eq. 4.16)" : "The moment form F<sub>M</sub> (eq. 4.15)"} balances this moment ${resChip(Math.abs(M.net) <= 1e-8 * M.W)}`
+        : `F<sub>H</sub> balances ΣS = ΣWκ instead (eq. 4.14; relative residual ${e2(Math.abs(mf.method.residual))}); the moment form F<sub>M</sub> balances this moment (eq. 4.15, thesis §5.5).`) +
+      "</p><p class=\"hint\">Not in the model: external loads (surcharge, water in a tension crack or against the face) and seismic forces.</p>";
+  }
   function renderFbd() {
-    const r3 = RES && RES.r3;
-    const why = noResult(r3, RES && RES.e3, "3D") || (r3 && !r3.tau_used ? ["The 3D run did not reach a final state, so there are no column forces to draw.", "warning"] : null);
-    $("#fbd-body").hidden = !!why;
-    if (why) { msg("fbd-msg", why[0], why[1]); return; }
-    msg("fbd-msg", r3.fos === null ? `3D: ${esc(r3.status)}. The diagram uses the last trial F = ${fx(r3.f_trial, 6)}, which is not a FoS.` : "");
+    // nothing to draw at all: not run yet, or the original closure (an admissibility check only)
+    const none = !RES ? [notRun(), "info"] : RES.inputs.model === "ejc_original"
+      ? ["The original closure is an admissibility check only; there are no forces to draw. See the summary above.", "info"] : null;
+    $("#fbd-body").hidden = !!none;
+    msg("fbd-msg", none ? none[0] : "", none ? none[1] : "info");
+    if (none) return;
+    renderMass();                       // the whole mass, 2D or 3D, with its own messages
+    const r3 = RES.r3;
+    const why = noResult(r3, RES.e3, "3D") || (!r3.tau_used ? ["The 3D run did not reach a final state, so there are no column forces to draw.", "warning"] : null);
+    $("#col-body").hidden = !!why;
+    if (why) { msg("col-msg", why[0], why[1]); return; }
+    msg("col-msg", r3.fos === null ? `3D: ${esc(r3.status)}. The diagram uses the last trial F = ${fx(r3.f_trial, 6)}, which is not a FoS.` : "");
     const inp = RES.inputs, m = r3.mesh, T = theme(), k = UI.k3;
     const f = E.columnForces(inp, r3, k);
     $("#col-title").textContent = `Column ${k} (i = ${m.i[k]}, j = ${m.j[k]})`;
@@ -1725,7 +1960,7 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
   function save() {
     clearTimeout(saveT);
     saveT = setTimeout(() => {
-      try { localStorage.setItem(STORE, JSON.stringify({ S, PRESET_KEY, UI: { tab: UI.tab, field: UI.field, mirror: UI.mirror, live: UI.live } })); } catch (e) { /* storage unavailable */ }
+      try { localStorage.setItem(STORE, JSON.stringify({ S, PRESET_KEY, UI: { tab: UI.tab, field: UI.field, mirror: UI.mirror, live: UI.live, mass: UI.mass } })); } catch (e) { /* storage unavailable */ }
     }, 300);
   }
   function load() {
@@ -1750,6 +1985,9 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
     });
     bindPick("k3", (k) => selectColumn(k)); bindPick("k3a", (k) => selectColumn(k)); bindPick("k2", (k) => selectSlice(k));
     document.querySelectorAll('input[name="tbl"]').forEach((el) => el.addEventListener("change", () => { if (el.checked) { UI.tbl = el.value; renderResultTable(); } }));
+    document.querySelectorAll('input[name="massview"]').forEach((el) => el.addEventListener("change", () => {
+      if (el.checked) { UI.mass = el.value; markDirty("free-body"); renderActive(); save(); }
+    }));
     $("#copy-csv").addEventListener("click", () => {
       const r = RES && (UI.tbl === "3" ? RES.r3 : RES.r2);
       if (!r || !r.mesh.count) { $("#copy-msg").textContent = "No results to copy."; return; }
@@ -1772,6 +2010,8 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
       Object.assign(UI, saved.UI || {});
       for (const k of Object.keys(NUM)) WIN[k] = windowFor(k, S);
       writeRail(); renderPresetInfo(); syncFieldSelects(); $("#mirror").checked = UI.mirror;
+      if (UI.mass !== "3") UI.mass = "2";
+      $(`#massview-${UI.mass}`).checked = true;
       changed({ immediate: true });
     } else {
       applyPreset(DEFAULT_KEY, { quiet: true });
@@ -1780,7 +2020,7 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
     const fromHash = location.hash.slice(1);
     setTab(TABS.includes(fromHash) ? fromHash : (UI.tab || "view-3d"), true);
     if (window.claude && window.claude.hot && window.claude.hot.snapshot) {
-      window.claude.hot.snapshot(() => ({ S, PRESET_KEY, UI: { tab: UI.tab, field: UI.field, mirror: UI.mirror, live: UI.live } }));
+      window.claude.hot.snapshot(() => ({ S, PRESET_KEY, UI: { tab: UI.tab, field: UI.field, mirror: UI.mirror, live: UI.live, mass: UI.mass } }));
     }
   }
 

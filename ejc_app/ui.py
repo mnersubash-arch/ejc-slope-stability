@@ -217,8 +217,8 @@ def sidebar() -> E.Inputs:
         for n in ("H", "beta", "xc", "zc", "R"):
             _num(st, n)
         _check(st, "base_circle", "Base circle: grid from exit to entry, floor columns allowed",
-               "Off by default (thesis grid). Needed for circles that cross the toe level behind the toe (x_c ≤ 0) or "
-               "exit on the floor ahead of the toe.")
+               "Off by default (thesis grid). Needed for circles that cross the toe level behind the toe (x_c ≤ 0), "
+               "exit on the floor ahead of the toe, or stay above the toe level (face circles, R ≤ z_c).")
     hb_off = d["strength"] == "MC"
     with sb.expander("Rock mass", expanded=False):
         _num(st, "gamma")
@@ -337,6 +337,43 @@ def status_badge(r: E.LemResult, label: str):
         st.info(f"**{label}: NOT APPLICABLE.** {r.reason}")
     else:
         st.error(f"**{label}: {r.status}, no accepted FoS.** {r.reason}")
+
+
+# Bases with tensile effective normal stress at an accepted state (QA/QC finding S3). The summary warns above a quarter
+# of the bases: the thesis's wet baseline has 30% and C0 lowers its FoS by 24%, the dry baseline has 8% and C0 lowers
+# it by 2.5% (thesis §5.8). The same rule is in webapp/index.html.
+TENSILE_WARN = 0.25
+
+
+def tensile_count(r: E.LemResult):
+    """(number of bases with sigma_n < 0, number of bases) at an accepted state, else None."""
+    if r is None or r.fos is None or r.sn is None:
+        return None
+    return int((r.sn < 0).sum()), len(r.sn)
+
+
+def tensile_text(t) -> str:
+    if t is None:
+        return "–"
+    n, total = t
+    share = "0%" if n == 0 else "<1%" if 100 * n / total < 1 else f"{round(100 * n / total)}%"
+    return f"{n} of {total} ({share})"
+
+
+def tensile_note(inp: E.Inputs, r3: E.LemResult, r2: E.LemResult):
+    """(kind, markdown) for the summary, or None: as tensileNote in webapp/index.html."""
+    if inp.tension != "none":
+        return None
+    found = [(lab, t) for lab, t in (("3D", tensile_count(r3)), ("2D", tensile_count(r2))) if t and t[0] > 0]
+    if not found:
+        return None
+    lst = ", ".join(f"{lab} {tensile_text(t)}" for lab, t in found)
+    if any(n / total > TENSILE_WARN for _, (n, total) in found):
+        return "warning", (f"**Tensile bases: {lst}.** More than a quarter of the bases carry tensile effective normal "
+                           "stress (σ′_n < 0) and the FoS counts their resistance. Compare the C0 and T0 options before "
+                           "relying on it (thesis §5.8, Table 5.7).")
+    return "info", (f"**Tensile bases: {lst}.** These bases carry tensile effective normal stress (σ′_n < 0) and the FoS "
+                    "counts their resistance; the C0 and T0 options show how much it depends on them (thesis §5.8).")
 
 
 def checks_frame(r: E.LemResult) -> pd.DataFrame:

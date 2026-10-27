@@ -1,8 +1,10 @@
-"""Page 4: free-body diagram of one column (3D) and of the matching slice (2D)."""
+"""Page 4: free-body diagrams: every force on the sliding mass (2D section or 3D full mass), then one column (3D)
+and the matching slice (2D)."""
 import numpy as np
 import pandas as pd
 import streamlit as st
 
+import engine as E
 import plots as P
 import ui
 
@@ -16,6 +18,39 @@ if A is None:
     st.stop()
 r3, r2 = A.r3, A.r2
 m3, m2 = r3.mesh, r2.mesh
+
+# ---- every force on the sliding mass
+st.subheader("All forces on the sliding mass")
+view = st.radio("View", ["2D central section", "3D full mass"], horizontal=True, key="mass_view",
+                label_visibility="collapsed")
+rm = r2 if view.startswith("2D") else r3
+if rm.mesh.count == 0 or rm.sn is None or rm.tau_used is None:
+    st.warning(f"{rm.mesh.dim}D: {rm.status}, no final state to draw. {rm.reason}")
+else:
+    if rm.fos is None:
+        st.warning(f"{rm.mesh.dim}D: {rm.status}. The forces use the last trial F = {rm.f_trial:.6f}, which is not a FoS.")
+    mf = E.mass_forces(A.inputs, rm)
+    fig, size = P.mass_fbd2d(A.inputs, rm, mf) if rm.mesh.dim == 2 else P.mass_fbd3d(A.inputs, rm, mf)
+    if rm.mesh.dim == 2:
+        st.caption("Central section y = 0, per metre. Each slice carries its weight W at its centre of gravity and, on its "
+                   "base, the effective normal force N′ and the pore-water force U (along the base normal, into the mass) "
+                   "and the mobilised shear S = τ_s A / F (along the base, against the rotation about the circle centre O; "
+                   "zoom out to see O). A tensile N′ points out of the mass.")
+    else:
+        st.caption("Full mass (both halves of the symmetric model). Each column carries its weight W at its centre of "
+                   "gravity and, on its base, N′, U and S as in the 2D section; the mass rotates about the axis through "
+                   f"(x_c, z_c) = ({A.inputs.xc:.1f}, {A.inputs.zc:.1f}) m, parallel to y. Drag to rotate the view.")
+    st.caption("All arrows share one scale; click a force in the legend to hide it." + (
+        f" For display, the forces are summed over {'groups of ' + str(size) + ' slices' if rm.mesh.dim == 2 else f'blocks of {size} × {size} columns'}; "
+        f"the table uses every {'slice' if rm.mesh.dim == 2 else 'column'}." if size > 1 else ""))
+    c1, c2 = st.columns([3, 2])
+    c1.plotly_chart(fig, width="stretch", key="mass_fbd")
+    c2.plotly_chart(P.force_polygon(mf), width="stretch", key="mass_polygon")
+    st.dataframe(pd.DataFrame(P.mass_rows(mf)), hide_index=True, width="stretch")
+    for line in P.mass_balance(mf):
+        st.markdown(line)
+
+st.subheader("One column and its matching slice")
 if r3.tau_used is None:
     ui.status_badge(r3, "3D")
     st.warning("The 3D run did not reach a final state, so there are no column forces to draw.")

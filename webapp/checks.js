@@ -195,7 +195,7 @@
       const amax = (a) => a.reduce((m, v) => (v > m ? v : m), -Infinity);
       push(byRounding(g, "Gravity cap max(gamma h - u), dry (MPa, 3D 20x20)", amax(capD) / 1000, 1.61, 2),
         byRounding(g, "Gravity cap max(gamma h - u), wet (MPa, 3D 20x20)", amax(capW) / 1000, 1.02, 2));
-      for (const [nu, tgt, d] of [[0.05, 0.92, 2], [0.10, 3.43, 2], [0.20, 19.23, 2], [0.271, 52.97, 2], [0.35, 177.8, 1], [0.45, 2188.0, 0]]) {
+      for (const [nu, tgt, d] of [[0.05, 0.92, 2], [0.10, 3.43, 2], [0.20, 19.23, 2], [0.271, 52.97, 2], [0.35, 177.8, 1], [0.45, 2188.0, 0], [0.49, 59952.0, 0]]) {
         const mn = nu === 0.271 ? m0 : E.originalClosureMinimum(77.7, mb, s, 0.5, nu);
         push(byRounding(g, `Table 5.2: min sigma_n at nu = ${fmtG(nu, 6)} (MPa)`, mn.sn_min, tgt, d));
       }

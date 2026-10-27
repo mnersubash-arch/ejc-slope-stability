@@ -9,7 +9,7 @@ const E = require(path.join(__dirname, "..", "engine.js"));
 
 const ref = JSON.parse(fs.readFileSync(process.argv[2] || path.join(__dirname, "ref", "reference.json"), "utf8"));
 const val = (v) => (v === "nan" ? NaN : v === "inf" ? Infinity : v === "-inf" ? -Infinity : v);
-let fails = 0, compared = 0, worstFos = 0, worstArr = 0;
+let fails = 0, compared = 0, worstFos = 0, worstArr = 0, masses = 0, worstMass = 0;
 const fail = (msg) => { fails++; console.log("FAIL", msg); };
 
 function rel(a, b) {
@@ -67,6 +67,23 @@ for (const c of ref.cases) {
     worstArr = Math.max(worstArr, dsn === Infinity ? 0 : dsn);
     if (!(dsn <= 1e-9)) fail(`${tag}: sigma_n arrays differ by ${dsn}`);
     if (!(arrDiff(js.tau_used, py.tau_used, 1) <= 1e-9)) fail(`${tag}: tau_used arrays differ`);
+    const pm = c[`m${dim}`];                     // whole-mass forces: totals to 1e-12 of the weight, moments to 1e-12
+    if (pm) {
+      let jm = null;
+      try { jm = E.massForces(inp, js); } catch (e) { fail(`${tag}: massForces threw ${e.message}`); }
+      if (jm) {
+        masses++;
+        if (rel(jm.weight, pm.weight) > 1e-13) fail(`${tag}: mass weight js ${jm.weight} py ${pm.weight}`);
+        for (const k of ["W", "N", "U", "S", "net"]) for (const ax of ["x", "z"]) {
+          const d = Math.abs(jm.totals[k][ax] - val(pm.totals[k][ax])) / pm.weight;
+          worstMass = Math.max(worstMass, d);
+          if (!(d <= 1e-12)) fail(`${tag}: mass total ${k}.${ax} js ${jm.totals[k][ax]} py ${pm.totals[k][ax]}`);
+        }
+        for (const k of ["W", "S", "net"]) if (!(Math.abs(jm.moments[k] - val(pm.moments[k])) <= 1e-12 * Math.abs(val(pm.moments.W)))) fail(`${tag}: mass moment ${k} js ${jm.moments[k]} py ${pm.moments[k]}`);
+        if (jm.method.form !== pm.method.form || !(Math.abs(jm.method.residual - val(pm.method.residual)) <= 1e-12)) fail(`${tag}: method equation js ${jm.method.residual} py ${pm.method.residual}`);
+        if (!(Math.abs(jm.vertical_max_rel - val(pm.vertical_max_rel)) <= 1e-12)) fail(`${tag}: vertical balance js ${jm.vertical_max_rel} py ${pm.vertical_max_rel}`);
+      }
+    }
   }
 }
 
@@ -98,6 +115,17 @@ for (const o of ref.original_closure) {
   const r = E.originalClosureMinimum(77.7, mb, s, 0.5, o.nu);
   for (const k of ["sigma3_min", "sn_min", "phi_deg"]) if (rel(r[k], o[k]) > 1e-9) fail(`original closure nu ${o.nu}: ${k} js ${r[k]} py ${o[k]}`);
 }
+// The same minima against 50-digit values on the edge sigma2 = sigma3 of the admissible set (QA/QC finding S1; see
+// ejc_app/tests/test_strength.py): [sigma3_min, sigma_n,min] in MPa.
+const EDGE_MINIMA = { 0.05: [0.380094742856100265, 0.915855437380532255], 0.1: [1.62220790622158018, 3.42932759983678206],
+  0.2: [10.975624118170999, 19.2255957374544289], 0.271: [34.3759758649727541, 52.9663755316253943],
+  0.35: [133.35940221633931, 177.816163701316242], 0.45: [1982.70231915863376, 2187.80980520517984],
+  0.49: [58768.4063005811189, 59951.6628165205653] };
+for (const [nu, [s3, sn]] of Object.entries(EDGE_MINIMA)) {
+  const [mb, s] = E.hoekBrownParameters(42, 10, 0);
+  const r = E.originalClosureMinimum(77.7, mb, s, 0.5, Number(nu));
+  if (!(rel(r.sigma3_min, s3) < 1e-9 && rel(r.sn_min, sn) < 1e-9)) fail(`original closure nu ${nu}: js ${r.sigma3_min}, ${r.sn_min}; 50-digit ${s3}, ${sn}`);
+}
 for (const x of ref.extents) {
   const e = E.slipExtent(inputsOf(x.inputs));
   if (rel(e[0], x.extent[0]) > 1e-14 || rel(e[1], x.extent[1]) > 1e-14) fail(`extent ${x.key}: js ${e} py ${x.extent}`);
@@ -105,7 +133,9 @@ for (const x of ref.extents) {
 const hb = E.hoekBrownParameters(42, 10, 0);
 hb.forEach((v, k) => { if (rel(v, ref.hb[k]) > 1e-15) fail(`hb ${k}`); });
 
-console.log(`${compared} runs, ${fx} fixture arrays, ${ref.original_closure.length} original-closure minima, ` +
-  `${ref.extents.length} extents compared; worst FoS rel diff ${worstFos.toExponential(2)}, worst sigma_n rel diff ` +
+console.log(`${compared} runs, ${fx} fixture arrays, ${ref.original_closure.length} original-closure minima ` +
+  `(and ${Object.keys(EDGE_MINIMA).length} against 50-digit values), ` +
+  `${ref.extents.length} extents, ${masses} whole-mass force sets compared (worst ${worstMass.toExponential(1)} of the weight); ` +
+  `worst FoS rel diff ${worstFos.toExponential(2)}, worst sigma_n rel diff ` +
   `${worstArr.toExponential(2)}; ${fails} failures`);
 process.exit(fails ? 1 : 0);

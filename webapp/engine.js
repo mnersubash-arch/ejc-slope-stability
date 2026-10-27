@@ -330,8 +330,12 @@
       const c1 = b_ - gr * (b_ - a_), c2 = a_ + gr * (b_ - a_);
       if (fval(c1) < fval(c2)) b_ = c2; else a_ = c1;
     }
-    const x = 0.5 * (a_ + b_), [ps, ok] = evaluate(x);
-    if (ok && ps.sn <= best[0]) best = [ps.sn, x, ps.phi];
+    // The minimum can lie on the edge of the admissible set (sigma2 = sigma3), where the bracket closes on the edge and
+    // its midpoint can fall just outside it: keep the best admissible point among the midpoint and both bracket ends.
+    for (const x of [0.5 * (a_ + b_), a_, b_]) {
+      const [ps, ok] = evaluate(x);
+      if (ok && ps.sn <= best[0]) best = [ps.sn, x, ps.phi];
+    }
     return { nu, a, sigma3_min: best[1], sn_min: best[0], phi_deg: best[2] * RAD, found: true };
   }
 
@@ -396,7 +400,8 @@
     if (inp.base_circle) {
       [x1, x0] = slipExtent(inp);
     } else {
-      if (!(R > zc)) throw new Error("require R > z_c (the sphere must cut the toe level)");
+      if (!(R > zc)) throw new Error("require R > z_c (the sphere must cut the toe level); for a face circle, with its lowest point " +
+        "above the toe level, use the base-circle option");
       x0 = xc - Math.sqrt(R * R - zc * zc);
       x1 = xc - R;
       if (x0 < -1e-5 * R)
@@ -638,10 +643,42 @@
       lever: Math.hypot(x - foot[0], y - foot[1], zb - foot[2]) };
   }
 
+  /** All forces on the sliding mass at the reported F (free-body diagram of the whole mass): for every column or slice
+   *  W (vertical), N' = sigma_n A and U = u A along the base normal n, S = tau_s A / F along s, as columnForces; their
+   *  totals for the full mass (both halves in 3D, per metre in 2D) and their moments about the rotation axis (parallel
+   *  to y through (x_c, z_c)), positive in the sense in which the weight drives. N' and U act along n, through the
+   *  sphere centre, so their moments are zero; S has lever arm rho. Vertical balance holds element by element
+   *  (eq. 4.12); horizontal force balance is not part of the method. The method's own global equation is
+   *  sum S = sum W kappa for F_H (eq. 4.14) and sum S rho = sum W (x_c - x) for F_M (eq. 4.15). Same as
+   *  ejc_app/engine.py mass_forces. */
+  function massForces(inp, r) {
+    const m = r.mesh, F = r.fos !== null ? r.fos : r.f_trial;
+    if (!r.sn || !r.tau_used || F === null) throw new Error("no converged state for this run");
+    const n = m.count, mult = m.dim === 3 ? 2 : 1, xc = inp.xc, zc = inp.zc, R = inp.R;
+    const nx = map(n, (k) => (xc - m.x[k]) / R), ny = map(n, (k) => -m.y[k] / R), nz = Float64Array.from(m.g);
+    const sx = map(n, (k) => -(zc - m.zb[k]) / m.rho[k]), sz = map(n, (k) => (xc - m.x[k]) / m.rho[k]);
+    const W = Float64Array.from(m.w), N = map(n, (k) => r.sn[k] * m.area[k]), U = map(n, (k) => m.u[k] * m.area[k]);
+    const S = map(n, (k) => r.tau_used[k] * m.area[k] / F);
+    const tot = (f, d) => mult * sum(map(n, (k) => f[k] * d[k]));
+    const vert = map(n, (k) => W[k] - (N[k] + U[k]) * nz[k] - S[k] * sz[k]);
+    const totals = { W: { x: 0, z: -mult * sum(W) }, N: { x: tot(N, nx), z: tot(N, nz) }, U: { x: tot(U, nx), z: tot(U, nz) },
+      S: { x: tot(S, sx), z: tot(S, sz) },
+      net: { x: mult * sum(map(n, (k) => (N[k] + U[k]) * nx[k] + S[k] * sx[k])), z: -mult * sum(vert) } };
+    const mW = mult * sum(map(n, (k) => W[k] * (xc - m.x[k]))), mS = -mult * sum(map(n, (k) => S[k] * m.rho[k]));
+    const fm = r.form === "FM";
+    const lhs = fm ? -mS : mult * sum(S), rhs = fm ? mW : mult * sum(map(n, (k) => W[k] * m.kap[k]));
+    let vmax = 0;
+    for (let k = 0; k < n; k++) vmax = Math.max(vmax, Math.abs(vert[k]) / W[k]);
+    return { F, dim: m.dim, mult, count: n, form: r.form, weight: -totals.W.z, totals,
+      moments: { W: mW, N: 0, U: 0, S: mS, net: mW + mS },
+      method: { form: r.form, lhs, rhs, residual: (lhs - rhs) / rhs }, vertical_max_rel: vmax,
+      el: { x: m.x, y: m.y, zb: m.zb, zm: map(n, (k) => (m.zb[k] + m.zt[k]) / 2), W, N, U, S, nx, ny, nz, sx, sz } };
+  }
+
   const api = { GAMMA_W, MODELS, REASONS, ITERATIONS, OK, SHEAR, NO_STATE, DOMAIN, hoekBrownParameters, makeStrength,
     closureConstants, principalState, scanSigma3, admissibleSnMin, solveStrength, originalClosureMinimum,
     DEFAULT_INPUTS, inputs, hb, strengthOf, groundZ, waterZ, sphereZ, slipExtent, buildMesh, projectionLimit, solve,
-    run3d, run2d, run, gravityCap, columnForces, sum, fmtG, DEG, RAD };
+    run3d, run2d, run, gravityCap, columnForces, massForces, sum, fmtG, DEG, RAD };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   root.EJC = api;
 })(typeof window !== "undefined" ? window : globalThis);

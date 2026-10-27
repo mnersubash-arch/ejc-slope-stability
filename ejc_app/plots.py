@@ -393,6 +393,245 @@ def fbd2d(inp: E.Inputs, r2: E.LemResult, k: int) -> go.Figure:
 
 
 # ---------------------------------------------------------------------------------------------------------------
+# page 4: free-body diagram of the whole mass (E.mass_forces); as renderMass in webapp/index.html
+# ---------------------------------------------------------------------------------------------------------------
+MASS_NAMES = {"W": "W, weight", "N": "N′, effective normal force", "U": "U, pore-water force", "S": "S, mobilised shear"}
+
+
+def _big(v: float) -> str:
+    """Whole kN or kN·m with thousands separators; smaller values to 6 significant digits."""
+    return f"{round(v):,}" if abs(v) >= 1e5 else f"{v:,.6g}"
+
+
+def mass_groups(mf: dict, m: E.Mesh, limit: int) -> tuple[list[dict], int]:
+    """Element forces summed over groups of neighbouring slices (2D) or blocks of b x b columns (3D) so that at most
+    `limit` arrows of each kind are drawn. Display only: the table and the balance use every element."""
+    n, el = mf["count"], mf["el"]
+    if m.dim == 2:
+        size = max(1, math.ceil(n / limit))
+        keys = [str(k // size) for k in range(n)]
+    else:
+        size = 1
+
+        def key(k, b):
+            return f"{(int(m.i[k]) - 1) // b},{(int(m.j[k]) - 1) // b}"
+        while len({key(k, size) for k in range(n)}) > limit:
+            size += 1
+        keys = [key(k, size) for k in range(n)]
+    by: dict[str, list[int]] = {}
+    for k, q in enumerate(keys):
+        by.setdefault(q, []).append(k)
+    groups = []
+    for ks in by.values():
+        ks = np.array(ks)
+        w = el["W"][ks]
+        W = float(w.sum())
+        cen = np.array([np.sum(w * el["x"][ks]), np.sum(w * el["y"][ks]), np.sum(w * el["zm"][ks])]) / W
+        N = np.array([np.sum(el["N"][ks] * el[c][ks]) for c in ("nx", "ny", "nz")])
+        U = np.array([np.sum(el["U"][ks] * el[c][ks]) for c in ("nx", "ny", "nz")])
+        S = np.array([np.sum(el["S"][ks] * el["sx"][ks]), 0.0, np.sum(el["S"][ks] * el["sz"][ks])])
+        b = int(ks[np.argmin((el["x"][ks] - cen[0]) ** 2 + (el["y"][ks] - cen[1]) ** 2)])
+        if m.dim == 2:
+            name = f"slice {ks[0]}" if len(ks) == 1 else f"slices {ks[0]}–{ks[-1]}"
+        else:
+            name = (f"column {ks[0]} (i = {m.i[ks[0]]}, j = {m.j[ks[0]]})" if len(ks) == 1
+                    else f"{len(ks)} columns around i = {m.i[b]}, j = {m.j[b]}")
+        groups.append(dict(name=name, W=W, cen=cen, base=np.array([el["x"][b], el["y"][b], el["zb"][b]]),
+                           tan=np.array([el["sx"][b], 0.0, el["sz"][b]]),
+                           nrm=np.array([el["nx"][b], el["ny"][b], el["nz"][b]]), N=N, U=U, S=S))
+    return groups, size
+
+
+def _mass_arrows(groups: list[dict], kind: str, sc: float, off: float, unit: str) -> list[tuple]:
+    """(start, end, hover text) of every arrow of one kind: W from the centre of gravity, S from the base point,
+    N' and U ending at the base point (pointing into the mass when compressive)."""
+    out = []
+    for g in groups:
+        v = np.array([0.0, 0.0, -g["W"]]) if kind == "W" else g[kind]
+        mag = float(np.linalg.norm(v))
+        if not mag > 0:
+            continue
+        vec = v * sc
+        if kind == "W":
+            a, b = g["cen"], g["cen"] + vec
+        elif kind == "S":
+            a, b = g["base"], g["base"] + vec
+        else:
+            p = g["base"] + g["tan"] * off if kind == "U" else g["base"]
+            a, b = p - vec, p
+        tensile = kind == "N" and float(v @ g["nrm"]) < 0
+        out.append((a, b, f"{g['name']}<br>{'N′' if kind == 'N' else kind} = {_big(mag)} {unit}"
+                          + (" (tensile: pulls on the mass)" if tensile else "")))
+    return out
+
+
+def _mass_setup(mf: dict, m: E.Mesh, factor: float, limit: int):
+    groups, size = mass_groups(mf, m, limit)
+    span = max(float(m.x.max() - m.x.min() + m.dx), float(m.zt.max() - m.zb.min()), 2 * float(m.y.max()))
+    peak = max(max(g["W"], *(float(np.linalg.norm(g[k])) for k in ("N", "U", "S"))) for g in groups)
+    kinds = [k for k in ("W", "N", "U", "S") if k != "U" or mf["totals"]["U"]["x"] != 0 or mf["totals"]["U"]["z"] != 0]
+    return groups, size, span, factor * span / peak, 0.025 * span, kinds
+
+
+def _mass_legend(mf: dict, k: str, unit: str) -> str:
+    t = mf["weight"] if k == "W" else math.hypot(mf["totals"][k]["x"], mf["totals"][k]["z"])
+    return f"{MASS_NAMES[k]} (Σ = {_big(t)} {unit})"
+
+
+def mass_fbd2d(inp: E.Inputs, r2: E.LemResult, mf: dict) -> tuple[go.Figure, int]:
+    """Every slice's W, N', U and S on the central section (per metre), the mass, the water table and the centre O.
+    Returns the figure and the display group size (1 = every slice drawn)."""
+    m = r2.mesh
+    groups, size, span, sc, off, kinds = _mass_setup(mf, m, 0.14, 50)
+    xa, xb, _ = _frame(inp, m)
+    xs = np.linspace(xa, xb, 400)
+    xe = _slip_x(inp, m, 600)
+    arc = E.sphere_z(xe, 0.0, inp.xc, inp.zc, inp.R)
+    with np.errstate(invalid="ignore"):
+        keep = E.ground_z(xe, inp.H, inp.beta) > arc                          # ground above the arc
+    xe, arc = xe[keep], arc[keep]
+    gz = E.ground_z(xe, inp.H, inp.beta)
+    fig = go.Figure(go.Scatter(x=np.r_[xe, xe[::-1]], y=np.r_[gz, arc[::-1]], fill="toself", fillcolor=ROCK,
+                               line=dict(color=GROUND, width=1), mode="lines", name="sliding mass", hoverinfo="skip"))
+    fig.add_trace(go.Scatter(x=xs, y=E.ground_z(xs, inp.H, inp.beta), mode="lines", line=dict(color=GROUND, width=2),
+                             name="ground", hoverinfo="skip", showlegend=False))
+    if inp.wet:
+        fig.add_trace(go.Scatter(x=xs, y=np.minimum(E.water_z(xs, inp.Hw, inp.beta_w), E.ground_z(xs, inp.H, inp.beta)),
+                                 mode="lines", line=dict(color=WATER, width=1.5, dash="dash"), name="water table",
+                                 hoverinfo="skip"))
+    fig.add_trace(go.Scatter(x=xe, y=arc, mode="lines", line=dict(color=SLIP, width=2), name="slip surface",
+                             hoverinfo="skip", showlegend=False))
+    fig.add_trace(go.Scatter(x=[inp.xc], y=[inp.zc], mode="markers+text", marker=dict(symbol="circle-x", size=12, color=SLIP),
+                             text=["O, rotation axis"], textposition="middle right", name="centre", showlegend=False,
+                             hovertext=[f"centre ({inp.xc:.2f}, {inp.zc:.2f}), R = {inp.R:.2f} m"], hoverinfo="text"))
+    pts = [np.c_[xe, gz], np.c_[xe, arc]]
+    for k in kinds:
+        x, y, size_, text = [], [], [], []
+        for a, b, t in _mass_arrows(groups, k, sc, off, "kN/m"):
+            x += [a[0], b[0], None]
+            y += [a[2], b[2], None]
+            size_ += [0, 10, 0]
+            text += [t, t, ""]
+            pts.append(np.array([[a[0], a[2]], [b[0], b[2]]]))
+        fig.add_trace(go.Scatter(x=x, y=y, mode="lines+markers", text=text, hoverinfo="text", name=_mass_legend(mf, k, "kN/m"),
+                                 line=dict(color=FORCE[k], width=1.6),
+                                 marker=dict(symbol="arrow", size=size_, angleref="previous", color=FORCE[k])))
+    p = np.vstack(pts)
+    lo, hi = p.min(axis=0), p.max(axis=0)
+    pad = 0.06 * (hi - lo)
+    fig.update_layout(xaxis=dict(title="x (m), toe at 0", range=[lo[0] - pad[0], hi[0] + pad[0]]),
+                      yaxis=dict(title="z (m)", scaleanchor="x", scaleratio=1, range=[lo[1] - pad[1], hi[1] + pad[1]]),
+                      height=520, margin=dict(l=10, r=10, t=30, b=10), legend=dict(orientation="h", y=1.02, yanchor="bottom"))
+    return fig, size
+
+
+def mass_fbd3d(inp: E.Inputs, r3: E.LemResult, mf: dict) -> tuple[go.Figure, int]:
+    """The same forces on every column of the full mass (both halves), with the slip and ground surfaces."""
+    m = r3.mesh
+    groups, size, span, sc, off, kinds = _mass_setup(mf, m, 0.25, 120)
+    bx, by = np.r_[m.x, m.x], np.r_[m.y, -m.y]
+    fig = go.Figure(go.Mesh3d(x=bx, y=by, z=np.r_[m.zb, m.zb], color=SLIP, opacity=0.35, name="slip surface",
+                              hoverinfo="skip", showlegend=True, delaunayaxis="z"))
+    fig.add_trace(go.Mesh3d(x=bx, y=by, z=np.r_[m.zt, m.zt], color=GROUND, opacity=0.25, name="ground over the mass",
+                            hoverinfo="skip", showlegend=True, delaunayaxis="z"))
+    for k in kinds:
+        x, y, z, text, tips, dirs = [], [], [], [], [], []
+        for a, b, t in _mass_arrows(groups, k, sc, off, "kN"):
+            for sg in (1.0, -1.0):
+                A, B = np.array([a[0], sg * a[1], a[2]]), np.array([b[0], sg * b[1], b[2]])
+                d = B - A
+                x += [A[0], B[0], None]
+                y += [A[1], B[1], None]
+                z += [A[2], B[2], None]
+                text += [t, t, ""]
+                tips.append(B)
+                dirs.append(d / np.linalg.norm(d))
+        fig.add_trace(go.Scatter3d(x=x, y=y, z=z, mode="lines", text=text, hoverinfo="text", name=_mass_legend(mf, k, "kN"),
+                                   legendgroup=k, line=dict(color=FORCE[k], width=3)))
+        tips, dirs = np.array(tips), np.array(dirs)
+        fig.add_trace(go.Cone(x=tips[:, 0], y=tips[:, 1], z=tips[:, 2], u=dirs[:, 0], v=dirs[:, 1], w=dirs[:, 2],
+                              anchor="tip", sizemode="raw", sizeref=0.035 * span, showscale=False,
+                              colorscale=[[0, FORCE[k]], [1, FORCE[k]]], hoverinfo="skip", showlegend=False, legendgroup=k))
+    fig.update_layout(scene=dict(aspectmode="data", xaxis_title="x (m)", yaxis_title="y (m)", zaxis_title="z (m)"),
+                      height=560, margin=dict(l=0, r=0, t=30, b=0), legend=dict(orientation="h", y=1.02, yanchor="bottom"))
+    return fig, size
+
+
+def force_polygon(mf: dict) -> go.Figure:
+    """The totals head to tail (W, U, N', S); the dashed arrow is their resultant (zero for full equilibrium)."""
+    unit = "kN" if mf["dim"] == 3 else "kN/m"
+    fig = go.Figure()
+    p = np.zeros(2)
+    for k in ("W", "U", "N", "S"):
+        t = mf["totals"][k]
+        if not math.hypot(t["x"], t["z"]) > 1e-12 * mf["weight"]:
+            continue
+        q = p + np.array([t["x"], t["z"]])
+        lab = f"Σ{'N′' if k == 'N' else k}"
+        fig.add_trace(go.Scatter(x=[p[0], (p[0] + q[0]) / 2, q[0]], y=[p[1], (p[1] + q[1]) / 2, q[1]], mode="lines+markers+text",
+                                 text=["", lab, ""], textposition="middle right", line=dict(color=FORCE[k], width=3),
+                                 marker=dict(symbol="arrow", size=[0, 0, 14], angleref="previous", color=FORCE[k]),
+                                 hovertext=[f"{lab}: x {_big(t['x'])}, z {_big(t['z'])} {unit}"] * 3, hoverinfo="text",
+                                 showlegend=False))
+        p = q
+    net = mf["totals"]["net"]
+    fig.add_trace(go.Scatter(x=[0.0, net["x"]], y=[0.0, net["z"]], mode="lines+markers",
+                             line=dict(color="#555555", width=2, dash="dash"),
+                             marker=dict(symbol="arrow", size=[0, 12], angleref="previous", color="#555555"),
+                             name=f"resultant: x {_big(net['x'])}, z {net['z']:.2e} {unit}", hoverinfo="name"))
+    fig.update_layout(title=dict(text="Force polygon (totals, head to tail)", font=dict(size=13)),
+                      xaxis_title=f"horizontal x ({unit})", yaxis=dict(title=f"vertical z ({unit})", scaleanchor="x", scaleratio=1),
+                      height=520, margin=dict(l=10, r=10, t=40, b=10), legend=dict(orientation="h", y=-0.15, yanchor="top"))
+    return fig
+
+
+def mass_rows(mf: dict) -> list[dict]:
+    """The totals and their moments about the rotation axis, for a table."""
+    t, M = mf["totals"], mf["moments"]
+    uF, uM = ("kN", "kN·m") if mf["dim"] == 3 else ("kN/m", "kN·m/m")
+
+    def f(v):
+        return "0" if v == 0 else f"{v:.3e}" if abs(v) < 1e-6 * mf["weight"] else _big(v)
+    rows = [("W, weight", t["W"], _big(M["W"]), "vertical, down, at each element's centre of gravity; drives the rotation"),
+            ("N′ = σ_n A, effective normal force", t["N"], "0", "normal to the slip surface, through the sphere centre"),
+            ("U = u A, pore-water force", t["U"], "0", "normal to the slip surface, through the sphere centre"),
+            ("S = τ_s A / F, mobilised shear", t["S"], _big(M["S"]), f"along the slip surface, against the rotation (F = {mf['F']:.6f})"),
+            ("Sum of all forces", t["net"], f"{M['net']:.3e}", "resultant on the mass")]
+    return [{"Force": n, f"Horizontal x ({uF})": f(v["x"]), f"Vertical z ({uF})": f(v["z"]),
+             f"Magnitude ({uF})": f(math.hypot(v["x"], v["z"])), f"Moment about the axis ({uM})": mom, "Direction": d}
+            for n, v, mom, d in rows]
+
+
+def mass_balance(mf: dict) -> list[str]:
+    """The vertical, horizontal and moment balance of the whole mass, as markdown lines (as massBalance in the web
+    app)."""
+    t, M, W = mf["totals"], mf["moments"], mf["weight"]
+    uF, uM = ("kN", "kN·m") if mf["dim"] == 3 else ("kN/m", "kN·m/m")
+    el = "column" if mf["dim"] == 3 else "slice"
+    up = t["N"]["z"] + t["U"]["z"] + t["S"]["z"]
+    v_ok = abs(t["net"]["z"]) <= 1e-9 * W and mf["vertical_max_rel"] <= 1e-9
+    lines = [f"**Vertical:** ΣW = {_big(W)} {uF} down; the vertical parts of N′, U and S add to {_big(up)} {uF} up. Net "
+             f"{t['net']['z']:.3e} {uF} ({abs(t['net']['z']) / W:.2e} of the weight): every {el} balances vertically "
+             f"(eq. 4.12; largest relative residual {mf['vertical_max_rel']:.2e}) → **{'PASS' if v_ok else 'FAIL'}**",
+             f"**Horizontal:** net {_big(t['net']['x'])} {uF}, {100 * abs(t['net']['x']) / W:.2f}% of the weight. "
+             f"{'Hungr' if mf['dim'] == 3 else 'Bishop'}'s {'method' if mf['dim'] == 3 else 'simplified method'} does not "
+             "enforce horizontal force equilibrium (thesis §5.5, §5.9), so this part stays unbalanced. The forces between "
+             f"{el}s act inside the mass and cancel in these sums; the method takes their vertical (shear) parts as zero."]
+    moment = (f"**Moments about the rotation axis** (through x_c, z_c, parallel to y): the weight drives {_big(M['W'])} {uM} "
+              f"and the mobilised shear resists {_big(-M['S'])} {uM}; N′ and U act through the axis. Net {M['net']:.3e} {uM} "
+              f"({abs(M['net']) / M['W']:.2e} of the driving moment). ")
+    if mf["dim"] == 2 or mf["form"] == "FM":
+        ok = abs(M["net"]) <= 1e-8 * M["W"]
+        moment += (f"{'Bishop' + chr(39) + 's method (eq. 4.16)' if mf['dim'] == 2 else 'The moment form F_M (eq. 4.15)'} "
+                   f"balances this moment → **{'PASS' if ok else 'FAIL'}**")
+    else:
+        moment += (f"F_H balances ΣS = ΣWκ instead (eq. 4.14; relative residual {abs(mf['method']['residual']):.2e}); the "
+                   "moment form F_M balances this moment (eq. 4.15, thesis §5.5).")
+    return lines + [moment, "Not in the model: external loads (surcharge, water in a tension crack or against the face) "
+                            "and seismic forces."]
+
+
+# ---------------------------------------------------------------------------------------------------------------
 # page 5: strength explorer
 # ---------------------------------------------------------------------------------------------------------------
 def strength_curves(sigma_ci, mb, s, a, nu, s3_max, n=1500) -> go.Figure:

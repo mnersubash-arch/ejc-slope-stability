@@ -6,10 +6,11 @@ Main sphere x_c = 355.7423115, z_c = 644.4192949, R = 725.2669975 m; 3D 20x20 an
 Tolerances: FoS given to 9 decimals to 1e-6; values given to 3-6 decimals to rounding; fixtures to the decimals
 shown. INFO rows are reference values (published and reported results), not targets.
 
-**Result: 88 PASS, 0 FAIL, 40 INFO.**
+**Result: 89 PASS, 0 FAIL, 40 INFO.**
 
-- 78 targets of the brief and the thesis records: all PASS, with the same values as before the Law/D'Esterre
-  additions (those are off by default).
+- 79 targets of the brief and the thesis records: all PASS. 78 have the same values as before the Law/D'Esterre
+  additions (those are off by default); Table 5.2 at nu = 0.49 was added with the QA/QC fix of the original-closure
+  search (finding S1, see `qa/README.md`), which left the other rows unchanged.
 - 8 cross-checks of the Law (2024) presets against the thesis reference code `lem_ref.py` (GHB 2D, 40 and 640
   slices, to 4 decimals).
 - 2 cross-checks of the Mohr-Coulomb option against the `slope3d` package's record (c' = 100 kPa, phi' = 0).
@@ -84,6 +85,7 @@ shown. INFO rows are reference values (published and reported results), not targ
 | 1.2(c) / Table 5.2 Original closure (admissibility check only, a = 0.5) | Table 5.2: min sigma_n at nu = 0.271 (MPa) | 52.97 | 52.96638 | -3.62e-03 | rounding to 2 dp | **PASS** |  |
 | 1.2(c) / Table 5.2 Original closure (admissibility check only, a = 0.5) | Table 5.2: min sigma_n at nu = 0.35 (MPa) | 177.8 | 177.8162 | +1.62e-02 | rounding to 1 dp | **PASS** |  |
 | 1.2(c) / Table 5.2 Original closure (admissibility check only, a = 0.5) | Table 5.2: min sigma_n at nu = 0.45 (MPa) | 2188 | 2187.810 | -1.90e-01 | rounding to 0 dp | **PASS** |  |
+| 1.2(c) / Table 5.2 Original closure (admissibility check only, a = 0.5) | Table 5.2: min sigma_n at nu = 0.49 (MPa) | 59952 | 59951.663 | -3.37e-01 | rounding to 0 dp | **PASS** |  |
 | 1.2(c) / Table 5.2 Original closure (admissibility check only, a = 0.5) | nu = 0.05: dry columns with gamma h - u below the threshold (of 76) | 43 | 43 | 0 | exact | **PASS** |  |
 | 1.2(c) / Table 5.2 Original closure (admissibility check only, a = 0.5) | Original closure never produces a FoS | NOT APPLICABLE | NOT APPLICABLE | n/a | status | **PASS** |  |
 | 3 Carranza-Torres & Hormazabal (2020), published circle, dry, a = 0.5 | 2D GHB, 40 slices (brief) | 2.0039 | 2.0038734 | -2.66e-05 | rounding to 4 dp | **PASS** |  |

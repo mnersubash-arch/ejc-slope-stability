@@ -8,6 +8,8 @@ history:
   `ejc_app/README.md` and `ejc_app/VERIFICATION.md`.
 - `webapp/`: the same app as a web page, with the engine ported to JavaScript and checked against
   `ejc_app/engine.py`; published privately on claude.ai. See `webapp/README.md`.
+- `qa/`: the QA/QC of both engines against the thesis, exact solutions, randomised tests and published case
+  studies (27 October 2026): the scripts and the record. See `qa/README.md`.
 - `slope3d/` and the other files described below: the earlier port of the thesis workbook (VBA).
 
 Research tool for the prescribed-surface comparison in Mahat (2026) thesis; not for design.

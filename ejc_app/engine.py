@@ -439,10 +439,12 @@ def original_closure_minimum(sigma_ci: float, mb: float, s: float, a: float, nu:
             b_ = c2
         else:
             a_ = c1
-    x = 0.5 * (a_ + b_)
-    p1, o1 = evaluate(x)
-    if o1[0] and float(p1.sn[0]) <= best[0]:
-        best = (float(p1.sn[0]), float(x), float(p1.phi[0]))
+    # The minimum can lie on the edge of the admissible set (sigma2 = sigma3), where the bracket closes on the edge and
+    # its midpoint can fall just outside it: keep the best admissible point among the midpoint and both bracket ends.
+    for x in (0.5 * (a_ + b_), a_, b_):
+        p1, o1 = evaluate(x)
+        if o1[0] and float(p1.sn[0]) <= best[0]:
+            best = (float(p1.sn[0]), float(x), float(p1.phi[0]))
     return OriginalClosureMinimum(nu, a, best[1], best[0], math.degrees(best[2]), True)
 
 
@@ -615,7 +617,8 @@ def build_mesh(inp: Inputs, dim: int, n: int) -> Mesh:
         x1, x0 = slip_extent(inp)
     else:
         if not (R > zc):
-            raise ValueError("require R > z_c (the sphere must cut the toe level)")
+            raise ValueError("require R > z_c (the sphere must cut the toe level); for a face circle, with its lowest point "
+                             "above the toe level, use the base-circle option")
         x0 = xc - math.sqrt(R * R - zc * zc)
         x1 = xc - R
         if x0 < -1e-5 * R:
@@ -999,3 +1002,44 @@ def columns_table(r: LemResult) -> dict[str, np.ndarray]:
                         "S_mobilised_kN": r.tau_used * m.area / F,
                         "resistance_kN": r.tau_used * m.area, "local_residual_rel": r.local_res})
     return out
+
+
+def mass_forces(inp: Inputs, r: LemResult) -> dict:
+    """All forces on the sliding mass at the reported F (free-body diagram of the whole mass).
+
+    For every column or slice: W (vertical), N' = sigma_n A and U = u A along the base normal n, S = tau_s A / F along
+    s, as plots.column_forces; their totals for the full mass (both halves in 3D, per metre in 2D) and their moments
+    about the rotation axis (parallel to y through (x_c, z_c)), positive in the sense in which the weight drives. N' and
+    U act along n, through the sphere centre, so their moments are zero; S has lever arm rho. Vertical balance holds
+    element by element (eq. 4.12); horizontal force balance is not part of the method. The method's own global
+    equation is sum S = sum W kappa for F_H (eq. 4.14) and sum S rho = sum W (x_c - x) for F_M (eq. 4.15).
+    Same as massForces in webapp/engine.js.
+    """
+    m = r.mesh
+    F = r.fos if r.fos is not None else r.f_trial
+    if r.sn is None or r.tau_used is None or F is None:
+        raise ValueError("no converged state for this run")
+    mult = 2.0 if m.dim == 3 else 1.0
+    nx, ny, nz = (inp.xc - m.x) / inp.R, -m.y / inp.R, m.g.copy()
+    sx, sz = -(inp.zc - m.zb) / m.rho, (inp.xc - m.x) / m.rho
+    W, N, U = m.w.copy(), r.sn * m.area, m.u * m.area
+    S = r.tau_used * m.area / F
+
+    def tot(f, d):
+        return float(mult * np.sum(f * d))
+
+    vert = W - (N + U) * nz - S * sz
+    totals = {"W": {"x": 0.0, "z": float(-mult * np.sum(W))}, "N": {"x": tot(N, nx), "z": tot(N, nz)},
+              "U": {"x": tot(U, nx), "z": tot(U, nz)}, "S": {"x": tot(S, sx), "z": tot(S, sz)},
+              "net": {"x": float(mult * np.sum((N + U) * nx + S * sx)), "z": float(-mult * np.sum(vert))}}
+    m_w = float(mult * np.sum(W * (inp.xc - m.x)))
+    m_s = float(-mult * np.sum(S * m.rho))
+    fm = r.form == "FM"
+    lhs = -m_s if fm else float(mult * np.sum(S))
+    rhs = m_w if fm else float(mult * np.sum(W * m.kap))
+    return {"F": F, "dim": m.dim, "mult": mult, "count": m.count, "form": r.form, "weight": -totals["W"]["z"],
+            "totals": totals, "moments": {"W": m_w, "N": 0.0, "U": 0.0, "S": m_s, "net": m_w + m_s},
+            "method": {"form": r.form, "lhs": lhs, "rhs": rhs, "residual": (lhs - rhs) / rhs},
+            "vertical_max_rel": float(np.max(np.abs(vert) / W)) if m.count else 0.0,
+            "el": {"x": m.x, "y": m.y, "zb": m.zb, "zm": (m.zb + m.zt) / 2, "W": W, "N": N, "U": U, "S": S, "nx": nx,
+                   "ny": ny, "nz": nz, "sx": sx, "sz": sz}}

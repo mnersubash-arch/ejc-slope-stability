@@ -264,6 +264,18 @@ def test_default_grid_refuses_circles_behind_the_toe():
     assert E.build_mesh(c.with_(base_circle=True), 2, 40).count > 0
 
 
+def test_default_grid_refuses_face_circles_and_names_the_base_circle_option():
+    # exit on the face 5 m above the toe, lowest point above the toe level (R < z_c): QA/QC finding S2
+    xe, ze = -5.0 / _m.tan(_m.radians(60.0)), 5.0
+    c = MAIN.with_(H=20.0, beta=60.0, xc=2.0, zc=30.0, R=_m.hypot(xe - 2.0, ze - 30.0), gamma=25.0, model="mc",
+                   c_mc=30.0, phi_mc=35.0)
+    assert c.R < c.zc
+    with pytest.raises(ValueError, match=r"require R > z_c .*use the base-circle option"):
+        E.build_mesh(c, 2, 40)
+    r = r2(c.with_(base_circle=True))
+    assert r.status == "ACCEPTED" and r.fos > 0
+
+
 @pytest.mark.parametrize("case", DATA["DEsterre_2024"]["cases"], ids=lambda c: c["id"])
 def test_base_circle_geometry_matches_the_file(case):
     xc, zc, R = case["x_c_engine"], case["z_c"], case["R"]
@@ -289,3 +301,25 @@ def test_law_cross_check_against_reference_code(p):
     for key, value in p.data["engine_check"].items():
         n2 = int(key.rsplit("_", 1)[1])
         assert rounds_to(r2(p.inputs.with_(n2=n2)).fos, value, 4)
+
+
+def test_mass_forces_balance():
+    """Free-body diagram of the whole mass: vertical balance element by element (eq. 4.12), the method's own global
+    equation (eq. 4.14 / 4.15) and, where the method imposes it, moment balance about the rotation axis."""
+    for inp in (MAIN, WET, MAIN.with_(form="FM"), WET.with_(form="FM"), WET.with_(tension="C0")):
+        for r in (r3(inp), r2(inp)):
+            mf = E.mass_forces(inp, r)
+            w = mf["weight"]
+            assert w == pytest.approx((2 if r.mesh.dim == 3 else 1) * r.mesh.w.sum(), rel=1e-12)
+            assert abs(mf["totals"]["net"]["z"]) <= 1e-12 * w and mf["vertical_max_rel"] <= 1e-9
+            assert abs(mf["totals"]["N"]["z"] + mf["totals"]["U"]["z"] + mf["totals"]["S"]["z"] - w) <= 1e-12 * w
+            assert abs(mf["method"]["residual"]) <= 1e-9
+            if r.mesh.dim == 2 or inp.form == "FM":
+                assert abs(mf["moments"]["net"]) <= 1e-9 * mf["moments"]["W"]
+    # F_H in 3D balances sum S = sum W kappa, not the moment about the axis: 0.08 % apart on the thesis case (§5.5)
+    mf = E.mass_forces(MAIN, r3(MAIN))
+    assert 5e-4 < mf["moments"]["net"] / mf["moments"]["W"] < 1e-3
+    # horizontal force balance is not part of these methods: 1.5 % (3D) and 1.9 % (2D) of the weight, dry baseline
+    assert 0.014 < mf["totals"]["net"]["x"] / mf["weight"] < 0.016
+    mf2 = E.mass_forces(MAIN, r2(MAIN))
+    assert 0.018 < mf2["totals"]["net"]["x"] / mf2["weight"] < 0.020

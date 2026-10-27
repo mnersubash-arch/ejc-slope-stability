@@ -30,6 +30,8 @@ Nothing in this folder deploys it to a public host.
 1. **Calculator.** Sidebar inputs: each has a number box and a slider that stay in sync, with units, valid range
    and reset-to-preset. Outputs:
    - FoS 3D and 2D, the 3D/2D ratio, iterations, active columns and slices, and the projection count;
+   - the bases with tensile effective normal stress (σ_n < 0), with a note when there are any and a warning above
+     a quarter of the bases (thesis §5.8);
    - PASS/FAIL for every final check, with the largest residuals;
    - CSV downloads of the column and slice results;
    - studies: a mesh study (eq. 4.17) and a ν sweep.
@@ -41,7 +43,12 @@ Nothing in this folder deploys it to a public host.
 3. **3D view.** Ground, spherical slip surface and column prisms, coloured by σ_n, φ_i, c_i, τ_s, u, contribution
    to resistance τ_s A, or the tension flag. A toggle mirrors the half-model into the full mass, and a plan view
    highlights a column.
-4. **Free-body diagram.** Choose a column by clicking the plan view or by its index. The page shows:
+4. **Free-body diagram.** First every force on the sliding mass, on the 2D central section or the 3D full mass:
+   - the weight W of each slice or column and the N′, U and S on its base (`engine.mass_forces`);
+   - the force polygon, the totals with their moments about the rotation axis, and the vertical (eq. 4.12),
+     horizontal and moment balance (F_H balances ΣS = ΣWκ; F_M and Bishop balance the moment).
+
+   Then one column, chosen by clicking the plan view or by its index:
    - W, N′ = σ_n A, U = u A, S = τ_s A / F, the base normal, the lever arm ρ and the rotation axis;
    - the force values and the vertical-balance residual;
    - the matching 2D slice diagram.
@@ -203,7 +210,7 @@ Carranza-Torres circles are 0.3–2.6 mm behind the toe, within that tolerance. 
 
 ## Verification
 
-`python verification.py --slow` (or the Verification page with the slow box ticked) gives **88 PASS, 0 FAIL,
+`python verification.py --slow` (or the Verification page with the slow box ticked) gives **89 PASS, 0 FAIL,
 40 INFO**. See `VERIFICATION.md`. Without the slow targets, the page lists the 9 fine-mesh rows (7 targets, 2
 reference rows) as "skipped (slow), see VERIFICATION.md", so the totals still add up. The PASS/FAIL rows are:
 
@@ -211,7 +218,7 @@ reference rows) as "skipped (slow), see VERIFICATION.md", so the totals still ad
 - the four main cases (3D and 2D, EJC and GHB);
 - EJC at σ2 = σ3 against GHB (≤ 1e-11 relative; observed ≤ 2e-16);
 - F_M, C0/T0 and the native-path iteration counts;
-- the original-closure table (Table 5.2) and the 43-of-76 count;
+- the original-closure table (Table 5.2, ν = 0.05 to 0.49) and the 43-of-76 count;
 - the Carranza-Torres records at 20×20 / 40 and at 320×320 / 5120;
 - the finest meshes;
 - the Law (2024) presets against the thesis reference code `lem_ref.py` (GHB 2D, 40 and 640 slices, 4 decimals);

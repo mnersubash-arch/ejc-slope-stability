@@ -45,6 +45,8 @@ async function check(cond, label) { console.log(`${cond ? "ok  " : "FAIL"} ${lab
   await check(await text(page, "#fos3") === "2.706024", `default 3D FoS ${await text(page, "#fos3")}`);
   await check(await text(page, "#fos2") === "2.447911", `default 2D FoS ${await text(page, "#fos2")}`);
   await check(/Accepted/i.test(await text(page, "#chip3")), "3D accepted chip");
+  await check(/6 of 76 \(8%\) \/ 1 of 30 \(3%\)/.test(await text(page, "#facts")), "summary: tensile bases 6 of 76 (3D) and 1 of 30 (2D)");
+  await check(/Tensile bases: 3D 6 of 76 \(8%\), 2D 1 of 30 \(3%\)/.test(await text(page, "#notes")), "summary: tensile-base note (info)");
   console.log("     runstate:", await text(page, "#runstate"), "| worker:", await page.evaluate(() => document.querySelector("#runstate").textContent.includes("on this page") ? "fallback" : "worker"));
   await page.waitForTimeout(600);
   await page.screenshot({ path: path.join(SHOTS, "w1-3d-light.png"), fullPage: true });
@@ -60,6 +62,19 @@ async function check(cond, label) { console.log(`${cond ? "ok  " : "FAIL"} ${lab
   console.log("     column:", await text(page, "#col-title"), "|", (await text(page, "#col-balance")).slice(0, 120));
   console.log("     slice:", await text(page, "#slice-title"), "|", (await text(page, "#slice-balance")).slice(0, 120));
   await check(/PASS/.test(await text(page, "#col-balance")) && /PASS/.test(await text(page, "#slice-balance")), "vertical balance PASS for column and slice");
+  // every force on the sliding mass: 2D section, then the 3D full mass
+  await page.waitForSelector("#chart-mass .main-svg", { timeout: 60000 });
+  let mb = await text(page, "#mass-balance");
+  console.log("     mass 2D:", mb.replace(/\s+/g, " ").slice(0, 260));
+  await check((mb.match(/PASS/g) || []).length === 2 && /1\.89% of the weight/.test(mb), "whole mass 2D: vertical and moment balance PASS, 1.89% horizontal");
+  await check((await page.$$eval("#mass-table tbody tr", (e) => e.length)) === 5, "whole mass 2D: table of W, N′, U, S and their sum");
+  await page.check("#massview-3");
+  await page.waitForTimeout(1500);
+  mb = await text(page, "#mass-balance");
+  await check(/FH balances ΣS = ΣWκ instead/.test(mb) && /1\.50% of the weight/.test(mb) && (mb.match(/PASS/g) || []).length === 1, "whole mass 3D: F_H equation, 1.50% horizontal");
+  await page.screenshot({ path: path.join(SHOTS, "w1-free-body-3d-light.png"), fullPage: false });
+  await page.check("#massview-2");
+  await page.waitForTimeout(600);
   // change the column with its slider
   await page.$eval("#sl-k3", (el) => { el.value = 5; el.dispatchEvent(new Event("input", { bubbles: true })); });
   await page.waitForTimeout(500);
@@ -69,7 +84,7 @@ async function check(cond, label) { console.log(`${cond ? "ok  " : "FAIL"} ${lab
   await page.click("#tab-verification");
   await page.waitForFunction(() => /Finished/.test(document.querySelector("#ver-status").textContent), null, { timeout: 120000 });
   console.log("     verification:", await text(page, "#ver-summary"), "|", await text(page, "#ver-status"));
-  await check(/81 pass/i.test(await text(page, "#ver-summary")) && /0 fail/i.test(await text(page, "#ver-summary")), "verification 81 pass / 0 fail");
+  await check(/82 pass/i.test(await text(page, "#ver-summary")) && /0 fail/i.test(await text(page, "#ver-summary")), "verification 82 pass / 0 fail");
   await page.screenshot({ path: path.join(SHOTS, "w1-verification-light.png"), fullPage: false });
 
   // studies: a short nu sweep and mesh study
@@ -125,6 +140,16 @@ async function check(cond, label) { console.log(`${cond ? "ok  " : "FAIL"} ${lab
   await page.fill("#nb-R", "700"); await page.dispatchEvent("#nb-R", "change");
   await waitSolved(page);
   console.log("     R = 700:", (await text(page, "#notes")).slice(0, 220));
+  await page.fill("#nb-R", "600"); await page.dispatchEvent("#nb-R", "change");
+  await waitSolved(page);
+  await check(/require R > z_c .*use the base-circle option/.test(await text(page, "#notes")), "R < z_c: the error names the base-circle option");
+  await page.selectOption("#preset", "thesis_wet_05");
+  await waitSolved(page);
+  await check(/Tensile bases: 3D 23 of 76 \(30%\).*More than a quarter/.test(await text(page, "#notes")), "wet baseline: tensile-base warning (23 of 76)");
+  await page.selectOption("#preset", "thesis_dry_05");
+  await waitSolved(page);
+  await page.fill("#nb-R", "700"); await page.dispatchEvent("#nb-R", "change");
+  await waitSolved(page);
   await page.click("#tab-cross-section");
   await page.waitForTimeout(600);
   await page.screenshot({ path: path.join(SHOTS, "w1-error-section-light.png"), fullPage: false });

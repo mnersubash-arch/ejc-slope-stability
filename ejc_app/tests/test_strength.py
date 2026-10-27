@@ -162,7 +162,25 @@ def test_original_closure_minimum():
 
 
 @pytest.mark.parametrize("nu,target,d", [(0.05, 0.92, 2), (0.10, 3.43, 2), (0.20, 19.23, 2), (0.271, 52.97, 2),
-                                         (0.35, 177.8, 1), (0.45, 2188.0, 0)])
+                                         (0.35, 177.8, 1), (0.45, 2188.0, 0), (0.49, 59952.0, 0)])
 def test_table_5_2(nu, target, d):
     mb, s, _ = MAIN.hb
     assert rounds_to(E.original_closure_minimum(77.7, mb, s, 0.5, nu).sn_min, target, d)
+
+
+# The minima lie on the edge sigma2 = sigma3 of the admissible set: sigma3 from k sigma3 = sigma_ci Q^0.5 with
+# k = (1 - 2 nu)/nu, then sigma_n of that state, both evaluated with mpmath at 50 digits (qa/qa_extra.py). Before the
+# QA/QC fix (finding S1) the search could stop one grid step inside the edge: 59,953.87 MPa at nu = 0.49.
+EDGE_MINIMA = {0.05: (0.380094742856100265, 0.915855437380532255), 0.10: (1.62220790622158018, 3.42932759983678206),
+               0.20: (10.975624118170999, 19.2255957374544289), 0.271: (34.3759758649727541, 52.9663755316253943),
+               0.35: (133.35940221633931, 177.816163701316242), 0.45: (1982.70231915863376, 2187.80980520517984),
+               0.49: (58768.4063005811189, 59951.6628165205653)}
+
+
+@pytest.mark.parametrize("nu", sorted(EDGE_MINIMA))
+def test_original_closure_minimum_on_the_admissible_edge(nu):
+    mb, s, _ = MAIN.hb
+    r = E.original_closure_minimum(77.7, mb, s, 0.5, nu)
+    s3, sn = EDGE_MINIMA[nu]
+    assert abs(r.sigma3_min / s3 - 1) < 1e-9
+    assert abs(r.sn_min / sn - 1) < 1e-9

@@ -1,4 +1,5 @@
 """Presets, figures and a headless run of every Streamlit page."""
+import math
 from pathlib import Path
 
 import numpy as np
@@ -51,6 +52,18 @@ def test_figures_build(field):
         P.cross_section(inp, a2, field)
         P.view3d(inp, a3, field, mirror=True, highlight=3)
         P.plan_view(a3, field, highlight=3, mirror=True)
+
+
+def test_tensile_bases_summary():
+    """QA/QC finding S3: the summary counts bases with sigma_n < 0 and warns above a quarter of them."""
+    import ui
+    dry, wet = (r3(MAIN), r2(MAIN)), (r3(WET), r2(WET))
+    assert ui.tensile_text(ui.tensile_count(dry[0])) == "6 of 76 (8%)"           # thesis §5.8: 6 of 76 dry bases
+    assert ui.tensile_text(ui.tensile_count(wet[0])) == "23 of 76 (30%)"         # and 23 of 76 wet bases
+    assert ui.tensile_note(MAIN, *dry)[0] == "info" and ui.tensile_note(WET, *wet)[0] == "warning"
+    c0 = MAIN.with_(tension="C0")
+    assert ui.tensile_note(c0, r3(c0), r2(c0)) is None                          # C0/T0 already treat those bases
+    assert ui.tensile_text(None) == "–"
 
 
 def test_free_body_balances():
@@ -120,3 +133,36 @@ def test_sidebar_keeps_its_values_across_pages():
         assert at.number_input(key="nb_n3").value == 24 and at.number_input(key="nb_c_mc").value == 21.6
         assert at.radio(key="w_strength").value == "MC" and at.checkbox(key="w_base_circle").value
         assert at.sidebar.selectbox(key="w_preset").value == "desterre_DE-1.5-c3-ru0"
+
+
+def test_whole_mass_figures():
+    """All forces on the sliding mass: every element drawn on the default meshes, groups on fine ones."""
+    import engine as E
+    for inp in (MAIN, WET, MAIN.with_(n3=40, n2=640)):
+        a3, a2 = r3(inp), r2(inp)
+        f2, size2 = P.mass_fbd2d(inp, a2, E.mass_forces(inp, a2))
+        f3, size3 = P.mass_fbd3d(inp, a3, E.mass_forces(inp, a3))
+        n_w2 = len(next(t for t in f2.data if t.name.startswith("W,")).x) // 3       # 3 points per arrow
+        n_w3 = len(next(t for t in f3.data if t.name and t.name.startswith("W,")).x) // 6   # both halves
+        assert size2 == max(1, math.ceil(a2.mesh.count / 50)) and n_w2 == math.ceil(a2.mesh.count / size2) <= 50
+        assert n_w3 <= 120 and (size3 == 1) == (a3.mesh.count <= 120)
+        if inp.n3 == 20:
+            assert (size2, size3, n_w2, n_w3) == (1, 1, a2.mesh.count, a3.mesh.count)   # every element drawn
+        assert any(t.name.startswith("N′") for t in f2.data) and any(t.name and t.name.startswith("S,") for t in f3.data)
+        assert any(t.name.startswith("U,") for t in f2.data) == inp.wet
+        for mf in (E.mass_forces(inp, a3), E.mass_forces(inp, a2)):
+            P.force_polygon(mf)
+            assert len(P.mass_rows(mf)) == 5 and "PASS" in P.mass_balance(mf)[0]
+
+
+def test_fbd_page_whole_mass_views():
+    at_mod = pytest.importorskip("streamlit.testing.v1")
+    at = at_mod.AppTest.from_file(str(APP), default_timeout=120)
+    at.run()
+    at.switch_page("views/fbd.py")
+    at.run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert any("Vertical:" in m.value and "PASS" in m.value for m in at.markdown)
+    at.radio(key="mass_view").set_value("3D full mass").run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert any("F_H balances ΣS = ΣWκ instead" in m.value for m in at.markdown)

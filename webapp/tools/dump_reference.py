@@ -46,6 +46,17 @@ def inputs_dict(inp):
     return {k: num(v) if not isinstance(v, str) else v for k, v in dataclasses.asdict(inp).items()}
 
 
+def mass(inp, r):
+    """Whole-mass forces (E.mass_forces) of a run that reached a final state, else None."""
+    if r.sn is None or r.tau_used is None or (r.fos is None and r.f_trial is None):
+        return None
+    mf = E.mass_forces(inp, r)
+    return dict(weight=num(mf["weight"]), vertical_max_rel=num(mf["vertical_max_rel"]),
+                totals={k: {c: num(v[c]) for c in ("x", "z")} for k, v in mf["totals"].items()},
+                moments={k: num(v) for k, v in mf["moments"].items()},
+                method={k: v if isinstance(v, str) else num(v) for k, v in mf["method"].items()})
+
+
 def lem(r):
     return dict(status=r.status, reason=r.reason, fos=num(r.fos), f_trial=num(r.f_trial), iterations=r.iterations,
                 projections=r.projections, count=r.mesh.count, volume=num(r.mesh.volume),
@@ -62,6 +73,7 @@ def run_case(name, inp, dims=(3, 2)):
         try:
             r = E.run_3d(inp) if dim == 3 else E.run_2d(inp)
             out[f"r{dim}"] = lem(r)
+            out[f"m{dim}"] = mass(inp, r)
         except ValueError as e:
             out[f"r{dim}"] = dict(error=str(e))
     return out
@@ -103,6 +115,10 @@ add("gsi 60 D 0.5", MAIN.with_(gsi=60.0, D=0.5, a_override=None))
 add("sigma_ci 30 mi 20", MAIN.with_(sigma_ci=30.0, mi=20.0))
 add("circle behind toe", MAIN.with_(zc=600.0, R=640.0))
 add("R <= zc", MAIN.with_(R=600.0))
+FACE = MAIN.with_(H=20.0, beta=60.0, xc=2.0, zc=30.0, R=math.hypot(-5.0 / math.tan(math.radians(60.0)) - 2.0, -25.0),
+                  gamma=25.0, model="mc", c_mc=30.0, phi_mc=35.0)       # face circle, lowest point above the toe level
+add("face circle, default grid", FACE)
+add("face circle, base circle", FACE.with_(base_circle=True))
 add("ru and wet", WET.with_(ru=0.2))
 add("N = 2", MAIN.with_(n3=2, n2=2))
 for p in PR.law_presets():
@@ -139,7 +155,7 @@ for name, st in strengths:
                                         code=arr(ps.code))))
 
 ocm = []
-for nu in (0.05, 0.10, 0.20, 0.271, 0.35, 0.45):
+for nu in (0.05, 0.10, 0.20, 0.271, 0.35, 0.45, 0.49):
     m0 = E.original_closure_minimum(77.7, mb, s, 0.5, nu)
     ocm.append(dict(nu=nu, sigma3_min=num(m0.sigma3_min), sn_min=num(m0.sn_min), phi_deg=num(m0.phi_deg),
                     found=m0.found))

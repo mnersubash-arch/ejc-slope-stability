@@ -61,7 +61,7 @@ if A is None:
 r3, r2 = A.r3, A.r2
 
 # ---- headline numbers
-c = st.columns(6)
+c = st.columns(7)
 c[0].metric("FoS 3D" + (" (F_M)" if A.inputs.form == "FM" else ""), ui.fmt(r3.fos))
 c[1].metric("FoS 2D (Bishop)", ui.fmt(r2.fos))
 c[2].metric("3D / 2D ratio", ui.fmt(A.ratio, 4))
@@ -70,8 +70,13 @@ c[4].metric("Active columns / slices", f"{r3.mesh.count} / {r2.mesh.count}")
 c[5].metric("Projections 3D / 2D", f"{r3.projections} / {r2.projections}",
             help="Trial σ_n moved above the projection limit during the iteration (thesis Section 4.6). A run is "
                  "accepted only if no base is projected at convergence.")
+c[6].metric("Tensile bases 3D / 2D", f"{ui.tensile_text(ui.tensile_count(r3))} / {ui.tensile_text(ui.tensile_count(r2))}",
+            help="Bases with tensile effective normal stress σ′_n < 0 at the accepted state (thesis Section 5.8).")
 ui.status_badge(r3, "3D")
 ui.status_badge(r2, "2D")
+tn = ui.tensile_note(A.inputs, r3, r2)
+if tn:
+    (st.warning if tn[0] == "warning" else st.info)(tn[1])
 if A.inputs.tension != "none":
     st.caption(f"{A.inputs.tension}: sensitivity, not a calibrated contact law.")
 mb, s, a = A.inputs.hb

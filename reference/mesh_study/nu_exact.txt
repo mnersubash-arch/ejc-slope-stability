@@ -1,0 +1,11 @@
+search: sigma3' from 1e-6 to 1e6 MPa, 200001 log-spaced points + golden-section refinement
+nu=0.050 | a=0.5:     0.915855 MPa (phi 57.499 deg, sigma3' 0.3801) | a=0.509923:     0.844425 MPa (phi 57.515 deg, sigma3' 0.3506)
+nu=0.100 | a=0.5:     3.429328 MPa (phi 46.179 deg, sigma3' 1.622) | a=0.509923:     3.193692 MPa (phi 46.305 deg, sigma3' 1.515)
+nu=0.150 | a=0.5:     8.810876 MPa (phi 37.315 deg, sigma3' 4.592) | a=0.509923:     8.350160 MPa (phi 37.473 deg, sigma3' 4.363)
+nu=0.200 | a=0.5:    19.225596 MPa (phi 29.927 deg, sigma3' 10.98) | a=0.509923:    18.536165 MPa (phi 30.087 deg, sigma3' 10.6)
+nu=0.250 | a=0.5:    39.330461 MPa (phi 23.548 deg, sigma3' 24.57) | a=0.509923:    38.553806 MPa (phi 23.696 deg, sigma3' 24.12)
+nu=0.271 | a=0.5:    52.966376 MPa (phi 21.101 deg, sigma3' 34.38) | a=0.509923:    52.283035 MPa (phi 21.241 deg, sigma3' 33.97)
+nu=0.300 | a=0.5:    80.640278 MPa (phi 17.909 deg, sigma3' 55.17) | a=0.509923:    80.384785 MPa (phi 18.036 deg, sigma3' 55.05)
+nu=0.350 | a=0.5:   177.816164 MPa (phi 12.836 deg, sigma3' 133.4) | a=0.509923:   180.516322 MPa (phi 12.936 deg, sigma3' 135.5)
+nu=0.400 | a=0.5:   475.665779 MPa (phi  8.212 deg, sigma3' 391.7) | a=0.509923:   493.684395 MPa (phi  8.283 deg, sigma3' 406.7)
+nu=0.450 | a=0.5:  2187.809805 MPa (phi  3.954 deg, sigma3' 1983) | a=0.509923:  2346.922312 MPa (phi  3.991 deg, sigma3' 2127)

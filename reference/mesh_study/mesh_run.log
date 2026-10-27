@@ -1,0 +1,106 @@
+Dry, a = 0.500000                      3D    10: F=2.493337 accepted=True min sn=76.00 proj(path/end)=0/0
+Dry, a = 0.500000                      3D    15: F=2.575341 accepted=True min sn=-48.60 proj(path/end)=0/0
+Dry, a = 0.500000                      3D    20: F=2.553668 accepted=True min sn=-50.26 proj(path/end)=0/0
+Dry, a = 0.500000                      3D    30: F=2.560849 accepted=True min sn=-71.92 proj(path/end)=2/0
+Dry, a = 0.500000                      3D    40: F=2.563260 accepted=True min sn=-76.12 proj(path/end)=4/0
+Dry, a = 0.500000                      3D    60: F=2.556729 accepted=True min sn=-72.69 proj(path/end)=11/0
+Dry, a = 0.500000                      3D    80: F=2.558929 accepted=True min sn=-76.35 proj(path/end)=21/0
+Dry, a = 0.500000                      3D   120: F=2.558652 accepted=True min sn=-79.81 proj(path/end)=48/0
+Dry, a = 0.500000                      3D   160: F=2.557690 accepted=True min sn=-80.84 proj(path/end)=77/0
+Dry, a = 0.500000                      3D   240: F=2.558574 accepted=True min sn=-80.94 proj(path/end)=179/0
+Dry, a = 0.500000                      3D   320: F=2.559301 accepted=True min sn=-81.51 proj(path/end)=338/0
+Dry, a = 0.500000                      2D    20: F=2.307823 accepted=True min sn=-0.73 proj(path/end)=0/0
+Dry, a = 0.500000                      2D    40: F=2.310255 accepted=True min sn=-44.29 proj(path/end)=0/0
+Dry, a = 0.500000                      2D    80: F=2.302454 accepted=True min sn=-35.62 proj(path/end)=0/0
+Dry, a = 0.500000                      2D   160: F=2.302374 accepted=True min sn=-55.28 proj(path/end)=1/0
+Dry, a = 0.500000                      2D   320: F=2.306354 accepted=True min sn=-81.22 proj(path/end)=2/0
+Dry, a = 0.500000                      2D   640: F=2.304389 accepted=True min sn=-77.28 proj(path/end)=3/0
+Dry, a = 0.500000                      2D  1280: F=2.305368 accepted=True min sn=-83.14 proj(path/end)=7/0
+Dry, a = 0.500000                      2D  2560: F=2.304878 accepted=True min sn=-82.19 proj(path/end)=14/0
+Wet, a = 0.500000                      3D    10: F=1.151764 accepted=True min sn=-38.30 proj(path/end)=0/0
+Wet, a = 0.500000                      3D    15: F=1.221479 accepted=True min sn=-75.57 proj(path/end)=0/0
+Wet, a = 0.500000                      3D    20: F=1.200122 accepted=True min sn=-80.64 proj(path/end)=1/0
+Wet, a = 0.500000                      3D    30: F=1.209084 accepted=True min sn=-88.34 proj(path/end)=4/0
+Wet, a = 0.500000                      3D    40: F=1.209439 accepted=True min sn=-88.53 proj(path/end)=9/0
+Wet, a = 0.500000                      3D    60: F=1.203069 accepted=True min sn=-88.16 proj(path/end)=15/0
+Wet, a = 0.500000                      3D    80: F=1.205334 accepted=True min sn=-89.41 proj(path/end)=36/0
+Wet, a = 0.500000                      3D   120: F=1.205132 accepted=True min sn=-90.25 proj(path/end)=77/0
+Wet, a = 0.500000                      3D   160: F=1.204192 accepted=True min sn=-90.84 proj(path/end)=118/0
+Wet, a = 0.500000                      3D   240: F=1.205068 accepted=True min sn=-90.87 proj(path/end)=284/0
+Wet, a = 0.500000                      3D   320: F=1.205803 accepted=True min sn=-91.03 proj(path/end)=518/0
+Wet, a = 0.500000                      2D    20: F=1.030663 accepted=True min sn=-54.25 proj(path/end)=0/0
+Wet, a = 0.500000                      2D    40: F=1.035871 accepted=True min sn=-69.96 proj(path/end)=0/0
+Wet, a = 0.500000                      2D    80: F=1.027173 accepted=True min sn=-80.25 proj(path/end)=1/0
+Wet, a = 0.500000                      2D   160: F=1.027213 accepted=True min sn=-85.20 proj(path/end)=1/0
+Wet, a = 0.500000                      2D   320: F=1.031299 accepted=True min sn=-91.72 proj(path/end)=3/0
+Wet, a = 0.500000                      2D   640: F=1.029278 accepted=True min sn=-90.73 proj(path/end)=5/0
+Wet, a = 0.500000                      2D  1280: F=1.030282 accepted=True min sn=-92.22 proj(path/end)=11/0
+Wet, a = 0.500000                      2D  2560: F=1.029778 accepted=True min sn=-91.98 proj(path/end)=22/0
+Dry, a = 0.509923                      3D    10: F=2.417883 accepted=True min sn=76.44 proj(path/end)=0/0
+Dry, a = 0.509923                      3D    15: F=2.497002 accepted=True min sn=-48.28 proj(path/end)=0/0
+Dry, a = 0.509923                      3D    20: F=2.476038 accepted=True min sn=-49.78 proj(path/end)=0/0
+Dry, a = 0.509923                      3D    30: F=2.483032 accepted=True min sn=-71.55 proj(path/end)=2/0
+Dry, a = 0.509923                      3D    40: F=2.485352 accepted=True min sn=-75.81 proj(path/end)=4/0
+Dry, a = 0.509923                      3D    60: F=2.479035 accepted=True min sn=-72.34 proj(path/end)=9/0
+Dry, a = 0.509923                      3D    80: F=2.481165 accepted=True min sn=-76.02 proj(path/end)=16/0
+Dry, a = 0.509923                      3D   120: F=2.480896 accepted=True min sn=-79.52 proj(path/end)=42/0
+Dry, a = 0.509923                      3D   160: F=2.479966 accepted=True min sn=-80.55 proj(path/end)=64/0
+Dry, a = 0.509923                      3D   240: F=2.480821 accepted=True min sn=-80.65 proj(path/end)=150/0
+Dry, a = 0.509923                      3D   320: F=2.481525 accepted=True min sn=-81.23 proj(path/end)=278/0
+Dry, a = 0.509923                      2D    20: F=2.239663 accepted=True min sn=-0.28 proj(path/end)=0/0
+Dry, a = 0.509923                      2D    40: F=2.242063 accepted=True min sn=-43.93 proj(path/end)=0/0
+Dry, a = 0.509923                      2D    80: F=2.234529 accepted=True min sn=-34.96 proj(path/end)=0/0
+Dry, a = 0.509923                      2D   160: F=2.234453 accepted=True min sn=-54.74 proj(path/end)=0/0
+Dry, a = 0.509923                      2D   320: F=2.238307 accepted=True min sn=-80.92 proj(path/end)=2/0
+Dry, a = 0.509923                      2D   640: F=2.236404 accepted=True min sn=-76.93 proj(path/end)=3/0
+Dry, a = 0.509923                      2D  1280: F=2.237352 accepted=True min sn=-82.86 proj(path/end)=7/0
+Dry, a = 0.509923                      2D  2560: F=2.236877 accepted=True min sn=-81.90 proj(path/end)=12/0
+Wet, a = 0.509923                      3D    10: F=1.111773 accepted=True min sn=-37.95 proj(path/end)=0/0
+Wet, a = 0.509923                      3D    15: F=1.179083 accepted=True min sn=-75.31 proj(path/end)=0/0
+Wet, a = 0.509923                      3D    20: F=1.158427 accepted=True min sn=-80.42 proj(path/end)=1/0
+Wet, a = 0.509923                      3D    30: F=1.167120 accepted=True min sn=-88.18 proj(path/end)=4/0
+Wet, a = 0.509923                      3D    40: F=1.167460 accepted=True min sn=-88.37 proj(path/end)=8/0
+Wet, a = 0.509923                      3D    60: F=1.161300 accepted=True min sn=-87.99 proj(path/end)=13/0
+Wet, a = 0.509923                      3D    80: F=1.163492 accepted=True min sn=-89.26 proj(path/end)=26/0
+Wet, a = 0.509923                      3D   120: F=1.163296 accepted=True min sn=-90.10 proj(path/end)=64/0
+Wet, a = 0.509923                      3D   160: F=1.162386 accepted=True min sn=-90.71 proj(path/end)=101/0
+Wet, a = 0.509923                      3D   240: F=1.163234 accepted=True min sn=-90.74 proj(path/end)=232/0
+Wet, a = 0.509923                      3D   320: F=1.163945 accepted=True min sn=-90.90 proj(path/end)=431/0
+Wet, a = 0.509923                      2D    20: F=0.995402 accepted=True min sn=-53.97 proj(path/end)=0/0
+Wet, a = 0.509923                      2D    40: F=1.000466 accepted=True min sn=-69.72 proj(path/end)=0/0
+Wet, a = 0.509923                      2D    80: F=0.992062 accepted=True min sn=-80.00 proj(path/end)=0/0
+Wet, a = 0.509923                      2D   160: F=0.992101 accepted=True min sn=-84.99 proj(path/end)=1/0
+Wet, a = 0.509923                      2D   320: F=0.996054 accepted=True min sn=-91.59 proj(path/end)=3/0
+Wet, a = 0.509923                      2D   640: F=0.994098 accepted=True min sn=-90.59 proj(path/end)=4/0
+Wet, a = 0.509923                      2D  1280: F=0.995069 accepted=True min sn=-92.10 proj(path/end)=10/0
+Wet, a = 0.509923                      2D  2560: F=0.994582 accepted=True min sn=-91.86 proj(path/end)=19/0
+Dry, a = 0.500000, published circle    3D    10: F=2.141219 accepted=True min sn=17.38 proj(path/end)=0/0
+Dry, a = 0.500000, published circle    3D    15: F=2.144374 accepted=True min sn=-70.51 proj(path/end)=1/0
+Dry, a = 0.500000, published circle    3D    20: F=2.141937 accepted=True min sn=-66.86 proj(path/end)=1/0
+Dry, a = 0.500000, published circle    3D    30: F=2.142452 accepted=True min sn=-83.91 proj(path/end)=2/0
+Dry, a = 0.500000, published circle    3D    40: F=2.141456 accepted=True min sn=-74.62 proj(path/end)=5/0
+Dry, a = 0.500000, published circle    3D    60: F=2.140278 accepted=True min sn=-83.03 proj(path/end)=16/0
+Dry, a = 0.500000, published circle    3D    80: F=2.141129 accepted=True min sn=-82.96 proj(path/end)=29/0
+Dry, a = 0.500000, published circle    3D   120: F=2.140923 accepted=True min sn=-85.38 proj(path/end)=51/0
+Dry, a = 0.500000, published circle    3D   160: F=2.140730 accepted=True min sn=-85.33 proj(path/end)=87/0
+Dry, a = 0.500000, published circle    3D   240: F=2.140806 accepted=True min sn=-85.64 proj(path/end)=216/0
+Dry, a = 0.500000, published circle    3D   320: F=2.140776 accepted=True min sn=-85.46 proj(path/end)=368/0
+Dry, a = 0.500000, published circle    2D    20: F=2.003379 accepted=True min sn=57.13 proj(path/end)=0/0
+Dry, a = 0.500000, published circle    2D    40: F=2.003873 accepted=True min sn=-33.33 proj(path/end)=0/0
+Dry, a = 0.500000, published circle    2D    80: F=2.003473 accepted=True min sn=-70.52 proj(path/end)=1/0
+Dry, a = 0.500000, published circle    2D   160: F=2.003369 accepted=True min sn=-85.89 proj(path/end)=1/0
+Dry, a = 0.500000, published circle    2D   320: F=2.002731 accepted=True min sn=-78.56 proj(path/end)=2/0
+Dry, a = 0.500000, published circle    2D   640: F=2.002724 accepted=True min sn=-82.32 proj(path/end)=3/0
+Dry, a = 0.500000, published circle    2D  1280: F=2.002723 accepted=True min sn=-84.13 proj(path/end)=7/0
+Dry, a = 0.500000, published circle    2D  2560: F=2.002722 accepted=True min sn=-85.02 proj(path/end)=13/0
+Dry, a = 0.500000 3D workbook mesh: reimplementation 2.553668420037 | workbook 2.553668420038 | diff 9.4e-13
+Dry, a = 0.500000 2D workbook mesh: reimplementation 2.310255027575 | workbook 2.310255027576 | diff 9.1e-13
+Wet, a = 0.500000 3D workbook mesh: reimplementation 1.200121844669 | workbook 1.200121844671 | diff 2.0e-12
+Wet, a = 0.500000 2D workbook mesh: reimplementation 1.035870832455 | workbook 1.035870832457 | diff 1.7e-12
+Dry, a = 0.509923 3D workbook mesh: reimplementation 2.476038083118 | workbook 2.476038083119 | diff 9.6e-13
+Dry, a = 0.509923 2D workbook mesh: reimplementation 2.242063265329 | workbook 2.242063265330 | diff 9.4e-13
+Wet, a = 0.509923 3D workbook mesh: reimplementation 1.158427450179 | workbook 1.158427450181 | diff 1.6e-12
+Wet, a = 0.509923 2D workbook mesh: reimplementation 1.000466157809 | workbook 1.000466157807 | diff 1.7e-12
+Dry, a = 0.500000, published circle 3D workbook mesh: reimplementation 2.141937394996 | workbook 2.141937394996 | diff 2.0e-13
+Dry, a = 0.500000, published circle 2D workbook mesh: reimplementation 2.003873410890 | workbook 2.003873410891 | diff 2.3e-13
+

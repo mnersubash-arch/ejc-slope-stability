@@ -1,0 +1,7 @@
+# Conventional Hoek-Brown comparator (3D geometry, 2D strength), dry, a = 0.5.
+# Expected: ACCEPTED, F3D = 2.5536684200376, F2D = 2.31025502757599.
+name: Dry, a = 0.5 (conventional HB comparator)
+closure: 3
+a_override: 0.5
+mesh3d: 20
+mesh2d: 40

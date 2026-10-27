@@ -1,0 +1,11 @@
+# Chile benchmark, Appendix E surface, thesis closure (closure 1, nu = 0.271).
+# Expected: NOT ACCEPTED in 3D and 2D, FoS withheld (no admissible eq. 4.21 strength).
+name: Chile thesis closure (default)
+geometry: {xc: 355.7423115464064, zc: 644.4192948645371, radius: 725.2669975187362, height: 360, gamma: 27}
+slope: {face_angle_deg: 50}
+water: {water_angle: 0, water_height: 0, u_extra: 0}
+rock_mass: {sci: 77.7, mi: 10, gsi: 42, d: 0, a_override: 0.5}
+strength_model: {strength: 1, c_mc: 7.2, phi_mc: 30}
+closure_inputs: {closure: 1, nu: 0.271}
+tolerances: {tol_a: 1.0e-10, tol_e: 1.0e-8, tol_f: 1.0e-8, checks: 1, max_iter: 2000}
+mesh: {mesh3d: 20, mesh2d: 40}

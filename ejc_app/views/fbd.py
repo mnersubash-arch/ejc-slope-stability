@@ -26,19 +26,26 @@ if r3.fos is None:
 # ---- choose the column: click in the plan view or pick its index
 if "fbd_col" not in st.session_state or st.session_state.fbd_col >= m3.count:
     st.session_state.fbd_col = int(np.argmax(m3.h))
+st.session_state.setdefault("fbd_plan_nonce", 0)
+
+
+def _index_typed():
+    # A new chart key clears the plan view's selection, so a typed index is not overridden by an earlier click
+    # and the same column can be clicked again.
+    st.session_state.fbd_plan_nonce += 1
+
+
 st.markdown("Click a column in the plan view, or pick its index.")
 ev = st.plotly_chart(P.plan_view(r3, "sigma_n", highlight=st.session_state.fbd_col), width="stretch",
-                     key="fbd_plan", on_select="rerun", selection_mode="points")
+                     key=f"fbd_plan_{st.session_state.fbd_plan_nonce}", on_select="rerun", selection_mode="points")
 pts = (ev.get("selection", {}) or {}).get("points", []) if isinstance(ev, dict) else getattr(ev.selection, "points", [])
-if pts:
-    sel = [p for p in pts if p.get("curve_number") == 1]
-    if sel:
-        k_new = int(sel[0].get("point_index", sel[0].get("point_number", 0)))
-        if st.session_state.get("fbd_last_click") != k_new:
-            st.session_state.fbd_last_click = k_new
-            st.session_state.fbd_col = k_new
-            st.rerun()
-st.number_input(f"Column index (0 to {m3.count - 1})", 0, m3.count - 1, key="fbd_col")
+sel = [p for p in pts if p.get("curve_number") == 1]
+if sel:
+    k_new = int(sel[0].get("point_index", sel[0].get("point_number", -1)))
+    if 0 <= k_new < m3.count and k_new != st.session_state.fbd_col:
+        st.session_state.fbd_col = k_new
+        st.rerun()
+st.number_input(f"Column index (0 to {m3.count - 1})", 0, m3.count - 1, key="fbd_col", on_change=_index_typed)
 k = int(st.session_state.fbd_col)
 
 f = P.column_forces(A.inputs, r3, k)

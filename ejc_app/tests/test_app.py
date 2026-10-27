@@ -74,3 +74,17 @@ def test_pages_run_headless(page):
     assert not at.exception, [e.value for e in at.exception]
     if page == "calculator":
         assert dict((m.label, m.value) for m in at.metric)["FoS 3D"] == "2.706024"
+
+
+@pytest.mark.parametrize("page", ["calculator", "view3d", "fbd"])
+def test_pages_with_no_active_columns(page):
+    """N = 2 leaves no active 3D column: the pages that use the 3D result report it instead of raising."""
+    at_mod = pytest.importorskip("streamlit.testing.v1")
+    at = at_mod.AppTest.from_file(str(APP), default_timeout=120)
+    at.run()
+    at.number_input(key="nb_n3").set_value(2)
+    at.run()
+    at.switch_page(f"views/{page}.py")
+    at.run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert any("No active columns" in e.value for e in at.error)

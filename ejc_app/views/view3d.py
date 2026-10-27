@@ -14,6 +14,10 @@ if A is None:
     st.stop()
 r3 = A.r3
 m = r3.mesh
+if m.count == 0:
+    ui.status_badge(r3, "3D")
+    st.warning("No active columns for this geometry and mesh, so there is nothing to draw.")
+    st.stop()
 c1, c2, c3 = st.columns([3, 1, 1])
 field = c1.selectbox("Colour columns by", list(P.FIELDS), format_func=lambda k: P.FIELDS[k][0], key="v3_field")
 mirror = c2.toggle("Mirror (full mass)", value=True, key="v3_mirror")

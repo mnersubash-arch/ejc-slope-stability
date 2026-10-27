@@ -1,0 +1,868 @@
+"""Calculation engine: 3D Hungr columns and 2D Bishop slices with the Extended Jiang Criterion (EJC).
+
+No Streamlit imports: the module is tested on its own (``pytest`` in this folder).
+
+Conventions (brief section 1): compression positive, effective stresses. Strength is evaluated in MPa; column
+forces in kN, stresses in kPa, areas in m^2 (1 MPa = 1000 kPa). The toe is at the origin and the slope rises
+towards negative x. Section numbers in the comments (``§1.2(a)`` and so on) refer to the app brief.
+
+Integrity rules: a local state that fails any acceptance test is REJECTED with its reason. GHB is never
+substituted for the EJC, and a factor of safety is reported only for a run that passes every check.
+"""
+from __future__ import annotations
+
+import math
+from dataclasses import dataclass, field, replace
+from functools import lru_cache
+from typing import Optional
+
+import numpy as np
+
+# ---------------------------------------------------------------------------------------------------------------
+# constants and tolerances (§1.3, §1.4)
+# ---------------------------------------------------------------------------------------------------------------
+GAMMA_W = 9.81             # kN/m^3
+TOL_EJC = 1e-8             # |f| of the unsquared EJC [MPa]
+TOL_CLOSURE = 1e-8         # |sigma2 - closure(sigma1, sigma3)| [MPa]
+TOL_DF = 1e-12             # |dF|/F
+TOL_DSN = 1e-9             # max |d sigma_n| [kPa]
+TOL_LOCAL = 1e-9           # relative local (vertical) equilibrium residual
+TOL_GLOBAL = 1e-8          # relative global equilibrium residual
+MAX_ITER = 2000
+N_SCAN = 4000              # sigma3 scan points (geometric in sigma3 - sigma3_t)
+SCAN_DECADES = 14          # the scan starts 1e-14 of the span above the tensile limit
+N_BISECT = 200             # bisection cap; it stops earlier once the bracket cannot shrink
+
+MODELS = {
+    "ejc_moscarda": "EJC, Moscarda closure sigma2 = nu (sigma1 + sigma3) (adopted)",
+    "ejc_original": "EJC, original closure sigma2 = sigma3/nu - sigma1 (admissibility check only)",
+    "ghb": "Conventional generalised Hoek-Brown (sigma2 = sigma3)",
+    "ejc_sigma2_eq_sigma3": "EJC with the closure sigma2 = sigma3 (must reproduce GHB)",
+}
+
+# local-state reason codes (§1.3 acceptance); 0 = accepted
+OK, DOMAIN, EJC_RES, CLOSURE_RES, ORDERING, GRADIENT, SHEAR, NO_STATE, BISECTION = range(9)
+REASONS = {
+    OK: "ACCEPTED",
+    DOMAIN: "REJECTED: DOMAIN (Q <= 0, complex root or non-finite state)",
+    EJC_RES: "REJECTED: EJC residual |f| >= 1e-8 MPa",
+    CLOSURE_RES: "REJECTED: closure residual >= 1e-8 MPa",
+    ORDERING: "REJECTED: ORDERING (sigma1 >= sigma2 >= sigma3 fails)",
+    GRADIENT: "REJECTED: GRADIENT (M < 1 or not finite)",
+    SHEAR: "REJECTED: SHEAR (tau_s < 0)",
+    NO_STATE: "REJECTED: no admissible state at this sigma_n (outside the admissible range of the closure)",
+    BISECTION: "REJECTED: bisection left the admissible interval",
+}
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# §1.1 rock-mass parameters (Hoek et al. 2002)
+# ---------------------------------------------------------------------------------------------------------------
+def hoek_brown_parameters(gsi: float, mi: float, d: float) -> tuple[float, float, float]:
+    """Return (m_b, s, a) from GSI, m_i and D."""
+    mb = mi * math.exp((gsi - 100.0) / (28.0 - 14.0 * d))
+    s = math.exp((gsi - 100.0) / (9.0 - 3.0 * d))
+    a = 0.5 + (math.exp(-gsi / 15.0) - math.exp(-20.0 / 3.0)) / 6.0
+    return mb, s, a
+
+
+@dataclass(frozen=True)
+class Strength:
+    """Strength model and rock-mass constants. ``sigma_ci`` in MPa."""
+
+    sigma_ci: float
+    mb: float
+    s: float
+    a: float
+    model: str = "ejc_moscarda"
+    nu: float = 0.271
+
+    def __post_init__(self):
+        if self.model not in MODELS:
+            raise ValueError(f"unknown strength model {self.model!r}")
+        if not (self.sigma_ci > 0 and self.mb > 0 and self.s > 0 and 0 < self.a <= 1):
+            raise ValueError("require sigma_ci > 0, m_b > 0, s > 0 and 0 < a <= 1")
+        if self.model in ("ejc_moscarda", "ejc_original") and not 0 < self.nu < 0.5:
+            raise ValueError("require 0 < nu < 0.5")
+
+    @property
+    def pq(self) -> tuple[float, float]:
+        """(p, q) of the closure sigma2 = p sigma1 + q sigma3."""
+        if self.model == "ejc_moscarda":
+            return self.nu, self.nu
+        if self.model == "ejc_original":
+            return -1.0, 1.0 / self.nu
+        return 0.0, 1.0                      # ghb and ejc_sigma2_eq_sigma3
+
+    @property
+    def sigma3_tensile(self) -> float:
+        """sigma3 at Q = 0, the Hoek-Brown tensile limit [MPa]."""
+        return -self.s * self.sigma_ci / self.mb
+
+
+def closure_constants(p: float, q: float) -> tuple[float, float, float]:
+    """Squared EJC on sigma2 = p sigma1 + q sigma3:  P sigma1^2 + R sigma1 sigma3 + S sigma3^2 = sigma_ci^2 Q^(2a).
+
+    P = p^2 - p + 1, R = 2pq - p - q - 1, S = q^2 - q + 1. Moscarda (p = q = nu): P = S = C and R = -B (§1.2(b));
+    original (p = -1, q = 1/nu): P = 3, R = -3/nu, S = 1 - 1/nu + 1/nu^2 (§1.2(c)).
+    """
+    return p * p - p + 1.0, 2.0 * p * q - p - q - 1.0, q * q - q + 1.0
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# §1.2 principal states along the closure, §1.3 tangent parameters
+# ---------------------------------------------------------------------------------------------------------------
+@dataclass
+class States:
+    """Principal states at given sigma3 (MPa), vectorised. ``code`` uses the reason codes above."""
+
+    s1: np.ndarray
+    s2: np.ndarray
+    s3: np.ndarray
+    Q: np.ndarray
+    M: np.ndarray
+    f: np.ndarray              # unsquared EJC residual [MPa]
+    closure: np.ndarray        # sigma2 - (p sigma1 + q sigma3) [MPa]
+    sn: np.ndarray             # sigma_n of the tangent point [MPa]
+    tau: np.ndarray            # tau_s [MPa]
+    phi: np.ndarray            # phi_i [rad]
+    c: np.ndarray              # c_i [MPa]
+    code: np.ndarray
+
+
+def ejc_residual(s1, s2, s3, Q, sigma_ci, a):
+    """§1.2(a): f = 2 sigma1 - sigma2 - sigma3 - sqrt(4 sigma_ci^2 Q^(2a) - 3 (sigma2 - sigma3)^2); NaN if not real."""
+    with np.errstate(invalid="ignore"):
+        rad = 4.0 * sigma_ci ** 2 * np.power(Q, 2.0 * a) - 3.0 * (s2 - s3) ** 2
+        return np.where(rad >= 0, 2.0 * s1 - s2 - s3 - np.sqrt(np.where(rad >= 0, rad, 0.0)), np.nan)
+
+
+def principal_states(s3, st: Strength) -> States:
+    """Principal state, gradient and tangent parameters on the selected model at each sigma3 [MPa].
+
+    EJC models: sigma1 is the root of the squared form that satisfies the unsquared EJC, Q > 0, a real radicand and
+    sigma1 >= sigma2 >= sigma3 (the + root is tried first). GHB (§1.2(d)): sigma1 = sigma3 + sigma_ci Q^a.
+    """
+    s3 = np.asarray(s3, dtype=float)
+    sci, mb, s, a = st.sigma_ci, st.mb, st.s, st.a
+    p, q = st.pq
+    with np.errstate(all="ignore"):
+        Q = mb * s3 / sci + s
+        qpos = Q > 0
+        Qp = np.where(qpos, Q, np.nan)
+        if st.model == "ghb":
+            s1 = s3 + sci * np.power(Qp, a)
+            s2 = s3.copy()
+            M = 1.0 + a * mb * np.power(Qp, a - 1.0)
+            real = qpos
+        else:
+            cP, cR, cS = closure_constants(p, q)
+            K = sci ** 2 * np.power(Qp, 2.0 * a)
+            disc = cR * cR * s3 * s3 - 4.0 * cP * (cS * s3 * s3 - K)
+            sq = np.sqrt(np.where(disc >= 0, disc, np.nan))
+
+            def branch(sign):
+                b1 = (-cR * s3 + sign * sq) / (2.0 * cP)
+                b2 = p * b1 + q * s3
+                bf = ejc_residual(b1, b2, s3, Qp, sci, a)
+                good = qpos & (disc >= 0) & np.isfinite(bf) & (np.abs(bf) < TOL_EJC) & (b1 >= b2) & (b2 >= s3)
+                return b1, good
+
+            s1p, okp = branch(+1.0)
+            s1m, okm = branch(-1.0)
+            s1 = np.where(okp | ~okm, s1p, s1m)
+            s2 = p * s1 + q * s3
+            real = qpos & (disc >= 0)
+            M = (2.0 * a * mb * sci * np.power(Qp, 2.0 * a - 1.0) - cR * s1 - 2.0 * cS * s3) / (2.0 * cP * s1 + cR * s3)
+        f = ejc_residual(s1, s2, s3, Qp, sci, a)
+        clo = s2 - (p * s1 + q * s3)
+        sinp = (M - 1.0) / (M + 1.0)
+        phi = np.arcsin(sinp)
+        sn = s3 + (s1 - s3) / (M + 1.0)
+        tau = (s1 - s3) * np.sqrt(M) / (M + 1.0)
+        c = tau - sn * np.tan(phi)
+    code = np.full(s3.shape, OK, dtype=int)
+    real = real & np.isfinite(f) & np.isfinite(s1)
+    code[~real] = DOMAIN
+    code[(code == OK) & ~(np.abs(f) < TOL_EJC)] = EJC_RES
+    code[(code == OK) & ~(np.abs(clo) < TOL_CLOSURE)] = CLOSURE_RES
+    code[(code == OK) & ~((s1 >= s2) & (s2 >= s3))] = ORDERING
+    code[(code == OK) & ~(np.isfinite(M) & (M >= 1.0))] = GRADIENT
+    code[(code == OK) & ~(tau >= 0)] = SHEAR
+    return States(s1, s2, s3, Q, M, f, clo, sn, tau, phi, c, code)
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# §1.3 Route 2: sigma_n target -> sigma3 by scan + bisection
+# ---------------------------------------------------------------------------------------------------------------
+@dataclass
+class StrengthResult:
+    """Local strength at target normal stresses. Stresses in kPa except the principal stresses (MPa)."""
+
+    sn_target: np.ndarray      # kPa
+    sn: np.ndarray             # kPa, sigma_n of the accepted state
+    phi: np.ndarray            # rad
+    c: np.ndarray              # kPa
+    tau: np.ndarray            # kPa
+    M: np.ndarray
+    s1: np.ndarray             # MPa
+    s2: np.ndarray
+    s3: np.ndarray
+    f: np.ndarray              # MPa
+    closure: np.ndarray        # MPa
+    code: np.ndarray
+    n_brackets: np.ndarray     # sign changes seen by the scan (1 = unique on the scan grid)
+
+    @property
+    def accepted(self) -> np.ndarray:
+        return self.code == OK
+
+    def reason(self, k: int) -> str:
+        return REASONS[int(self.code[k])]
+
+
+def _monotone_pieces(ok: np.ndarray, v: np.ndarray) -> list[tuple[int, int]]:
+    """Index ranges [i0, i1] of consecutive admissible scan points on which v is monotone."""
+    pieces = []
+    n = len(v)
+    i = 0
+    while i < n - 1:
+        if not (ok[i] and ok[i + 1]):
+            i += 1
+            continue
+        i0 = i
+        direction = np.sign(v[i + 1] - v[i])
+        while i < n - 1 and ok[i + 1] and np.sign(v[i + 1] - v[i]) in (direction, 0):
+            i += 1
+        pieces.append((i0, i))
+    return pieces
+
+
+def scan_sigma3(st: Strength, top: float, n_scan: int = N_SCAN) -> tuple[np.ndarray, States]:
+    """Scan sigma3 over (sigma3_t, top] MPa: points geometric in sigma3 - sigma3_t (1e-14 of the span to the span),
+    plus the ends of every admissible interval located by bisection on admissibility (so the first and last
+    admissible states are resolved to machine precision, not to the scan spacing)."""
+    s3t = st.sigma3_tensile
+    grid = s3t + (top - s3t) * np.power(10.0, np.linspace(-SCAN_DECADES, 0.0, n_scan + 1))
+    gs = principal_states(grid, st)
+    ok = gs.code == OK
+    k = np.flatnonzero(ok[:-1] != ok[1:])
+    if len(k):
+        a, b = grid[k].copy(), grid[k + 1].copy()          # ok[a] != ok[b]
+        a_ok = ok[k].copy()
+        for _ in range(80):
+            mid = 0.5 * (a + b)
+            if not np.any((mid > np.minimum(a, b)) & (mid < np.maximum(a, b))):
+                break
+            m_ok = principal_states(mid, st).code == OK
+            same = m_ok == a_ok
+            a = np.where(same, mid, a)
+            b = np.where(same, b, mid)
+        edge = np.where(a_ok, a, b)                         # the admissible end of each transition
+        grid = np.unique(np.concatenate([grid, edge]))
+        gs = principal_states(grid, st)
+    return grid, gs
+
+
+@lru_cache(maxsize=64)
+def _cached_scan(st: Strength, span_exp: int, n_scan: int) -> tuple[np.ndarray, States]:
+    """The scan for spans up to 2**span_exp MPa, reused across iterations (results differ only in the bracket)."""
+    return scan_sigma3(st, st.sigma3_tensile + 2.0 ** span_exp, n_scan)
+
+
+def admissible_sn_min(st: Strength, top: Optional[float] = None) -> float:
+    """Lowest sigma_n [kPa] of any admissible state found by the sigma3 scan (NaN if none)."""
+    top = 10.0 * st.sigma_ci if top is None else top
+    _, gs = scan_sigma3(st, top)
+    ok = gs.code == OK
+    return float(np.min(gs.sn[ok]) * 1000.0) if ok.any() else math.nan
+
+
+def solve_strength(sn_kpa, st: Strength, n_scan: int = N_SCAN) -> StrengthResult:
+    """Route 2 (§1.3): for each target sigma_n, scan sigma3 for the admissible interval, bracket
+    sigma_n(sigma3) - sigma_n,target and bisect. The first bracket (lowest sigma3) is used; ``n_brackets`` counts all.
+
+    The scan runs over sigma3 in (sigma3_t, max target], since sigma3 <= sigma_n for every admissible state; the
+    points are geometric in sigma3 - sigma3_t so the tensile end is resolved. One scan serves all targets.
+    """
+    target_kpa = np.atleast_1d(np.asarray(sn_kpa, dtype=float))
+    t = target_kpa / 1000.0
+    n = len(t)
+    s3t = st.sigma3_tensile
+    code = np.full(n, NO_STATE, dtype=int)
+    nbr = np.zeros(n, dtype=int)
+    lo = np.full(n, np.nan)
+    hi = np.full(n, np.nan)
+    glo = np.full(n, np.nan)
+    cand = np.isfinite(t) & (t > s3t)
+    if cand.any():
+        span_exp = int(math.ceil(math.log2(float(t[cand].max()) - s3t)))
+        grid, gs = _cached_scan(st, span_exp, n_scan)
+        gok = gs.code == OK
+        for i0, i1 in _monotone_pieces(gok, gs.sn):
+            v = gs.sn[i0:i1 + 1]
+            inc = v[-1] >= v[0]
+            w = v if inc else v[::-1]
+            inside = cand & (t >= w[0]) & (t <= w[-1])
+            if not inside.any():
+                continue
+            k = np.clip(np.searchsorted(w, t[inside], side="left"), 1, len(w) - 1)
+            if inc:
+                ja, jb = i0 + k - 1, i0 + k
+            else:
+                ja, jb = i1 - k, i1 - k + 1
+            idx = np.flatnonzero(inside)
+            nbr[idx] += 1
+            first = idx[np.isnan(lo[idx])]
+            sel = np.isnan(lo[idx])
+            lo[first] = grid[ja[sel]]
+            hi[first] = grid[jb[sel]]
+            glo[first] = gs.sn[ja[sel]] - t[first]
+    have = np.isfinite(lo)
+    code[have] = OK
+    # bisection on sigma3 (vectorised over all targets that have a bracket)
+    for _ in range(N_BISECT):
+        act = have & (code == OK)
+        if not act.any():
+            break
+        mid = 0.5 * (lo + hi)
+        moving = act & (mid > lo) & (mid < hi)
+        if not moving.any():
+            break
+        ms = principal_states(mid[moving], st)
+        idx = np.flatnonzero(moving)
+        bad = ms.code != OK
+        code[idx[bad]] = BISECTION
+        good = idx[~bad]
+        gm = ms.sn[~bad] - t[good]
+        left = glo[good] * gm <= 0
+        hi[good[left]] = mid[good[left]]
+        lo[good[~left]] = mid[good[~left]]
+        glo[good[~left]] = gm[~left]
+    s3 = np.where(have, lo, np.nan)
+    use_hi = have & (code == OK)
+    if use_hi.any():                                   # take the bracket end closer to the target
+        e_lo = principal_states(lo[use_hi], st)
+        e_hi = principal_states(hi[use_hi], st)
+        pick_hi = np.abs(e_hi.sn - t[use_hi]) < np.abs(e_lo.sn - t[use_hi])
+        s3[use_hi] = np.where(pick_hi, hi[use_hi], lo[use_hi])
+    fs = principal_states(np.where(have, s3, s3t), st)
+    final_code = np.where(code == OK, fs.code, code)
+    nanf = lambda arr: np.where(have, arr, np.nan)       # noqa: E731
+    return StrengthResult(
+        sn_target=target_kpa, sn=nanf(fs.sn * 1000.0), phi=nanf(fs.phi), c=nanf(fs.c * 1000.0),
+        tau=nanf(fs.tau * 1000.0), M=nanf(fs.M), s1=nanf(fs.s1), s2=nanf(fs.s2), s3=nanf(fs.s3),
+        f=nanf(fs.f), closure=nanf(fs.closure), code=final_code, n_brackets=nbr)
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# §1.2(c) original closure: minimum admissible sigma_n (admissibility check only, never a FoS)
+# ---------------------------------------------------------------------------------------------------------------
+@dataclass
+class OriginalClosureMinimum:
+    nu: float
+    a: float
+    sigma3_min: float          # MPa, sigma3 at the minimum admissible sigma_n
+    sn_min: float              # MPa
+    phi_deg: float             # phi_i at that state
+    found: bool
+
+
+def original_closure_minimum(sigma_ci: float, mb: float, s: float, a: float, nu: float,
+                             lo: float = 1e-6, hi: float = 1e6, n: int = 200_000) -> OriginalClosureMinimum:
+    """Minimum sigma_n over all admissible states of the EJC on sigma2 = sigma3/nu - sigma1.
+
+    Admissible: sigma3/(2 nu) <= sigma1 <= sigma3 (1 - nu)/nu (ordering), sigma1 - sigma3 >= sigma_ci Q^a, |f| < 1e-8 MPa,
+    real state, M >= 1. sigma3 is searched on a log grid in [lo, hi] MPa (ordering needs sigma3 >= 0), then refined by a
+    golden-section search around the best grid point.
+    """
+    st = Strength(sigma_ci, mb, s, a, "ejc_original", nu)
+
+    def evaluate(x):
+        ps = principal_states(np.atleast_1d(np.asarray(x, dtype=float)), st)
+        ok = (ps.code == OK) & (ps.s1 - ps.s3 >= sigma_ci * np.power(np.where(ps.Q > 0, ps.Q, np.nan), a))
+        ok &= ps.s1 >= ps.s3 / (2 * nu)
+        ok &= ps.s1 <= ps.s3 * (1 - nu) / nu
+        return ps, ok
+
+    grid = np.logspace(math.log10(lo), math.log10(hi), n + 1)
+    ps, ok = evaluate(grid)
+    if not ok.any():
+        return OriginalClosureMinimum(nu, a, math.nan, math.nan, math.nan, False)
+    vals = np.where(ok, ps.sn, np.inf)
+    k = int(np.argmin(vals))
+    best = (float(ps.sn[k]), float(grid[k]), float(ps.phi[k]))
+    a_, b_ = grid[max(k - 1, 0)], grid[min(k + 1, n)]
+    gr = (math.sqrt(5.0) - 1.0) / 2.0
+
+    def fval(x):
+        p1, o1 = evaluate(x)
+        return float(p1.sn[0]) if o1[0] else math.inf
+
+    for _ in range(200):
+        c1 = b_ - gr * (b_ - a_)
+        c2 = a_ + gr * (b_ - a_)
+        if fval(c1) < fval(c2):
+            b_ = c2
+        else:
+            a_ = c1
+    x = 0.5 * (a_ + b_)
+    p1, o1 = evaluate(x)
+    if o1[0] and float(p1.sn[0]) <= best[0]:
+        best = (float(p1.sn[0]), float(x), float(p1.phi[0]))
+    return OriginalClosureMinimum(nu, a, best[1], best[0], math.degrees(best[2]), True)
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# inputs
+# ---------------------------------------------------------------------------------------------------------------
+@dataclass(frozen=True)
+class Inputs:
+    """Every input of one analysis. Lengths m, angles deg, gamma kN/m^3, sigma_ci MPa."""
+
+    H: float = 360.0
+    beta: float = 50.0
+    xc: float = 355.7423115
+    zc: float = 644.4192949
+    R: float = 725.2669975
+    gamma: float = 27.0
+    sigma_ci: float = 77.7
+    mi: float = 10.0
+    gsi: float = 42.0
+    D: float = 0.0
+    a_override: Optional[float] = 0.5      # None = a from GSI (§1.1)
+    nu: float = 0.271
+    model: str = "ejc_moscarda"
+    wet: bool = False
+    Hw: float = 360.0
+    beta_w: float = 50.0
+    n3: int = 20
+    n2: int = 40
+    form: str = "FH"                        # "FH" (governing) or "FM" (moment form, 3D only)
+    tension: str = "none"                   # "none", "C0" or "T0" (§1.6 sensitivities)
+    iteration: str = "spec"                 # "spec" (§1.4) or "workbook" (see solve())
+    safeguard: str = "none"                 # "none" (§1.4) or "project" (see solve())
+
+    @property
+    def hb(self) -> tuple[float, float, float]:
+        mb, s, a = hoek_brown_parameters(self.gsi, self.mi, self.D)
+        return mb, s, (a if self.a_override is None else float(self.a_override))
+
+    def strength(self) -> Strength:
+        mb, s, a = self.hb
+        return Strength(self.sigma_ci, mb, s, a, self.model, self.nu)
+
+    def with_(self, **kw) -> "Inputs":
+        return replace(self, **kw)
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# §1.4 mesh and column quantities
+# ---------------------------------------------------------------------------------------------------------------
+def ground_z(x, H: float, beta: float):
+    """z_t = min(H, -x tan beta) for x <= 0; 0 on the pit floor (x > 0)."""
+    x = np.asarray(x, dtype=float)
+    return np.where(x <= 0, np.minimum(H, -x * math.tan(math.radians(beta))), 0.0)
+
+
+def water_z(x, Hw: float, beta_w: float):
+    """z_w = min(H_w, -x tan beta_w) for x <= 0; 0 on the pit floor."""
+    x = np.asarray(x, dtype=float)
+    return np.where(x <= 0, np.minimum(Hw, -x * math.tan(math.radians(beta_w))), 0.0)
+
+
+def sphere_z(x, y, xc: float, zc: float, R: float):
+    """z_b = z_c - sqrt(R^2 - (x - x_c)^2 - y^2); NaN where not real."""
+    with np.errstate(invalid="ignore"):
+        q = R * R - (np.asarray(x, dtype=float) - xc) ** 2 - np.asarray(y, dtype=float) ** 2
+        return np.where(q >= 0, zc - np.sqrt(np.where(q >= 0, q, 0.0)), np.nan)
+
+
+@dataclass
+class Mesh:
+    """Active columns (3D half-model) or slices (2D, unit thickness). Index ``i``, ``j`` are 1-based cell numbers."""
+
+    dim: int
+    n: int
+    x0: float
+    x1: float
+    dx: float
+    dy: float
+    i: np.ndarray
+    j: np.ndarray
+    x: np.ndarray
+    y: np.ndarray
+    zb: np.ndarray
+    zt: np.ndarray
+    h: np.ndarray
+    ah: np.ndarray
+    g: np.ndarray              # g_z (cos alpha in 2D)
+    area: np.ndarray           # A = A_h / g_z
+    rho: np.ndarray
+    kap: np.ndarray            # kappa (sin alpha in 2D)
+    w: np.ndarray              # kN
+    u: np.ndarray              # kPa
+    zw: np.ndarray
+
+    @property
+    def count(self) -> int:
+        return len(self.x)
+
+    @property
+    def volume(self) -> float:
+        """3D: full mass (twice the half-model); 2D: m^3 per m."""
+        v = float(np.sum(self.h * self.ah))
+        return 2.0 * v if self.dim == 3 else v
+
+
+def build_mesh(inp: Inputs, dim: int, n: int) -> Mesh:
+    """§1.4 mesh: x from x0 = x_c - sqrt(R^2 - z_c^2) to x1 = x_c - R, dx = (x0 - x1)/N, x_i = x0 - (i - 1/2) dx;
+    3D: y from 0 to R, dy = R/N, y_j = (j - 1/2) dy. §1.5 2D: y = 0, unit thickness, rho = R.
+    Active: real z_b (R^2 - (x - x_c)^2 - y^2 > 0, so g_z > 0), x <= 0 and h = z_t - z_b > 0.
+    """
+    if dim not in (2, 3):
+        raise ValueError("dim must be 2 or 3")
+    if not (isinstance(n, (int, np.integer)) and n >= 1):
+        raise ValueError("mesh size must be a positive integer")
+    if not (inp.R > inp.zc):
+        raise ValueError("require R > z_c (the sphere must cut the toe level)")
+    xc, zc, R = inp.xc, inp.zc, inp.R
+    x0 = xc - math.sqrt(R * R - zc * zc)
+    x1 = xc - R
+    dx = (x0 - x1) / n
+    if dim == 3:
+        dy = R / n
+        ii, jj = np.meshgrid(np.arange(1, n + 1), np.arange(1, n + 1), indexing="ij")
+        ii, jj = ii.ravel(), jj.ravel()
+        y = (jj - 0.5) * dy
+    else:
+        dy = 1.0
+        ii = np.arange(1, n + 1)
+        jj = np.ones(n, dtype=int)
+        y = np.zeros(n)
+    x = x0 - (ii - 0.5) * dx
+    q = R * R - (x - xc) ** 2 - y ** 2
+    keep = (q > 0) & (x <= 0)
+    ii, jj, x, y, q = ii[keep], jj[keep], x[keep], y[keep], q[keep]
+    zb = zc - np.sqrt(q)
+    zt = ground_z(x, inp.H, inp.beta)
+    h = zt - zb
+    keep = h > 0
+    ii, jj, x, y, q, zb, zt, h = (v[keep] for v in (ii, jj, x, y, q, zb, zt, h))
+    ah = np.full(len(x), dx * dy)
+    g = np.sqrt(q) / R
+    rho = np.sqrt(R * R - y * y) if dim == 3 else np.full(len(x), R)
+    kap = (xc - x) / rho
+    if inp.wet:
+        zw = water_z(x, inp.Hw, inp.beta_w)
+        u = GAMMA_W * np.maximum(0.0, zw - zb)
+    else:
+        zw = np.full(len(x), np.nan)
+        u = np.zeros(len(x))
+    return Mesh(dim, n, x0, x1, dx, dy, ii, jj, x, y, zb, zt, h, ah, g, ah / g, rho, kap,
+                inp.gamma * h * ah, u, zw)
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# §1.4 / §1.5 iteration and final checks
+# ---------------------------------------------------------------------------------------------------------------
+@dataclass
+class Check:
+    name: str
+    value: float
+    limit: str
+    passed: bool
+
+
+@dataclass
+class LemResult:
+    """Result of one 3D or 2D solution. ``fos`` is set only when every check passes."""
+
+    dim: int
+    status: str                       # ACCEPTED / REJECTED / NOT CONVERGED / NOT APPLICABLE
+    reason: str
+    fos: Optional[float]
+    f_trial: Optional[float]          # last trial F (diagnostic, never reported as a FoS)
+    iterations: int
+    form: str
+    tension: str
+    iteration: str
+    mesh: Mesh
+    strength: Optional[StrengthResult] = None
+    sn: Optional[np.ndarray] = None   # final sigma_n [kPa]
+    c_used: Optional[np.ndarray] = None
+    tan_used: Optional[np.ndarray] = None
+    tau_used: Optional[np.ndarray] = None
+    tensile: Optional[np.ndarray] = None
+    m_alpha: Optional[np.ndarray] = None
+    local_res: Optional[np.ndarray] = None
+    global_res: float = math.nan
+    bishop_res: float = math.nan
+    checks: list = field(default_factory=list)
+    history: list = field(default_factory=list)   # (iteration, F, |dF|/F, max |d sigma_n|, tensile count, projections)
+    projections: int = 0
+    rejected_index: Optional[np.ndarray] = None
+    safeguard: str = "none"
+    sn_floor: Optional[float] = None
+
+    @property
+    def accepted(self) -> bool:
+        return self.status == "ACCEPTED"
+
+
+def _sensitivity(c, t, tau, sn, tension, tens):
+    """§1.6 sensitivities on the tensile set ``tens``: C0 removes c_i, T0 removes all basal shear.
+
+    The set is cumulative: a base joins it the first time its sigma_n is negative during the iteration and stays in it
+    (with c_i removed its sigma_n turns positive, so a set rebuilt from the current sigma_n alone would oscillate).
+    """
+    c_e, t_e, tau_e = c.copy(), t.copy(), tau.copy()
+    if tension == "C0":
+        c_e[tens] = 0.0
+        tau_e[tens] = sn[tens] * t[tens]
+    elif tension == "T0":
+        c_e[tens] = 0.0
+        t_e[tens] = 0.0
+        tau_e[tens] = 0.0
+    return c_e, t_e, tau_e
+
+
+def _global_f(m: Mesh, tau_e, xc: float, form: str) -> float:
+    """F_H = sum(tau_s A)/sum(W kappa) (governing); F_M = sum(tau_s A rho)/sum(W (x_c - x))."""
+    if form == "FM":
+        return float(np.sum(tau_e * m.area * m.rho) / np.sum(m.w * (xc - m.x)))
+    return float(np.sum(tau_e * m.area) / np.sum(m.w * m.kap))
+
+
+def _local_sn(m: Mesh, c_e, t_e, F):
+    """§1.4 local vertical equilibrium: m_alpha = g_z + kappa tan(phi)/F, sigma_n = (W - u A_h - c A kappa/F)/(A m_alpha)."""
+    ma = m.g + m.kap * t_e / F
+    return (m.w - m.u * m.ah - c_e * m.area * m.kap / F) / (m.area * ma), ma
+
+
+def solve(m: Mesh, st: Strength, xc: float, gamma: float, form: str = "FH", tension: str = "none",
+          iteration: str = "spec", safeguard: str = "none", max_iter: int = MAX_ITER) -> LemResult:
+    """Solve F for one mesh.
+
+    ``iteration="spec"`` (§1.4, default): sigma_n0 = (gamma h - u) g_z^2; each iteration evaluates the strength at
+    sigma_n, then F from the selected global form (F_H, or F_M with its own iteration), then sigma_n from local vertical
+    equilibrium at that F. It stops when |dF|/F < 1e-12 and max |d sigma_n| < 1e-9 kPa (2000 iterations at most).
+
+    ``iteration="workbook"``: the path of the thesis workbook (VBA). F starts at 1, sigma_n is updated with the
+    previous F, and the new F is the global form at the updated sigma_n (for F_H this is the Hungr form
+    sum[(c A_h + (W - u A_h) tan phi)/m_alpha]/sum(W kappa)). Not part of §1.4; kept because it reproduces the recorded
+    iteration counts. Same fixed point and same final checks as the default path.
+
+    ``safeguard="project"``: a trial sigma_n below the lowest admissible sigma_n of the closure (``admissible_sn_min``)
+    is moved to that value + 0.001 |value| (the workbook's tensile projection, applied at the closure's own limit) and
+    counted in ``projections``. Not part of §1.4. It only changes the path: the run is accepted only if no base is
+    projected in the final iteration, so the reported F is the same fixed point. With ``"none"`` (default) such a
+    base is REJECTED.
+
+    In 2D (§1.5) the same equations hold with rho = R, g_z = cos(alpha), kappa = sin(alpha); the result is also checked
+    against Bishop's expression.
+    """
+    if form not in ("FH", "FM"):
+        raise ValueError("form must be FH or FM")
+    if tension not in ("none", "C0", "T0"):
+        raise ValueError("tension must be none, C0 or T0")
+    if iteration not in ("spec", "workbook"):
+        raise ValueError("iteration must be spec or workbook")
+    if safeguard not in ("none", "project"):
+        raise ValueError("safeguard must be none or project")
+    res = LemResult(m.dim, "REJECTED", "", None, None, 0, form, tension, iteration, m, safeguard=safeguard)
+    if st.model == "ejc_original":
+        res.status = "NOT APPLICABLE"
+        res.reason = ("The original closure is an admissibility check only and never produces a FoS "
+                      "(see original_closure_minimum).")
+        return res
+    if m.count == 0:
+        res.reason = "No active columns."
+        return res
+    drive = np.sum(m.w * (xc - m.x)) if form == "FM" else np.sum(m.w * m.kap)
+    if not drive > 0:
+        res.reason = "Non-positive driving sum."
+        return res
+    sn = (gamma * m.h - m.u) * m.g ** 2
+    if safeguard == "project":
+        sn_min = admissible_sn_min(st)
+        floor = sn_min + max(1e-9, 0.001 * abs(sn_min))
+        res.sn_floor = floor
+
+        def project(v):
+            p = v < sn_min
+            return np.where(p, floor, v), int(p.sum())
+    else:
+        def project(v):
+            return v, 0
+    sn, res.projections = project(sn)
+    f_old = 1.0 if iteration == "workbook" else None
+    tens = np.zeros(m.count, dtype=bool)
+    for it in range(1, max_iter + 1):
+        stg = solve_strength(sn, st)
+        res.iterations = it
+        if not stg.accepted.all():
+            bad = np.flatnonzero(~stg.accepted)
+            res.strength, res.sn, res.rejected_index = stg, sn, bad
+            res.reason = (f"{len(bad)} of {m.count} bases have no accepted local state at iteration {it}; "
+                          f"first: column {int(bad[0])} at sigma_n = {sn[bad[0]]:.6g} kPa, {stg.reason(int(bad[0]))}")
+            return res
+        t = np.tan(stg.phi)
+        if tension != "none":
+            tens = tens | (sn < 0)
+        c_e, t_e, tau_e = _sensitivity(stg.c, t, stg.tau, sn, tension, tens)
+        if iteration == "spec":
+            F = _global_f(m, tau_e, xc, form)
+            if not (math.isfinite(F) and F > 0):
+                res.reason = f"Non-positive or non-finite trial F at iteration {it}."
+                return res
+            new, ma = _local_sn(m, c_e, t_e, F)
+            new, n_proj = project(new)
+        else:
+            new, ma = _local_sn(m, c_e, t_e, f_old)
+            new, n_proj = project(new)
+            F = _global_f(m, c_e + new * t_e, xc, form)
+            if not (math.isfinite(F) and F > 0):
+                res.reason = f"Non-positive or non-finite trial F at iteration {it}."
+                return res
+        res.projections += n_proj
+        if (ma <= 0).any():
+            res.reason = f"Non-positive m_alpha at iteration {it}."
+            return res
+        prev = f_old if iteration == "workbook" else (res.history[-1][1] if res.history else None)
+        dF = abs(F - prev) / F if prev is not None else math.inf
+        move = float(np.max(np.abs(new - sn)))
+        res.history.append((it, F, dF, move, int(tens.sum()), n_proj))
+        res.f_trial = F
+        sn = new
+        f_old = F
+        if dF < TOL_DF and move < TOL_DSN:
+            if iteration == "workbook":         # the final state is rebuilt at the converged F
+                sn, _ = _local_sn(m, c_e, t_e, F)
+            return _final_checks(res, m, st, xc, F, sn, tens, dF, move)
+    res.status = "NOT CONVERGED"
+    res.reason = f"No convergence in {max_iter} iterations; no accepted FoS."
+    res.sn = sn
+    return res
+
+
+def _final_checks(res: LemResult, m: Mesh, st: Strength, xc: float, F: float, sn: np.ndarray,
+                  tens_used: np.ndarray, dF: float, move: float) -> LemResult:
+    """Independent check of the converged state: fresh strength at the final sigma_n, then the local (vertical)
+    and global residuals at the reported F (§1.4 step 4)."""
+    stg = solve_strength(sn, st)
+    t = np.tan(stg.phi)
+    tens = tens_used | (sn < 0) if res.tension != "none" else tens_used
+    c_e, t_e, tau_e = _sensitivity(stg.c, t, stg.tau, sn, res.tension, tens_used)
+    ma = m.g + m.kap * t_e / F
+    with np.errstate(invalid="ignore"):
+        local = np.abs(m.w - (sn + m.u) * m.ah - tau_e * m.area * m.kap / F) / m.w
+    f_glob = _global_f(m, tau_e, xc, res.form)
+    glob = abs(f_glob - F) / F
+    bishop = float(np.sum((c_e * m.ah + (m.w - m.u * m.ah) * t_e) / ma) / np.sum(m.w * m.kap))
+    bishop_res = abs(bishop - F) / F
+    acc = stg.accepted
+    finite = np.isfinite(stg.f)
+    checks = [
+        Check("Convergence |dF|/F", dF, "< 1e-12", dF < TOL_DF),
+        Check("Convergence max |d sigma_n| (kPa)", move, "< 1e-9", move < TOL_DSN),
+        Check("Local states accepted (count rejected)", float((~acc).sum()), "0", bool(acc.all())),
+        Check("Max |f| unsquared EJC (MPa)", float(np.nanmax(np.abs(stg.f))) if finite.any() else math.nan,
+              "< 1e-8", bool(finite.all() and np.all(np.abs(stg.f) < TOL_EJC))),
+        Check("Max closure residual (MPa)", float(np.nanmax(np.abs(stg.closure))), "< 1e-8",
+              bool(np.all(np.abs(stg.closure) < TOL_CLOSURE))),
+        Check("Ordering sigma1 >= sigma2 >= sigma3 (failures)",
+              float(np.sum(~((stg.s1 >= stg.s2) & (stg.s2 >= stg.s3)))), "0",
+              bool(np.all((stg.s1 >= stg.s2) & (stg.s2 >= stg.s3)))),
+        Check("Min M (gradient)", float(np.nanmin(stg.M)), ">= 1, finite",
+              bool(np.all(np.isfinite(stg.M) & (stg.M >= 1)))),
+        Check("Min tau_s (kPa)", float(np.nanmin(stg.tau)), ">= 0", bool(np.all(stg.tau >= 0))),
+        Check("Min m_alpha", float(np.min(ma)), "> 0", bool(np.all(ma > 0))),
+        Check("Max relative local residual", float(np.nanmax(local)), "<= 1e-9",
+              bool(np.all(local <= TOL_LOCAL))),
+        Check(f"Relative global residual ({res.form})", glob, "<= 1e-8", glob <= TOL_GLOBAL),
+    ]
+    if m.dim == 2:
+        checks.append(Check("Relative Bishop residual", bishop_res, "<= 1e-8", bishop_res <= TOL_GLOBAL))
+    if res.tension in ("C0", "T0"):
+        same = bool(np.array_equal(tens, tens_used))
+        checks.append(Check("New tensile bases at the final state", float(np.sum(tens != tens_used)), "0", same))
+    if res.safeguard == "project":
+        last_proj = res.history[-1][5] if res.history else 0
+        checks.append(Check("Projected bases in the final iteration", float(last_proj), "0", last_proj == 0))
+    res.strength, res.sn, res.c_used, res.tan_used, res.tau_used = stg, sn, c_e, t_e, tau_e
+    res.tensile, res.m_alpha, res.local_res = tens_used, ma, local
+    res.global_res, res.bishop_res, res.checks = glob, bishop_res, checks
+    res.f_trial = F
+    if all(c.passed for c in checks):
+        res.status, res.fos = "ACCEPTED", F
+        res.reason = "Every local state, local and global equilibrium check passed."
+        if res.tension != "none":
+            res.reason += f" {res.tension}: sensitivity, not a calibrated contact law."
+    else:
+        failed = [c.name for c in checks if not c.passed]
+        res.status = "REJECTED"
+        res.reason = "Final-state check failed: " + "; ".join(failed)
+    return res
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# one case = 3D + 2D
+# ---------------------------------------------------------------------------------------------------------------
+@dataclass
+class Analysis:
+    inputs: Inputs
+    r3: LemResult
+    r2: LemResult
+
+    @property
+    def ratio(self) -> Optional[float]:
+        if self.r3.fos is None or self.r2.fos is None:
+            return None
+        return self.r3.fos / self.r2.fos
+
+
+def run_3d(inp: Inputs) -> LemResult:
+    return solve(build_mesh(inp, 3, inp.n3), inp.strength(), inp.xc, inp.gamma, inp.form, inp.tension, inp.iteration,
+                 inp.safeguard)
+
+
+def run_2d(inp: Inputs) -> LemResult:
+    """§1.5: Bishop on the central section; F_M = F_H there (rho = R), so the governing form is used."""
+    return solve(build_mesh(inp, 2, inp.n2), inp.strength(), inp.xc, inp.gamma, "FH", inp.tension, inp.iteration,
+                 inp.safeguard)
+
+
+def run(inp: Inputs) -> Analysis:
+    return Analysis(inp, run_3d(inp), run_2d(inp))
+
+
+def mesh_error(fos_values: list[float], fos_finest: float) -> float:
+    """§1.6: epsilon_mesh = (F_max - F_min)/F_finest x 100 %."""
+    return (max(fos_values) - min(fos_values)) / fos_finest * 100.0
+
+
+def gravity_cap(m: Mesh, gamma: float) -> np.ndarray:
+    """Gravity cap sigma_n <= gamma h - u for each column [kPa]."""
+    return gamma * m.h - m.u
+
+
+def columns_table(r: LemResult) -> dict[str, np.ndarray]:
+    """Per-column results as named columns (for CSV export)."""
+    m = r.mesh
+    out = {"i": m.i, "j": m.j, "x_m": m.x, "y_m": m.y, "z_base_m": m.zb, "z_top_m": m.zt, "h_m": m.h,
+           "A_h_m2": m.ah, "A_m2": m.area, "g_z": m.g, "rho_m": m.rho, "kappa": m.kap, "W_kN": m.w, "u_kPa": m.u}
+    if r.strength is not None and r.sn is not None:
+        s = r.strength
+        out.update({"sigma_n_kPa": r.sn, "phi_i_deg": np.degrees(s.phi), "c_i_kPa": s.c, "tau_s_kPa": s.tau,
+                    "M": s.M, "sigma1_MPa": s.s1, "sigma2_MPa": s.s2, "sigma3_MPa": s.s3, "f_MPa": s.f,
+                    "closure_res_MPa": s.closure, "state": np.array([REASONS[int(k)] for k in s.code]),
+                    "n_brackets": s.n_brackets})
+        if r.tau_used is not None:
+            F = r.f_trial
+            out.update({"c_used_kPa": r.c_used, "tan_phi_used": r.tan_used, "tau_used_kPa": r.tau_used,
+                        "tensile": r.tensile, "m_alpha": r.m_alpha,
+                        "N_prime_kN": r.sn * m.area, "U_kN": m.u * m.area,
+                        "S_mobilised_kN": r.tau_used * m.area / F,
+                        "resistance_kN": r.tau_used * m.area, "local_residual_rel": r.local_res})
+    return out

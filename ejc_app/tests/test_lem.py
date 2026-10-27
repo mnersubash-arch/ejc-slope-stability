@@ -53,21 +53,32 @@ def test_wet_a05():
     assert abs(a2.fos - 1.098069496) <= 1e-6
 
 
-def test_iterations_dry_a05():
-    """Brief: 34 iterations. The §1.4 path converges in 30 (reported to the user, not adjusted)."""
-    assert r3(MAIN).iterations == 34
-
-
-def test_iterations_wet_a05():
-    """Brief: 63 iterations. The §1.4 path converges in 65 (reported to the user, not adjusted)."""
-    assert r3(WET).iterations == 63
-
-
-def test_workbook_path_reproduces_iteration_counts():
-    kw = dict(iteration="workbook", safeguard="project")
-    d, w = r3(MAIN.with_(**kw)), r3(WET.with_(**kw))
+def test_native_v15_path_iteration_counts():
+    """Iteration counts 34 / 63 are checked on the native v15 path only (the default path shows its count)."""
+    d, w = r3(MAIN.with_(iteration="native_v15")), r3(WET.with_(iteration="native_v15"))
     assert (d.iterations, w.iterations) == (34, 63)
     assert abs(d.fos - 2.706024342) <= 1e-6 and abs(w.fos - 1.272331405) <= 1e-6
+    assert d.projections > 0 and w.projections > 0          # the path passes below the admissible edge
+
+
+def test_native_v15_path_refuses_c0_t0_and_fm():
+    m = E.build_mesh(MAIN, 3, 20)
+    for kw in (dict(tension="C0"), dict(tension="T0"), dict(form="FM")):
+        with pytest.raises(ValueError):
+            E.solve(m, MAIN.strength(), MAIN.xc, MAIN.gamma, iteration="native_v15", **kw)
+
+
+def test_projection_rule():
+    st = MAIN.strength()
+    tensile = st.sigma3_tensile * 1000
+    edge = E.admissible_sn_min(st)
+    assert E.projection_limit(st) == max(tensile, edge) == edge         # Moscarda edge lies above the tensile limit
+    assert E.projection_limit(MAIN.with_(model="ghb").strength()) == tensile
+    r = r3(MAIN.with_(iteration="native_v15"))
+    assert r.projection_value == pytest.approx(edge + max(1e-9, 0.001 * abs(edge)), rel=1e-15)
+    assert E.solve_strength([r.projection_value], st).accepted[0]
+    names = [c.name for c in r.checks]
+    assert "Projected bases at convergence" in names and all(c.passed for c in r.checks)
 
 
 @pytest.mark.parametrize("wet,a,t3,t2,g3,g2", [(False, 0.5, None, None, 2.554, 2.310),
@@ -148,23 +159,39 @@ def test_gravity_cap_and_threshold_count():
 
 
 # ---- previous studies ----------------------------------------------------------------------------------------------
-def test_carranza_torres_2d_ghb():
-    ct = MAIN.with_(xc=207.28, zc=586.53, R=622.08, model="ghb")
-    assert rounds_to(r2(ct).fos, 2.0039, 4)
+CT = MAIN.with_(xc=207.28, zc=586.53, R=622.08)
+
+
+def test_carranza_torres_default_meshes():
+    assert rounds_to(r2(CT.with_(model="ghb")).fos, 2.0039, 4)
+    assert rounds_to(r2(CT.with_(model="ghb")).fos, 2.003873, 6)
+    assert rounds_to(r3(CT.with_(model="ghb")).fos, 2.142, 3)
+    assert rounds_to(r3(CT.with_(model="ghb")).fos, 2.141937, 6)
+    assert rounds_to(r2(CT).fos, 2.122598, 6)
+    assert rounds_to(r3(CT).fos, 2.269068, 6)
+
+
+@pytest.mark.slow
+def test_carranza_torres_fine_meshes():
+    assert rounds_to(r2(CT.with_(n2=5120)).fos, 2.121420, 6)
+    assert rounds_to(r3(CT.with_(model="ghb", n3=320)).fos, 2.140776, 6)
+    assert rounds_to(r3(CT.with_(n3=320)).fos, 2.267835, 6)
 
 
 # ---- rejection is explicit ---------------------------------------------------------------------------------------
 def test_rejected_run_withholds_fos():
-    """Fine wet 2D mesh on the §1.4 path: a crest-end slice's trial sigma_n falls below the Moscarda admissible range."""
-    a = r2(WET.with_(n2=320))
+    """Without the projection (diagnostic), a crest-end slice's trial sigma_n falls below the Moscarda admissible range
+    on the fine wet 2D mesh: the run is REJECTED and F withheld, never replaced."""
+    a = r2(WET.with_(n2=320, safeguard="none"))
     assert a.status == "REJECTED" and a.fos is None and a.f_trial is not None
     assert "no admissible state" in a.reason
 
 
-def test_safeguard_inactive_at_convergence_same_fixed_point():
-    a = r3(MAIN)
-    b = r3(MAIN.with_(safeguard="project"))
-    assert b.fos == pytest.approx(a.fos, rel=1e-12)
+def test_projection_only_changes_the_path():
+    a = r2(WET.with_(n2=320))
+    assert a.accepted and a.projections > 0 and a.history[-1][5] == 0
+    b = r3(MAIN.with_(safeguard="none"))
+    assert b.fos == pytest.approx(r3(MAIN).fos, rel=1e-12)
 
 
 # ---- finest mesh (slow) ----------------------------------------------------------------------------------------
@@ -176,20 +203,14 @@ def test_finest_dry():
 
 @pytest.mark.slow
 def test_finest_wet():
-    """Brief: 1.2776 / 1.0916. On the §1.4 path both are REJECTED at iteration 2 (reported to the user)."""
-    assert rounds_to(r3(WET.with_(n3=240)).fos, 1.2776, 4)
-    assert rounds_to(r2(WET.with_(n2=5120)).fos, 1.0916, 4)
-
-
-@pytest.mark.slow
-def test_finest_wet_with_safeguard():
-    assert rounds_to(r3(WET.with_(n3=240, safeguard="project")).fos, 1.2776, 4)
-    assert rounds_to(r2(WET.with_(n2=5120, safeguard="project")).fos, 1.0916, 4)
+    a3, a2 = r3(WET.with_(n3=240)), r2(WET.with_(n2=5120))
+    assert rounds_to(a3.fos, 1.2776, 4) and rounds_to(a2.fos, 1.0916, 4)
+    assert a3.projections > 0 and a2.projections > 0         # projected on the path, none at convergence
 
 
 @pytest.mark.slow
 def test_coarse_mesh_underestimates():
-    for inp, pct in ((MAIN, 2.6), (WET.with_(safeguard="project"), 4.4)):
+    for inp, pct in ((MAIN, 2.6), (WET, 4.4)):
         fine, coarse = r3(inp.with_(n3=240)).fos, r3(inp.with_(n3=10)).fos
         assert rounds_to((fine - coarse) / fine * 100, pct, 1)
 

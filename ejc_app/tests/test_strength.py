@@ -113,8 +113,8 @@ def test_ghb_fixture():
 
 
 def test_extra_fixture_original_closure():
-    """sigma_ci 120, m_b 3.5, s 0.002, a 0.505, nu 0.05, sigma_n 5.7403 MPa. Reproduced with the ORIGINAL closure;
-    the Moscarda closure has no admissible state there (reported to the user)."""
+    """Extra fixture, original closure (nu = 0.05): sigma_ci 120, m_b 3.5, s 0.002, a 0.505, sigma_n 5.7403 MPa.
+    The Moscarda closure has no admissible state there."""
     r = E.solve_strength([5740.3], E.Strength(120.0, 3.5, 0.002, 0.505, "ejc_original", 0.05))
     assert r.accepted[0]
     assert rounds_to(math.degrees(r.phi[0]), 55.0720, 4)

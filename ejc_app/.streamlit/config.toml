@@ -1,0 +1,6 @@
+# Local use only: no deploy button, no usage statistics (the repository must stay private).
+[client]
+toolbarMode = "minimal"
+
+[browser]
+gatherUsageStats = false

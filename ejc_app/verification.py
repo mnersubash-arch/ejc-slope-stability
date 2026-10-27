@@ -16,7 +16,7 @@ import numpy as np
 
 import engine as E
 
-MAIN = E.Inputs()                                     # main sphere, Moscarda closure, EJC, dry, a = 0.5, 20x20 / 40
+MAIN = E.Inputs()            # main sphere, Moscarda closure, EJC, dry, a = 0.5, 20x20 / 40, default path + projection
 CARRANZA = MAIN.with_(xc=207.28, zc=586.53, R=622.08)
 
 
@@ -33,16 +33,13 @@ class Row:
 
 
 class Runner:
-    """Runs and caches the analyses needed by the targets under one iteration path / safeguard setting."""
+    """Runs and caches the analyses needed by the targets (default path with the Section 4.6 projection unless a row
+    asks for the native v15 path)."""
 
-    def __init__(self, iteration: str = "spec", safeguard: str = "none"):
-        self.iteration = iteration
-        self.safeguard = safeguard
+    def __init__(self):
         self._cache: dict = {}
 
     def inputs(self, base: E.Inputs = MAIN, **kw) -> E.Inputs:
-        kw.setdefault("iteration", self.iteration)
-        kw.setdefault("safeguard", self.safeguard)
         return base.with_(**kw)
 
     def r3(self, base: E.Inputs = MAIN, **kw) -> E.LemResult:
@@ -141,10 +138,10 @@ def verification_rows(runner: Optional[Runner] = None, slow: bool = False,
              by_rounding(g, "GHB, sigma_n = 400 kPa: tau_s (kPa)", float(gh.tau[0]), 1111.0, 0)]
     xo = E.solve_strength([5740.3], E.Strength(120.0, 3.5, 0.002, 0.505, "ejc_original", 0.05))
     xm = E.solve_strength([5740.3], E.Strength(120.0, 3.5, 0.002, 0.505, "ejc_moscarda", 0.05))
-    note = "matched with the ORIGINAL closure sigma2 = sigma3/nu - sigma1"
-    rows += [by_rounding(g, "Extra fixture (sigma_ci 120, m_b 3.5, s 0.002, a 0.505, nu 0.05, 5.7403 MPa): phi_i",
+    note = "sigma_ci 120 MPa, m_b 3.5, s 0.002, a 0.505, sigma_n 5.7403 MPa"
+    rows += [by_rounding(g, "Extra fixture, original closure (nu = 0.05): phi_i (deg)",
                          float(np.degrees(xo.phi[0])), 55.0720, 4, note),
-             by_rounding(g, "Extra fixture: c_i (kPa)", float(xo.c[0]), 2079.5, 1, note),
+             by_rounding(g, "Extra fixture, original closure (nu = 0.05): c_i (kPa)", float(xo.c[0]), 2079.5, 1, note),
              info(g, "Extra fixture with the Moscarda closure", xm.reason(0), "",
                   "the Moscarda closure has no admissible state here")]
 
@@ -165,14 +162,22 @@ def verification_rows(runner: Optional[Runner] = None, slow: bool = False,
     d2 = R.r2()
     rows += [by_exact(g, "Active half-columns (3D 20x20)", d3.mesh.count, 76),
              by_exact(g, "Active slices (2D 40)", d2.mesh.count, 30)]
-    rows += [by_abs(g, "Dry, a = 0.5: F 3D", d3.fos, 2.706024342, 1e-6),
-             by_exact(g, "Dry, a = 0.5: 3D iterations", d3.iterations, 34),
-             by_abs(g, "Dry, a = 0.5: F 2D", d2.fos, 2.447910895, 1e-6)]
     w3 = R.r3(wet=True)
     w2 = R.r2(wet=True)
-    rows += [by_abs(g, "Wet, a = 0.5: F 3D", w3.fos, 1.272331405, 1e-6),
-             by_exact(g, "Wet, a = 0.5: 3D iterations", w3.iterations, 63),
-             by_abs(g, "Wet, a = 0.5: F 2D", w2.fos, 1.098069496, 1e-6)]
+    rows += [by_abs(g, "Dry, a = 0.5: F 3D", d3.fos, 2.706024342, 1e-6),
+             by_abs(g, "Dry, a = 0.5: F 2D", d2.fos, 2.447910895, 1e-6),
+             by_abs(g, "Wet, a = 0.5: F 3D", w3.fos, 1.272331405, 1e-6),
+             by_abs(g, "Wet, a = 0.5: F 2D", w2.fos, 1.098069496, 1e-6),
+             info(g, "Dry / wet, a = 0.5: 3D iterations and projections (default path)",
+                  f"{d3.iterations} / {w3.iterations} iterations; {d3.projections} / {w3.projections} projections",
+                  "shown, not tested")]
+    gn = "3 Native v15 iteration path (start F = 1, Hungr explicit form, projection)"
+    n3d, n3w = R.r3(iteration="native_v15"), R.r3(iteration="native_v15", wet=True)
+    rows += [by_abs(gn, "Dry, a = 0.5: F 3D", n3d.fos, 2.706024342, 1e-6),
+             by_exact(gn, "Dry, a = 0.5: 3D iterations", n3d.iterations, 34),
+             by_abs(gn, "Wet, a = 0.5: F 3D", n3w.fos, 1.272331405, 1e-6),
+             by_exact(gn, "Wet, a = 0.5: 3D iterations", n3w.iterations, 63),
+             info(gn, "Projections dry / wet", f"{n3d.projections} / {n3w.projections}", "")]
     for wet, a, t3, t2, g3, g2 in ((False, 0.5, None, None, 2.554, 2.310), (True, 0.5, None, None, 1.200, 1.036),
                                     (False, 0.509923, 2.624, 2.376, 2.476, 2.242),
                                     (True, 0.509923, 1.228, 1.061, 1.158, 1.000)):
@@ -229,15 +234,28 @@ def verification_rows(runner: Optional[Runner] = None, slow: bool = False,
     # previous studies
     say("Carranza-Torres & Hormazabal (2020)")
     g = "3 Carranza-Torres & Hormazabal (2020), published circle, dry, a = 0.5"
-    ct2 = R.r2(CARRANZA, model="ghb")
-    ct3 = R.r3(CARRANZA, model="ghb")
-    ce2 = R.r2(CARRANZA)
-    ce3 = R.r3(CARRANZA)
-    rows += [by_rounding(g, "2D GHB, 40 slices", ct2.fos, 2.0039, 4),
-             info(g, "Published FoS (their method)", "", "2.01", "reference only"),
-             info(g, "3D GHB, 20x20", _fmt(ct3.fos, 4), "about 2.14", "mesh to be confirmed"),
-             info(g, "2D EJC (Moscarda), 40 slices", _fmt(ce2.fos, 4), "2.1214", "recorded comparison; mesh/inputs to be confirmed"),
-             info(g, "3D EJC (Moscarda), 20x20", _fmt(ce3.fos, 4), "2.2678", "recorded comparison; mesh/inputs to be confirmed")]
+    ct2, ct3 = R.r2(CARRANZA, model="ghb"), R.r3(CARRANZA, model="ghb")
+    ce2, ce3 = R.r2(CARRANZA), R.r3(CARRANZA)
+    rows += [by_rounding(g, "2D GHB, 40 slices (brief)", ct2.fos, 2.0039, 4),
+             by_rounding(g, "2D GHB, 40 slices (thesis record)", ct2.fos, 2.003873, 6),
+             by_rounding(g, "3D GHB, 20x20 (thesis value)", ct3.fos, 2.142, 3),
+             by_rounding(g, "3D GHB, 20x20 (thesis record)", ct3.fos, 2.141937, 6),
+             by_rounding(g, "2D EJC, 40 slices", ce2.fos, 2.122598, 6),
+             by_rounding(g, "3D EJC, 20x20", ce3.fos, 2.269068, 6),
+             info(g, "Published FoS (their method)", "", "2.01", "reference only")]
+    if slow:
+        say("Carranza-Torres fine meshes (slow)")
+        rows += [by_rounding(g, "2D EJC, 5120 slices (slow)", R.r2(CARRANZA, n2=5120).fos, 2.121420, 6),
+                 by_rounding(g, "3D GHB, 320x320 (slow)", R.r3(CARRANZA, model="ghb", n3=320).fos, 2.140776, 6),
+                 by_rounding(g, "3D EJC, 320x320 (slow)", R.r3(CARRANZA, n3=320).fos, 2.267835, 6)]
+    g = "3 Moscarda (2025), main sphere, nu = 0.271 (reference values, not targets)"
+    for case, wet, a, rep_, sheet in ((1, False, 0.5, 2.24, 2.245), (2, True, 0.5, 1.57, 1.567),
+                                      (3, False, 0.509923, 2.04, 2.041), (4, True, 0.509923, 1.13, 1.132)):
+        ours = R.r2(wet=wet, a_override=a).fos
+        rows.append(info(g, f"Case {case}: {'wet' if wet else 'dry'}, a = {a:g}, 2D FoS",
+                         f"this engine (Route 2, 40 slices): {_fmt(ours, 4)}",
+                         f"reported {rep_:.2f} (sheet at nu = 0.271: {sheet:.3f})",
+                         "his own slice model and the inherited route"))
 
     # statements on the Limitations page
     g = "6 Limitations statements (about)"
@@ -257,8 +275,9 @@ def verification_rows(runner: Optional[Runner] = None, slow: bool = False,
         rows += [by_rounding(g, "Dry: F 3D 240x240", f3d.fos, 2.7112, 4),
                  by_rounding(g, "Dry: F 2D 5120", f2d.fos, 2.4422, 4),
                  by_rounding(g, "Wet: F 3D 240x240", f3w.fos, 1.2776, 4,
-                             "" if f3w.fos else f3w.reason[:160]),
-                 by_rounding(g, "Wet: F 2D 5120", f2w.fos, 1.0916, 4, "" if f2w.fos else f2w.reason[:160])]
+                             f"{f3w.projections} projections on the path" if f3w.fos else f3w.reason[:160]),
+                 by_rounding(g, "Wet: F 2D 5120", f2w.fos, 1.0916, 4,
+                             f"{f2w.projections} projections on the path" if f2w.fos else f2w.reason[:160])]
         g6 = "6 Limitations statements (about)"
         c10d, c10w = R.r3(n3=10), R.r3(n3=10, wet=True)
         for lab, c10, fin, tgt in (("dry", c10d, f3d, "about 2.6"), ("wet", c10w, f3w, "about 4.4")):
@@ -281,9 +300,6 @@ def as_markdown(rows: list[Row]) -> str:
 
 if __name__ == "__main__":
     args = sys.argv[1:]
-    it = "workbook" if "--workbook" in args else "spec"
-    sg = "project" if "--safeguard" in args else "none"
-    rs = verification_rows(Runner(it, sg), slow="--slow" in args, progress=lambda s: print("...", s, file=sys.stderr))
-    print(f"iteration = {it}, safeguard = {sg}\n")
+    rs = verification_rows(Runner(), slow="--slow" in args, progress=lambda s: print("...", s, file=sys.stderr))
     print(as_markdown(rs))
     print("\n", summary(rs))

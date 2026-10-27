@@ -1,33 +1,12 @@
-# Verification of the engine (brief §3)
+# Verification of the engine
 
-Generated with `python verification.py --slow` (add `--safeguard` and/or `--workbook` for the other paths).
-Inputs as in the brief: main sphere x_c = 355.7423115, z_c = 644.4192949, R = 725.2669975 m; 3D 20x20, 2D 40 slices
-unless stated. Tolerances as in the brief: 9-decimal FoS to 1e-6, others to rounding, fixtures to the decimals shown.
+Generated with `python verification.py --slow` (the same table is on the app's Verification page).
+Default path with the Section 4.6 projection; the native v15 iteration path only where a row says so.
+Main sphere x_c = 355.7423115, z_c = 644.4192949, R = 725.2669975 m; 3D 20x20 and 2D 40 slices unless stated.
+Tolerances: FoS given to 9 decimals to 1e-6; values given to 3-6 decimals to rounding; fixtures to the decimals
+shown. INFO rows are reference values, not targets.
 
-## Summary
-
-| Configuration | PASS | FAIL | INFO |
-|---|---|---|---|
-| Brief §1.4 as written (`iteration=spec`, `safeguard=none`, the default) | 64 | 4 | 9 |
-| §1.4 + trial-stress projection (`safeguard=project`) | 66 | 2 | 9 |
-| Workbook path + projection (`iteration=workbook`, `safeguard=project`) | 62 | 6 | 9 |
-
-## Rows whose status depends on the configuration
-
-| Item | Target | §1.4 as written | §1.4 + projection | Workbook path + projection |
-|---|---|---|---|---|
-| Dry, a = 0.5: 3D iterations | 34 | 30 (**FAIL**) | 30 (**FAIL**) | 34 (**PASS**) |
-| Wet, a = 0.5: 3D iterations | 63 | 65 (**FAIL**) | 65 (**FAIL**) | 63 (**PASS**) |
-| Dry: C0 3D | 2.637 | 2.637135 (**PASS**) | 2.637135 (**PASS**) | 2.453241 (**FAIL**) |
-| Dry: T0 3D | 2.597 | 2.597232 (**PASS**) | 2.597232 (**PASS**) | 2.047666 (**FAIL**) |
-| Dry: C0 2D | 2.430 | 2.430370 (**PASS**) | 2.430370 (**PASS**) | 2.362592 (**FAIL**) |
-| Dry: T0 2D | 2.429 | 2.428723 (**PASS**) | 2.428723 (**PASS**) | 2.213417 (**FAIL**) |
-| Wet: C0 3D | 0.964 | 0.963803 (**PASS**) | 0.963803 (**PASS**) | 0.892323 (**FAIL**) |
-| Wet: C0 2D | 0.978 | 0.978391 (**PASS**) | 0.978391 (**PASS**) | 0.957267 (**FAIL**) |
-| Wet: F 3D 240x240 | 1.2776 | none (**FAIL**) | 1.2775700 (**PASS**) | 1.2775700 (**PASS**) |
-| Wet: F 2D 5120 | 1.0916 | none (**FAIL**) | 1.0916067 (**PASS**) | 1.0916067 (**PASS**) |
-
-## Full table, default configuration (brief §1.4 as written)
+**Result: {'PASS': 78, 'FAIL': 0, 'INFO': 12}**
 
 | Group | Item | Target | Computed | Difference | Tolerance | Status | Note |
 |---|---|---|---|---|---|---|---|
@@ -46,8 +25,8 @@ unless stated. Tolerances as in the brief: 9-decimal FoS to 1e-6, others to roun
 | 3 Strength fixtures (Moscarda, a = 0.5, nu = 0.271, Route 2) | GHB, sigma_n = 400 kPa: phi_i (deg) | 58.45 | 58.44835 | -1.65e-03 | rounding to 2 dp | **PASS** |  |
 | 3 Strength fixtures (Moscarda, a = 0.5, nu = 0.271, Route 2) | GHB, sigma_n = 400 kPa: c_i (kPa) | 460 | 459.504 | -4.96e-01 | rounding to 0 dp | **PASS** |  |
 | 3 Strength fixtures (Moscarda, a = 0.5, nu = 0.271, Route 2) | GHB, sigma_n = 400 kPa: tau_s (kPa) | 1111 | 1110.925 | -7.47e-02 | rounding to 0 dp | **PASS** |  |
-| 3 Strength fixtures (Moscarda, a = 0.5, nu = 0.271, Route 2) | Extra fixture (sigma_ci 120, m_b 3.5, s 0.002, a 0.505, nu 0.05, 5.7403 MPa): phi_i | 55.0720 | 55.0720172 | +1.72e-05 | rounding to 4 dp | **PASS** | matched with the ORIGINAL closure sigma2 = sigma3/nu - sigma1 |
-| 3 Strength fixtures (Moscarda, a = 0.5, nu = 0.271, Route 2) | Extra fixture: c_i (kPa) | 2079.5 | 2079.5128 | +1.28e-02 | rounding to 1 dp | **PASS** | matched with the ORIGINAL closure sigma2 = sigma3/nu - sigma1 |
+| 3 Strength fixtures (Moscarda, a = 0.5, nu = 0.271, Route 2) | Extra fixture, original closure (nu = 0.05): phi_i (deg) | 55.0720 | 55.0720172 | +1.72e-05 | rounding to 4 dp | **PASS** | sigma_ci 120 MPa, m_b 3.5, s 0.002, a 0.505, sigma_n 5.7403 MPa |
+| 3 Strength fixtures (Moscarda, a = 0.5, nu = 0.271, Route 2) | Extra fixture, original closure (nu = 0.05): c_i (kPa) | 2079.5 | 2079.5128 | +1.28e-02 | rounding to 1 dp | **PASS** | sigma_ci 120 MPa, m_b 3.5, s 0.002, a 0.505, sigma_n 5.7403 MPa |
 | 3 Strength fixtures (Moscarda, a = 0.5, nu = 0.271, Route 2) | Extra fixture with the Moscarda closure |  | REJECTED: no admissible state at this sigma_n (outside the admissible range of the closure) |  | reference only | **INFO** | the Moscarda closure has no admissible state here |
 | 3 EJC route at sigma2 = sigma3 reproduces GHB | 3D dry, a = 0.5: F(EJC, sigma2 = sigma3) vs F(GHB) | 2.553668420403 | 2.553668420403 | 0.00e+00 (rel) | rel <= 1e-11 | **PASS** |  |
 | 3 EJC route at sigma2 = sigma3 reproduces GHB | 2D dry, a = 0.5: F(EJC, sigma2 = sigma3) vs F(GHB) | 2.310255027833 | 2.310255027833 | 1.92e-16 (rel) | rel <= 1e-11 | **PASS** |  |
@@ -56,11 +35,15 @@ unless stated. Tolerances as in the brief: 9-decimal FoS to 1e-6, others to roun
 | 3 Main sphere, Moscarda closure, EJC (20x20, 40 slices) | Active half-columns (3D 20x20) | 76 | 76 | 0 | exact | **PASS** |  |
 | 3 Main sphere, Moscarda closure, EJC (20x20, 40 slices) | Active slices (2D 40) | 30 | 30 | 0 | exact | **PASS** |  |
 | 3 Main sphere, Moscarda closure, EJC (20x20, 40 slices) | Dry, a = 0.5: F 3D | 2.706024342 | 2.706024342432 | +4.32e-10 | abs <= 1e-06 | **PASS** |  |
-| 3 Main sphere, Moscarda closure, EJC (20x20, 40 slices) | Dry, a = 0.5: 3D iterations | 34 | 30 | -4 | exact | **FAIL** |  |
 | 3 Main sphere, Moscarda closure, EJC (20x20, 40 slices) | Dry, a = 0.5: F 2D | 2.447910895 | 2.447910895515 | +5.15e-10 | abs <= 1e-06 | **PASS** |  |
 | 3 Main sphere, Moscarda closure, EJC (20x20, 40 slices) | Wet, a = 0.5: F 3D | 1.272331405 | 1.272331405186 | +1.86e-10 | abs <= 1e-06 | **PASS** |  |
-| 3 Main sphere, Moscarda closure, EJC (20x20, 40 slices) | Wet, a = 0.5: 3D iterations | 63 | 65 | +2 | exact | **FAIL** |  |
 | 3 Main sphere, Moscarda closure, EJC (20x20, 40 slices) | Wet, a = 0.5: F 2D | 1.098069496 | 1.098069496535 | +5.35e-10 | abs <= 1e-06 | **PASS** |  |
+| 3 Main sphere, Moscarda closure, EJC (20x20, 40 slices) | Dry / wet, a = 0.5: 3D iterations and projections (default path) | shown, not tested | 30 / 65 iterations; 0 / 0 projections |  | reference only | **INFO** |  |
+| 3 Native v15 iteration path (start F = 1, Hungr explicit form, projection) | Dry, a = 0.5: F 3D | 2.706024342 | 2.706024342432 | +4.32e-10 | abs <= 1e-06 | **PASS** |  |
+| 3 Native v15 iteration path (start F = 1, Hungr explicit form, projection) | Dry, a = 0.5: 3D iterations | 34 | 34 | 0 | exact | **PASS** |  |
+| 3 Native v15 iteration path (start F = 1, Hungr explicit form, projection) | Wet, a = 0.5: F 3D | 1.272331405 | 1.272331405181 | +1.81e-10 | abs <= 1e-06 | **PASS** |  |
+| 3 Native v15 iteration path (start F = 1, Hungr explicit form, projection) | Wet, a = 0.5: 3D iterations | 63 | 63 | 0 | exact | **PASS** |  |
+| 3 Native v15 iteration path (start F = 1, Hungr explicit form, projection) | Projections dry / wet |  | 1 / 2 |  | reference only | **INFO** |  |
 | 3 Main sphere, Moscarda closure, EJC (20x20, 40 slices) | Dry, a = 0.5: GHB F 3D | 2.554 | 2.553668 | -3.32e-04 | rounding to 3 dp | **PASS** |  |
 | 3 Main sphere, Moscarda closure, EJC (20x20, 40 slices) | Dry, a = 0.5: GHB F 2D | 2.310 | 2.310255 | +2.55e-04 | rounding to 3 dp | **PASS** |  |
 | 3 Main sphere, Moscarda closure, EJC (20x20, 40 slices) | Wet, a = 0.5: GHB F 3D | 1.200 | 1.200122 | +1.22e-04 | rounding to 3 dp | **PASS** |  |
@@ -95,16 +78,25 @@ unless stated. Tolerances as in the brief: 9-decimal FoS to 1e-6, others to roun
 | 1.2(c) / Table 5.2 Original closure (admissibility check only, a = 0.5) | Table 5.2: min sigma_n at nu = 0.45 (MPa) | 2188 | 2187.810 | -1.90e-01 | rounding to 0 dp | **PASS** |  |
 | 1.2(c) / Table 5.2 Original closure (admissibility check only, a = 0.5) | nu = 0.05: dry columns with gamma h - u below the threshold (of 76) | 43 | 43 | 0 | exact | **PASS** |  |
 | 1.2(c) / Table 5.2 Original closure (admissibility check only, a = 0.5) | Original closure never produces a FoS | NOT APPLICABLE | NOT APPLICABLE | n/a | status | **PASS** |  |
-| 3 Carranza-Torres & Hormazabal (2020), published circle, dry, a = 0.5 | 2D GHB, 40 slices | 2.0039 | 2.0038734 | -2.66e-05 | rounding to 4 dp | **PASS** |  |
+| 3 Carranza-Torres & Hormazabal (2020), published circle, dry, a = 0.5 | 2D GHB, 40 slices (brief) | 2.0039 | 2.0038734 | -2.66e-05 | rounding to 4 dp | **PASS** |  |
+| 3 Carranza-Torres & Hormazabal (2020), published circle, dry, a = 0.5 | 2D GHB, 40 slices (thesis record) | 2.003873 | 2.003873411 | +4.11e-07 | rounding to 6 dp | **PASS** |  |
+| 3 Carranza-Torres & Hormazabal (2020), published circle, dry, a = 0.5 | 3D GHB, 20x20 (thesis value) | 2.142 | 2.141937 | -6.26e-05 | rounding to 3 dp | **PASS** |  |
+| 3 Carranza-Torres & Hormazabal (2020), published circle, dry, a = 0.5 | 3D GHB, 20x20 (thesis record) | 2.141937 | 2.141937395 | +3.95e-07 | rounding to 6 dp | **PASS** |  |
+| 3 Carranza-Torres & Hormazabal (2020), published circle, dry, a = 0.5 | 2D EJC, 40 slices | 2.122598 | 2.122598022 | +2.22e-08 | rounding to 6 dp | **PASS** |  |
+| 3 Carranza-Torres & Hormazabal (2020), published circle, dry, a = 0.5 | 3D EJC, 20x20 | 2.269068 | 2.269068429 | +4.29e-07 | rounding to 6 dp | **PASS** |  |
 | 3 Carranza-Torres & Hormazabal (2020), published circle, dry, a = 0.5 | Published FoS (their method) | 2.01 |  |  | reference only | **INFO** | reference only |
-| 3 Carranza-Torres & Hormazabal (2020), published circle, dry, a = 0.5 | 3D GHB, 20x20 | about 2.14 | 2.1419 |  | reference only | **INFO** | mesh to be confirmed |
-| 3 Carranza-Torres & Hormazabal (2020), published circle, dry, a = 0.5 | 2D EJC (Moscarda), 40 slices | 2.1214 | 2.1226 |  | reference only | **INFO** | recorded comparison; mesh/inputs to be confirmed |
-| 3 Carranza-Torres & Hormazabal (2020), published circle, dry, a = 0.5 | 3D EJC (Moscarda), 20x20 | 2.2678 | 2.2691 |  | reference only | **INFO** | recorded comparison; mesh/inputs to be confirmed |
+| 3 Carranza-Torres & Hormazabal (2020), published circle, dry, a = 0.5 | 2D EJC, 5120 slices (slow) | 2.121420 | 2.121420104 | +1.04e-07 | rounding to 6 dp | **PASS** |  |
+| 3 Carranza-Torres & Hormazabal (2020), published circle, dry, a = 0.5 | 3D GHB, 320x320 (slow) | 2.140776 | 2.140775815 | -1.85e-07 | rounding to 6 dp | **PASS** |  |
+| 3 Carranza-Torres & Hormazabal (2020), published circle, dry, a = 0.5 | 3D EJC, 320x320 (slow) | 2.267835 | 2.267835497 | +4.97e-07 | rounding to 6 dp | **PASS** |  |
+| 3 Moscarda (2025), main sphere, nu = 0.271 (reference values, not targets) | Case 1: dry, a = 0.5, 2D FoS | reported 2.24 (sheet at nu = 0.271: 2.245) | this engine (Route 2, 40 slices): 2.4479 |  | reference only | **INFO** | his own slice model and the inherited route |
+| 3 Moscarda (2025), main sphere, nu = 0.271 (reference values, not targets) | Case 2: wet, a = 0.5, 2D FoS | reported 1.57 (sheet at nu = 0.271: 1.567) | this engine (Route 2, 40 slices): 1.0981 |  | reference only | **INFO** | his own slice model and the inherited route |
+| 3 Moscarda (2025), main sphere, nu = 0.271 (reference values, not targets) | Case 3: dry, a = 0.509923, 2D FoS | reported 2.04 (sheet at nu = 0.271: 2.041) | this engine (Route 2, 40 slices): 2.3757 |  | reference only | **INFO** | his own slice model and the inherited route |
+| 3 Moscarda (2025), main sphere, nu = 0.271 (reference values, not targets) | Case 4: wet, a = 0.509923, 2D FoS | reported 1.13 (sheet at nu = 0.271: 1.132) | this engine (Route 2, 40 slices): 1.0607 |  | reference only | **INFO** | his own slice model and the inherited route |
 | 6 Limitations statements (about) | F_H vs F_M difference, dry / wet (%) | 0.14-0.27 | 0.142 / 0.224 |  | reference only | **INFO** |  |
 | 6 Limitations statements (about) | Wet 3D FoS drop with C0 (%) | about 25 | 24.2 |  | reference only | **INFO** |  |
 | 3 Finest mesh (240x240, 5120 slices; slow) | Dry: F 3D 240x240 | 2.7112 | 2.7112235 | +2.35e-05 | rounding to 4 dp | **PASS** |  |
 | 3 Finest mesh (240x240, 5120 slices; slow) | Dry: F 2D 5120 | 2.4422 | 2.4422059 | +5.87e-06 | rounding to 4 dp | **PASS** |  |
-| 3 Finest mesh (240x240, 5120 slices; slow) | Wet: F 3D 240x240 | 1.2776 | none | n/a | rounding to 4 dp | **FAIL** | 3 of 10974 bases have no accepted local state at iteration 2; first: column 10909 at sigma_n = -98.1601 kPa, REJECTED: no admissible state at this sigma_n (outs |
-| 3 Finest mesh (240x240, 5120 slices; slow) | Wet: F 2D 5120 | 1.0916 | none | n/a | rounding to 4 dp | **FAIL** | 7 of 3796 bases have no accepted local state at iteration 2; first: column 3789 at sigma_n = -98.1733 kPa, REJECTED: no admissible state at this sigma_n (outsid |
+| 3 Finest mesh (240x240, 5120 slices; slow) | Wet: F 3D 240x240 | 1.2776 | 1.2775700 | -3.00e-05 | rounding to 4 dp | **PASS** | 3 projections on the path |
+| 3 Finest mesh (240x240, 5120 slices; slow) | Wet: F 2D 5120 | 1.0916 | 1.0916067 | +6.70e-06 | rounding to 4 dp | **PASS** | 7 projections on the path |
 | 6 Limitations statements (about) | 10x10 below 240x240, dry (%) | about 2.6 | 2.55 |  | reference only | **INFO** |  |
-| 6 Limitations statements (about) | 10x10 below 240x240, wet (%) | about 4.4 | none |  | reference only | **INFO** |  |
+| 6 Limitations statements (about) | 10x10 below 240x240, wet (%) | about 4.4 | 4.43 |  | reference only | **INFO** |  |

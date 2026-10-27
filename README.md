@@ -1,5 +1,8 @@
 # slope3d
 
+> **See also `ejc_app/`:** the interactive Streamlit app for the submitted thesis method (EJC with the Moscarda
+> closure, Route 2, Hungr 3D / Bishop 2D). It is a separate engine; run it with `cd ejc_app && streamlit run app.py`.
+
 Standalone 3D limit-equilibrium rock-slope stability with a 3D Hoek-Brown (EJC eq. 4.21) strength model: a port of the
 verified GENG5512 thesis workbook (`reference/`) with a command line, a Streamlit interface, plots and a run report.
 **The science is unchanged**: the VBA is the specification (`docs/SPEC.md` lists every rule with its VBA line, and the

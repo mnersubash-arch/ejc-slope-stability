@@ -237,6 +237,8 @@ table.data th { text-align: left; font: 600 12px/1.3 var(--font-body); letter-sp
 table.data td { border-bottom: 1px solid var(--rule); padding: 5px 8px; vertical-align: top; }
 table.data td.n { font-family: var(--font-data); font-size: 12.5px; text-align: right; white-space: nowrap; }
 table.data td.m { font-family: var(--font-data); font-size: 12.5px; }
+table.srch td.v { font-family: var(--font-data); font-size: 12.5px; text-align: right; }
+@media (max-width: 640px) { table.srch td.v { text-align: left; } table.srch th { text-align: left; } }
 table.data tr.grp td { font-weight: 600; background: var(--sunken); padding-top: 9px; }
 .res { display: inline-flex; gap: 5px; align-items: center; font-weight: 600; font-size: 12px; letter-spacing: .05em; white-space: nowrap; }
 .res i { font-style: normal; }
@@ -249,6 +251,8 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
 .ticks label { display: inline-flex; gap: 5px; align-items: center; font: 13px var(--font-data); cursor: pointer; }
 .inline-nums { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
 .inline-nums label { display: grid; gap: 3px; font-size: 13.5px; }
+.inline-nums label[hidden] { display: none; }
+#srch-sec .inline-nums { grid-template-columns: repeat(2, minmax(0, 1fr)); max-width: 640px; }
 .footer { margin-top: 22px; padding-top: 12px; border-top: 1px solid var(--line); font-size: 12.5px; color: var(--ink-2); display: grid; gap: 4px; }
 </style>
 
@@ -505,6 +509,21 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
       </section>
 
       <section class="panel" id="panel-studies" role="tabpanel" aria-labelledby="tab-studies" hidden>
+        <div class="stack" id="srch-sec">
+          <h3>Critical surface (search)</h3>
+          <p>Finds the circle (2D) and the sphere centred on y = 0 (3D) with the lowest accepted FoS for the current inputs, mesh and grid option. The search tries surfaces that leave the ground at a front exit (the toe or the face; with the base-circle option also the pit floor) and at a back exit (the face or the crest), and that meet the ground at both exits, so the mass has no vertical back face.</p>
+          <div class="inline-nums">
+            <label><span>Back exit up to (× H behind the crest)</span><input type="number" id="srch-back" min="0.25" max="10" step="0.25" value="2"></label>
+            <label id="srch-front-wrap"><span>Front exit up to (× H ahead of the toe)</span><input type="number" id="srch-front" min="0.25" max="10" step="0.25" value="2"></label>
+          </div>
+          <div class="toolbar">
+            <button type="button" class="btn" id="srch-run">Search</button>
+            <label class="check"><input type="checkbox" id="srch-3d"><span>Include 3D (slower: it starts from the 2D minima)</span></label>
+          </div>
+          <progress id="srch-prog" max="1" value="0" hidden></progress>
+          <p class="hint" id="srch-status"></p>
+          <div id="srch-out" class="stack"></div>
+        </div>
         <div class="grid-2">
           <div class="stack">
             <h3>Mesh study (eq. 4.17)</h3>
@@ -653,7 +672,7 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
   let RES = null;                         // last analysis: {key, inputs, r3, e3, r2, e2, orig, ms}
   let running = false, rerun = null, debounceT = null, lastError = null;
   const DIRTY = new Set(TABS);
-  let STUDY = { mesh: null, nu: null, ver: null };
+  let STUDY = { mesh: null, nu: null, search: null, ver: null };
 
   const isNum = (v) => typeof v === "number" && Number.isFinite(v);
   const f6 = (v) => (isNum(v) ? v.toFixed(6) : "withheld");
@@ -792,6 +811,7 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
       else { nb.removeAttribute("aria-invalid"); er.hidden = true; }
     }
     $("#closure-wrap").hidden = S.strength !== "EJC";
+    $("#srch-front-wrap").hidden = !S.base_circle;
     $("#a_on-wrap").hidden = S.strength === "MC";
     const native = S.iteration === "native_v15";
     document.querySelectorAll('input[name="form"], input[name="tension"]').forEach((el) => { el.disabled = native; });
@@ -1819,6 +1839,7 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
     $("#mesh-n2").innerHTML = MESH2.map((n) => `<label><input type="checkbox" id="m2-${n}" value="${n}"${MESH2_ON.includes(n) ? " checked" : ""}>${n}</label>`).join("");
     $("#mesh-run").addEventListener("click", runMesh);
     $("#nu-run").addEventListener("click", runNu);
+    $("#srch-run").addEventListener("click", runSearch);
     $("#ver-run").addEventListener("click", runVerify);
   }
   function validInputsOrSay(el) {
@@ -1894,6 +1915,153 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
       { type: "scatter", mode: "lines+markers", x, y: rows.map((r) => r.fos2), name: "FoS 2D", line: { color: T.slip, width: 2 }, marker: { size: 6, color: T.slip } },
     ], layout(T, { annotations: ann, margin: { l: 10, r: 30, t: 30, b: 10 }, xaxis: { title: "ν" }, yaxis: { title: "FoS" } }));
   }
+  // critical-surface search (engine.criticalSearch; QA/QC finding R1)
+  const SRCH_EDGE = {
+    "front limit": (st) => `lies on the front limit (${st.front} H ahead of the toe): widen it and search again`,
+    "back limit": (st) => `lies on the back limit (${st.back} H behind the crest): widen it and search again`,
+    "crest": () => "has its front exit at the crest edge",
+    "exits meet": () => "has its two exits next to each other",
+    "vertical back": () => "has an arc that is vertical at the back exit, the steepest arc the search tries",
+    "flat": () => "is nearly flat, the flattest arc the search tries",
+    "coverage": (st) => `lies on the default grid's coverage limit: a flatter or longer circle would cover less than ${Math.round(st.coverage * 100)} % of the grid's span from x<sub>c</sub> − R to the toe-level crossing, so few slices or columns would resolve it, and the search skips it (the base-circle option meshes the mass itself)`,
+    "masses": () => "lies on the base-circle grid's limit of one sliding mass",
+    "grid": () => "lies on the default grid's limit (it analyses circles that cross the toe level at or ahead of the toe); the base-circle option also analyses circles that pass below the toe, or stay above the toe level",
+    "withheld": () => "lies next to surfaces whose results were withheld (not accepted)",
+  };
+  const SRCH_KEYS = ["xc", "zc", "R"];
+  const withoutSurface = (inp) => { const o = Object.assign({}, inp); for (const k of SRCH_KEYS) delete o[k]; return JSON.stringify(o); };
+  function runSearch() {
+    const out = $("#srch-out"), inp = validInputsOrSay(out);
+    if (!inp) return;
+    const back = Number($("#srch-back").value), front = Number($("#srch-front").value);
+    if (!(back >= 0.25 && back <= 10) || (inp.base_circle && !(front >= 0.25 && front <= 10))) {
+      out.innerHTML = note("critical", "Use exit limits from 0.25 to 10 times H."); return;
+    }
+    const dims = $("#srch-3d").checked ? [2, 3] : [2];
+    const bar = $("#srch-prog"), status = $("#srch-status"), t0 = Date.now();
+    bar.hidden = false; bar.value = 0; $("#srch-run").disabled = true;
+    status.textContent = "Searching…";
+    out.innerHTML = "";
+    submit({ type: "search", inputs: inp, dims, back, front }, (p) => {
+      progressTo(bar)(p);
+      status.textContent = `${p.label}… ${Math.round((Date.now() - t0) / 1000)} s`;
+    }).then((res) => {
+      bar.hidden = true; $("#srch-run").disabled = false;
+      if (res.type !== "search") { status.textContent = ""; out.innerHTML = note("critical", esc(res.error || "The search failed.")); return; }
+      res.inputs = inp;
+      STUDY.search = res; renderSearch();
+    });
+  }
+  function exitText(inp, p) {
+    const crest = -inp.H / Math.tan(inp.beta * E.DEG), f2 = (v) => (Math.abs(v) < 0.005 ? "0.00" : fx(v, 2));
+    const where = Math.abs(p[0]) < 0.005 && Math.abs(p[1]) < 0.005 ? "toe" : p[1] >= inp.H ? `crest, ${f2(crest - p[0])} m behind the edge`
+      : p[1] > 0 ? "face" : `floor, ${f2(p[0])} m ahead of the toe`;
+    return `(${f2(p[0])}, ${f2(p[1])})<br>${where}`;
+  }
+  function renderSearch() {
+    const res = STUDY.search, out = $("#srch-out");
+    if (!res) { $("#srch-status").textContent = "Not run yet."; return; }
+    const inp = res.inputs, P = res.prescribed, dims = res.settings.dims, rs = dims.map((d) => res["r" + d]);
+    const st = res.settings;
+    $("#srch-status").textContent = `Finished in ${(res.ms / 1000).toFixed(1)} s: ` + dims.map((d, q) => `${rs[q].evaluations} surfaces in ${d}D`).join(", ") + ".";
+    const notes = [];
+    let current = null;
+    try { current = toInputs(S); } catch (e) { current = null; }
+    if (current && withoutSurface(current) !== withoutSurface(inp)) notes.push(note("warning", "The inputs have changed since this search (other than the surface). Search again for the current inputs."));
+    if (P.vertical_back > 0) notes.push(note("info", `The prescribed circle ends below the ground at its back extreme (x<sub>c</sub> − R = ${fx(P.xc - P.R, 2)} m): the mass analysed for it has a vertical back face ${fx(P.vertical_back, 2)} m high that carries no force, as a tension crack would. The search does not try such circles.`));
+    const T = theme();
+    const pct = (a, b) => (isNum(a) && isNum(b) ? `${a >= b ? "+" : "−"}${Math.abs((a / b - 1) * 100).toFixed(1)} %` : "–");
+    const fosOrStatus = (v, s) => (isNum(v) ? v.toFixed(6) : esc(s || "withheld"));
+    const mesh = (d, n) => (d === 3 ? `${n} × ${n}` : `${n} slices`);
+    const row = (label, f) => `<tr><td>${label}</td>${dims.map((d, q) => `<td class="v">${f(d, rs[q])}</td>`).join("")}</tr>`;
+    const inLimits = (r) => SRCH_KEYS.every((k) => r[k] >= NUM[k].min && r[k] <= NUM[k].max);
+    let html = `<div class="tbl-wrap"><table class="data srch"><thead><tr><th></th>${dims.map((d) => `<th>${d === 2 ? "2D, Bishop" : "3D, Hungr"}</th>`).join("")}</tr></thead><tbody>` +
+      row("FoS on the prescribed surface", (d) => fosOrStatus(P["fos" + d], P["status" + d])) +
+      row("FoS on the critical surface", (d, r) => (isNum(r.fos) ? `<b>${r.fos.toFixed(6)}</b>` : "none found")) +
+      row("Change", (d, r) => pct(r.fos, P["fos" + d])) +
+      row("x<sub>c</sub>, z<sub>c</sub>, R (m)", (d, r) => (isNum(r.fos) ? `${fx(r.xc, 3)}, ${fx(r.zc, 3)}, ${fx(r.R, 3)}` : "–")) +
+      row("Front exit (x, z) (m)", (d, r) => (isNum(r.fos) ? exitText(inp, r.front) : "–")) +
+      row("Back exit (x, z) (m)", (d, r) => (isNum(r.fos) ? exitText(inp, r.back) : "–")) +
+      row(`Mesh check (finer mesh)`, (d, r) => (r.check ? `${mesh(d, r.check.n)}:<br>${fosOrStatus(r.check.fos, r.check.status)}${isNum(r.check.change) ? ` (${pct(r.check.fos, r.fos)})` : ""}` : "–")) +
+      row("Surfaces tried", (d, r) => `${r.evaluations}:<br>${r.counts.solved} solved, ${r.counts.withheld} withheld, ${r.counts.skipped} skipped`) +
+      row("Time", (d, r) => `${(r.ms / 1000).toFixed(1)} s`) +
+      row("", (d, r) => (isNum(r.fos) ? `<button type="button" class="btn" data-use="${d}"${inLimits(r) ? "" : " disabled"}>Use this ${d === 2 ? "circle" : "sphere"}</button>` : "")) +
+      "</tbody></table></div>";
+    if (dims.length === 2 && rs.every((r) => isNum(r.fos)) && isNum(P.fos2) && isNum(P.fos3))
+      html += `<p>3D/2D ratio: <b class="mono">${(P.fos3 / P.fos2).toFixed(3)}</b> on the prescribed surface, <b class="mono">${(rs[1].fos / rs[0].fos).toFixed(3)}</b> on the critical surfaces (the 2D circle and the 3D sphere each with its own lowest FoS).</p>`;
+    dims.forEach((d, q) => {
+      const r = rs[q];
+      if (r.message) notes.push(note("warning", `${d}D: ${esc(r.message)}`));
+      if (!isNum(r.fos)) return;
+      if (!inLimits(r)) notes.push(note("warning", `${d}D: the critical surface lies outside the input limits of the rail (x<sub>c</sub> ${NUM.xc.min} to ${NUM.xc.max} m, z<sub>c</sub> ${NUM.zc.min} to ${NUM.zc.max} m, R ${NUM.R.min} to ${NUM.R.max} m), so it cannot be used as the prescribed surface.`));
+      const seen = new Set(), edges = [];
+      for (const e of r.edges) if (e.why !== "toe" && SRCH_EDGE[e.why] && !seen.has(e.why)) { seen.add(e.why); edges.push(SRCH_EDGE[e.why](st)); }
+      if (edges.length) notes.push(note("warning", `${d}D: the critical ${d === 2 ? "circle" : "sphere"} ${edges.join("; it ")}.`));
+      if (r.check && isNum(r.check.change) && Math.abs(r.check.change) > 0.005)
+        notes.push(note("warning", `${d}D: on ${mesh(d, r.check.n)} the critical surface's FoS changes by ${pct(r.check.fos, r.fos)}, more than the 0.5 % screening threshold of eq. 4.17. The current mesh under-resolves this surface, and the search may favour surfaces whose FoS the mesh underestimates. Refine the mesh (${d === 2 ? "N<sub>2D</sub>" : "N"}) and search again.`));
+      else if (r.check && !isNum(r.check.fos)) notes.push(note("warning", `${d}D: on ${mesh(d, r.check.n)} the critical surface gave no accepted FoS (${esc(r.check.status)}).`));
+    });
+    html += notes.join("");
+    html += '<div class="chart h-m" id="chart-search"></div>';
+    html += `<p class="hint">2D: a grid of ${st.grid.join(" × ")} = ${st.grid[0] * st.grid[1] * st.grid[2]} starting circles (front exit × back exit × curvature), then Nelder–Mead from the ${st.starts} best that are not neighbours, each restarted until it stops improving.${dims.includes(3) ? " 3D: Nelder–Mead from the 2D minima." : ""} The critical surface is the lowest accepted FoS among the surfaces tried: a local search, not a proof of the global minimum. Withheld results and surfaces the grid option cannot analyse are skipped. Every surface is solved on the current mesh (${inp.n2} slices, ${inp.n3} × ${inp.n3} columns); the mesh check re-solves the critical surface on a finer one. On a coarse 3D mesh the FoS changes in small steps as columns enter or leave the mass, so searches from different starts can stop at FoS that differ by a few tenths of a percent.</p>`;
+    out.innerHTML = html;
+    out.querySelectorAll("[data-use]").forEach((b) => b.addEventListener("click", () => useSurface(Number(b.dataset.use))));
+    searchChart(res, T);
+  }
+  function searchChart(res, T) {
+    const inp = res.inputs, P = res.prescribed, crest = -inp.H / Math.tan(inp.beta * E.DEG);
+    const surfs = [["prescribed surface", P, T.muted, "dash"]];
+    if (res.r2 && isNum(res.r2.fos)) surfs.push(["2D critical circle", res.r2, T.slip, "solid"]);
+    if (res.r3 && isNum(res.r3.fos)) surfs.push(["3D critical sphere, section y = 0", res.r3, T.n, "solid"]);
+    const xs = [crest, 0], zs = [0, inp.H], data = [];
+    const arcs = surfs.map(([name, c, color, dash]) => {
+      const x = linspace(c.xc - c.R, c.xc + c.R, 1601), z = x.map((v) => E.sphereZ(v, 0, c.xc, c.zc, c.R));
+      const y = x.map((v, q) => (isNum(z[q]) && z[q] < E.groundZ(v, inp.H, inp.beta) && (inp.base_circle || v <= 0) ? z[q] : null));
+      x.forEach((v, q) => { if (y[q] !== null) { xs.push(v); zs.push(y[q]); } });
+      xs.push(c.xc); zs.push(c.zc);
+      return { type: "scatter", mode: "lines", x, y, name, line: { color, width: c === P ? 2 : 3, dash }, hoverinfo: "skip" };
+    });
+    const [xa, xb] = range(xs), [za, zb] = range(zs), pad = 0.08 * Math.max(xb - xa, zb - za, inp.H);
+    const gx = [xa - 3 * (xb - xa) - pad].concat(linspace(Math.min(xa - pad, crest - 1e-9), Math.max(xb + pad, 1e-9), 600), [xb + 3 * (xb - xa) + pad]);
+    const gz = gx.map((x) => E.groundZ(x, inp.H, inp.beta)), deep = za - 3 * (zb - za) - pad;
+    data.push({ type: "scatter", x: gx.concat(gx.slice().reverse()), y: gz.concat(gx.map(() => deep)), fill: "toself", fillcolor: rgba(T.rock, T.dark ? 0.9 : 0.85),
+      line: { width: 0 }, hoverinfo: "skip", name: "rock mass", showlegend: false });
+    data.push({ type: "scatter", x: gx, y: gz, mode: "lines", line: { color: T.rockEdge, width: 2 }, name: "ground surface", hoverinfo: "skip", showlegend: false });
+    if (res.r2) {
+      const c = res.r2.cloud, keep = c.fos.map((v) => isNum(v));
+      const pick = (a) => a.filter((v, q) => keep[q]);
+      const best = res.r2.fos, top = isNum(best) ? 1.5 * best : 1;
+      data.push({ type: "scatter", mode: "markers", x: pick(c.xc), y: pick(c.zc), name: "centres tried (2D)",
+        text: c.fos.map((v, q) => (keep[q] ? `centre (${fx(c.xc[q], 2)}, ${fx(c.zc[q], 2)}), R = ${fx(c.R[q], 2)} m<br>FoS 2D ${v.toFixed(4)}` : null)).filter((v) => v !== null), hoverinfo: "text",
+        marker: { size: 6, color: pick(c.fos), cmin: isNum(best) ? best : undefined, cmax: top, colorscale: T.ramp.slice().reverse().map((col, i, a) => [i / (a.length - 1), col]),
+          line: { width: 0.5, color: T.surface }, colorbar: { title: { text: "FoS 2D", side: "right", font: { color: T.ink2 } }, len: 0.6, thickness: 12, outlinewidth: 0,
+            tickfont: { color: T.ink2, family: "IBM Plex Mono, monospace", size: 11 } } } });
+    }
+    if (res.r3) {
+      const c = res.r3.cloud, keep = c.fos.map((v) => isNum(v));
+      data.push({ type: "scatter", mode: "markers", x: c.xc.filter((v, q) => keep[q]), y: c.zc.filter((v, q) => keep[q]), name: "centres tried (3D)", visible: "legendonly",
+        text: c.fos.map((v, q) => (keep[q] ? `centre (${fx(c.xc[q], 2)}, ${fx(c.zc[q], 2)}), R = ${fx(c.R[q], 2)} m<br>FoS 3D ${v.toFixed(4)}` : null)).filter((v) => v !== null), hoverinfo: "text",
+        marker: { size: 6, color: "rgba(0,0,0,0)", line: { width: 1.2, color: T.n } } });
+    }
+    data.push(...arcs);
+    surfs.forEach(([name, c, color]) => data.push({ type: "scatter", mode: "markers", x: [c.xc], y: [c.zc], showlegend: false, name,
+      marker: { symbol: "x", size: c === P ? 9 : 11, color }, hovertext: [`${name}: centre (${fx(c.xc, 3)}, ${fx(c.zc, 3)}), R = ${fx(c.R, 3)} m${isNum(c.fos) ? `, FoS ${c.fos.toFixed(4)}` : ""}`], hoverinfo: "text" }));
+    plot("chart-search", data, layout(T, { margin: { l: 10, r: 10, t: 40, b: 10 },
+      xaxis: { title: "x (m), toe at 0, slope rises to −x", range: [xa - pad, xb + pad] },
+      yaxis: { title: "z (m)", scaleanchor: "x", scaleratio: 1, range: [za - pad, zb + pad] } }));
+  }
+  function useSurface(dim) {
+    const r = STUDY.search && STUDY.search["r" + dim];
+    if (!r || !isNum(r.fos)) return;
+    for (const k of SRCH_KEYS) {
+      S[k] = r[k];
+      if (!(r[k] >= WIN[k].lo && r[k] <= WIN[k].hi)) WIN[k] = windowFor(k, S);
+    }
+    writeRail();
+    changed({ immediate: true });
+    if (!(UI.live && liveAllowed())) requestRun(true);
+    $("#srch-status").textContent = `The prescribed surface is now the ${dim}D critical ${dim === 2 ? "circle" : "sphere"}; the analysis reruns.`;
+  }
   function runVerify() {
     const bar = $("#ver-prog"), slow = $("#ver-slow").checked;
     bar.hidden = false; bar.value = 0; $("#ver-run").disabled = true;
@@ -1948,7 +2116,7 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
       else if (t === "cross-section") renderSection();
       else if (t === "free-body") { if (!RES) { msg("fbd-msg", notRun(), "info"); $("#fbd-body").hidden = true; } else renderFbd(); }
       else if (t === "checks") renderChecks();
-      else if (t === "studies") { renderMesh(); renderNu(); }
+      else if (t === "studies") { renderSearch(); renderMesh(); renderNu(); }
       else if (t === "verification") { if (STUDY.ver) renderVerify(); else if (!$("#ver-run").disabled) runVerify(); }
     } catch (e) {
       console.error(e);

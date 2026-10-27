@@ -21,7 +21,7 @@ They need Node 18 or newer (run with 22.22) and Python 3.11 or newer with numpy,
 | `node qa_industry.js` | D'Esterre (2024) against Slide2 and Slide3, Law (2024) against Slide2 and Excel, Carranza-Torres & Hormazábal (2020). | 1 min |
 | `node qa_desterre_search.js` | The app's own critical circle near each D'Esterre circle (finding B1). | 1 min |
 | `node qa_desterre_oms.js` | The Ordinary method of slices on the app's slices for the D'Esterre circles (finding B1). | seconds |
-| `node qa_search.js` | Critical-surface searches on the thesis slope, GHB and EJC, dry and wet, 2D and 3D (finding R1). | 3 min |
+| `node qa_search.js` | Critical-surface searches on the thesis slope, GHB and EJC, dry and wet, 2D and 3D (finding R1; the apps now have their own search, below). | 3 min |
 | `node qa_scenarios.js` | One input at a time on the thesis slope: GSI, σci, mi, D, γ, Hw, r_u and slope height. | 1 min |
 
 `run_engine.js` is the batch runner the Python scripts use (`node run_engine.js jobs.json out.json`).
@@ -38,5 +38,33 @@ They need Node 18 or newer (run with 22.22) and Python 3.11 or newer with numpy,
 - **S3**: the results summary counts the bases with tensile effective normal stress (σ′n < 0), with a note when
   there are any and a warning above a quarter of the bases.
 
+## Finding addressed since the record
+
+- **R1**: both apps now search for the critical surface (Studies: `criticalSearch` in `webapp/engine.js`,
+  `critical_search` in `ejc_app/engine.py`, the same algorithm with the same results; method and limits in
+  `ejc_app/README.md`). On the thesis slope at the default meshes its minima are at or below those of
+  `qa_search.js`, which the record used:
+
+  | Case | 2D: app search (record) | 3D: app search (record) |
+  |---|---|---|
+  | EJC dry | 2.1186 (2.1212) | 2.2600 (2.2635) |
+  | EJC wet | 0.9929 (0.9943) | 1.0770 (1.0821) |
+  | GHB dry | 2.0002 (2.0025) | 2.1359 (2.1368) |
+  | GHB wet | 0.9369 (0.9373) | 1.0214 (1.0224) |
+
+  Building it showed three things that the record did not cover:
+  - The engines accept a circle whose arc ends below the ground at its back extreme x_c − R. The mass then has a
+    vertical back face that carries no force, as a tension crack would. On Taylor's 75° slope (H = 10 m, c = 100 kPa,
+    φ = 0) the circle (0.40, 7.20, 7.21) has a 2.8 m face and an exact FoS of 1.6245 (by `qa_analytic.py`'s
+    quadrature), below the 1.6906 of the critical circle. The search tries only circles that meet the ground at both
+    exits, and its panel reports such a face on the prescribed circle. The single-surface analysis is unchanged.
+  - A search on a coarse mesh favours surfaces whose FoS the mesh underestimates: on that slope with 40 slices it
+    reports 1.6925 on a circle that gives 1.7503 on 160 slices. The search re-solves its critical surfaces on a finer
+    mesh and warns above the 0.5 % threshold of eq. 4.17. The thesis's wet cases exceed it at the default meshes
+    (+0.8 % to +1.8 %), so their critical FoS needs a finer search mesh.
+  - On the default grid, slices are spread from x_c − R to the toe-level crossing, so a nearly flat circle can leave
+    its mass on one slice: on Taylor's 60° slope, R = 994 m gives 1.34 with 40 slices (2.55 with 640). The search
+    skips circles whose mass covers less than half of that span.
+
 The record's other findings concern the thesis text (T1 to T4), published benchmarks (B1 to B3) and real-life use
-(R1 to R3); they need no change to the code.
+(R2, R3); they need no change to the code.

@@ -98,7 +98,20 @@ async function check(cond, label) { console.log(`${cond ? "ok  " : "FAIL"} ${lab
   await page.waitForSelector("#chart-mesh3 .main-svg", { timeout: 60000 });
   await page.waitForTimeout(500);
   console.log("     mesh study:", (await text(page, "#mesh-out")).slice(0, 220).replace(/\s+/g, " "));
+  // critical-surface search (2D), then make the critical circle the prescribed surface
+  await page.click("#srch-run");
+  await page.waitForSelector("#chart-search .main-svg", { timeout: 180000 });
+  const srch = await text(page, "#srch-out");
+  console.log("     search:", (await text(page, "#srch-status")), "|", srch.slice(0, 260).replace(/\s+/g, " "));
+  await check(/FoS on the critical surface\s*2\.118587/.test(srch) && /−13\.5 %/.test(srch) && /160 slices:\s*2\.125346/.test(srch),
+    "search: 2D critical FoS 2.118587 (−13.5 %), mesh check 2.125346 on 160 slices");
+  await page.waitForTimeout(500);
   await page.screenshot({ path: path.join(SHOTS, "w1-studies-light.png"), fullPage: true });
+  await page.click('[data-use="2"]');
+  await page.waitForFunction(() => /Up to date/.test(document.querySelector("#runstate").textContent) && document.querySelector("#fos2").textContent === "2.118587", null, { timeout: 60000 });
+  await check(await text(page, "#fos2") === "2.118587" && await page.$eval("#nb-R", (el) => el.value) === "592.030235019", "Use this circle: the analysis reruns on the critical circle");
+  await page.click("#reset");
+  await waitSolved(page);
 
   // number box: R = 760 m -> new FoS; then back to the preset
   await page.click("#tab-view-3d");
@@ -196,6 +209,13 @@ async function check(cond, label) { console.log(`${cond ? "ok  " : "FAIL"} ${lab
   await page.waitForTimeout(800);
   const overflow2 = await page.evaluate(() => [document.documentElement.scrollWidth, document.documentElement.clientWidth]);
   await check(overflow2[0] <= overflow2[1], `no horizontal scroll on the FBD tab at 390 px (${overflow2})`);
+  await page.click("#tab-studies");
+  await page.click("#srch-run");
+  await page.waitForSelector("#chart-search .main-svg", { timeout: 180000 });
+  await page.waitForTimeout(500);
+  const overflow3 = await page.evaluate(() => [document.documentElement.scrollWidth, document.documentElement.clientWidth]);
+  await check(overflow3[0] <= overflow3[1], `no horizontal scroll on the Studies tab with search results at 390 px (${overflow3})`);
+  await page.screenshot({ path: path.join(SHOTS, "w3-phone-search.png"), fullPage: true });
   console.log("     problems (phone):", problems.length ? problems : "none");
   await ctx.close();
   await browser.close();

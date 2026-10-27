@@ -675,10 +675,249 @@
       el: { x: m.x, y: m.y, zb: m.zb, zm: map(n, (k) => (m.zb[k] + m.zt[k]) / 2), W, N, U, S, nx, ny, nz, sx, sz } };
   }
 
+  // ---------------------------------------------------------------------------------------------------------------
+  // critical-surface search (QA/QC finding R1)
+  // ---------------------------------------------------------------------------------------------------------------
+  /** Settings of criticalSearch: limits of the exits (multiples of H behind the crest edge, and ahead of the toe for
+   *  base circles), grid of starting surfaces (front exit x back exit x curvature; grid_base with the base-circle
+   *  option), Nelder-Mead starts, tolerance on the normalised parameters, evaluations per run, restarts, and the
+   *  least share of the default grid's span that the mass must cover. Same as SEARCH in ejc_app/engine.py. */
+  const SEARCH = Object.freeze({ back: 2, front: 2, grid: Object.freeze([4, 9, 4]), grid_base: Object.freeze([6, 9, 4]),
+    starts: 2, tol: 1e-3, max_eval: 100, restarts: 2, coverage: 0.5 });
+
+  /** Point of the ground surface at s (m): s <= 0 on the pit floor ahead of the toe (x = -s), 0 < s <= H up the face
+   *  by height (z = s), s > H on the crest at s - H behind the crest edge. */
+  function groundAt(s, H, tanB) {
+    if (s <= 0) return [-s, 0];
+    if (s <= H) return [-s / tanB, s];
+    return [-H / tanB - (s - H), H];
+  }
+
+  /** Circle through the front exit pf and the back exit pb (x_b < x_f, z_b >= z_f) whose lower arc joins them. The
+   *  centre lies on the chord's perpendicular bisector, d = (c/2)(dz/dx + 1/t - 1) above the chord's midpoint, so that
+   *  z_c - z_b = (1/t - 1) dx/2: t = 1 makes the arc vertical at pb, t -> 0 flattens it towards the chord. For
+   *  t <= 1 the arc meets the ground at pb before its back extreme x_c - R, so the mass has no vertical back face. */
+  function circleFromExits(pf, pb, t) {
+    const dx = pf[0] - pb[0], dz = pb[1] - pf[1];
+    const c = Math.sqrt(dx * dx + dz * dz), h = c / 2;
+    const d = h * (dz / dx + 1 / t - 1);
+    return { xc: (pf[0] + pb[0]) / 2 + d * dz / c, zc: (pf[1] + pb[1]) / 2 + d * dx / c, R: Math.sqrt(h * h + d * d) };
+  }
+
+  /** The surface of search parameters p = [a, b, t]: front exit at s = aH, back exit at s = bH (groundAt), curvature
+   *  t (circleFromExits). */
+  function searchSurface(inp, p) {
+    const H = inp.H, tanB = Math.tan(inp.beta * DEG);
+    const front = groundAt(p[0] * H, H, tanB), back = groundAt(p[1] * H, H, tanB);
+    return Object.assign(circleFromExits(front, back, p[2]), { front, back });
+  }
+
+  /** True if the ground is above the circle on y = 0 over one interval that ends inside (x_c - R, x_c + R), sampled as
+   *  slipExtent samples it: one sliding mass, with no vertical face at the circle's extremes (base-circle grid). */
+  function singleMass(inp) {
+    const { xc, zc, R } = inp, n = 20001, xs = linspace(xc - R, xc + R, n);
+    let runs = 0, prev = false, first = -1, last = -1;
+    for (let i = 0; i < n; i++) {
+      const on = groundZ(xs[i], inp.H, inp.beta) - sphereZ(xs[i], 0, xc, zc, R) > 0;
+      if (on) { if (!prev) runs++; if (first < 0) first = i; last = i; }
+      prev = on;
+    }
+    return runs === 1 && first > 0 && last < n - 1;
+  }
+
+  /** Nelder-Mead (reflection 1, expansion 2, contractions 1/2, shrink 1/2) from x0 and x0 + step_i e_i, stopped when
+   *  every vertex lies within tol of the best in every parameter or after maxEval calls; ties go to the lower index.
+   *  Same as _nelder_mead in ejc_app/engine.py. */
+  function nelderMead(f, x0, step, tol, maxEval) {
+    const n = x0.length;
+    let pts = [x0.slice()];
+    for (let i = 0; i < n; i++) { const p = x0.slice(); p[i] = x0[i] + step[i]; pts.push(p); }
+    let vals = pts.map(f), evals = n + 1;
+    while (evals < maxEval) {
+      const idx = vals.map((v, i) => i).sort((a, b) => (vals[a] < vals[b] ? -1 : vals[a] > vals[b] ? 1 : a - b));
+      pts = idx.map((i) => pts[i]); vals = idx.map((i) => vals[i]);
+      let spread = 0;
+      for (let i = 1; i <= n; i++) for (let j = 0; j < n; j++) spread = Math.max(spread, Math.abs(pts[i][j] - pts[0][j]));
+      if (spread < tol) break;
+      const c = [];
+      for (let j = 0; j < n; j++) { let s = 0; for (let i = 0; i < n; i++) s += pts[i][j]; c.push(s / n); }
+      const at = (t) => c.map((cj, j) => cj + t * (pts[n][j] - cj));
+      const xr = at(-1), fr = f(xr); evals++;
+      if (fr < vals[0]) {
+        const xe = at(-2), fe = f(xe); evals++;
+        if (fe < fr) { pts[n] = xe; vals[n] = fe; } else { pts[n] = xr; vals[n] = fr; }
+      } else if (fr < vals[n - 1]) { pts[n] = xr; vals[n] = fr; }
+      else {
+        const outside = fr < vals[n], xk = at(outside ? -0.5 : 0.5), fk = f(xk); evals++;
+        if (outside ? fk <= fr : fk < vals[n]) { pts[n] = xk; vals[n] = fk; }
+        else {
+          for (let i = 1; i <= n; i++) { pts[i] = pts[i].map((v, j) => pts[0][j] + 0.5 * (v - pts[0][j])); vals[i] = f(pts[i]); evals++; }
+        }
+      }
+    }
+    let b = 0;
+    for (let i = 1; i <= n; i++) if (vals[i] < vals[b]) b = i;
+    return { x: pts[b], f: vals[b] };
+  }
+
+  /** Critical-surface search: the lowest accepted FoS over circles (2D, Bishop) and spheres centred on y = 0 (3D,
+   *  Hungr) that leave the ground at a front exit (the toe or the face; with the base-circle option also the pit
+   *  floor, up to front H ahead of the toe) and a back exit (face or crest, up to back H behind the crest edge), with
+   *  the lower arc between them (circleFromExits, so no vertical back face). Each surface is solved with the current
+   *  inputs, mesh and grid option; it is skipped when the grid option cannot analyse it (the default grid refuses
+   *  it, or its mass covers less than `coverage` of the default grid's span from x_c - R to the toe-level crossing,
+   *  so that few slices or columns resolve it; with the base-circle option, the ground is not above it over one
+   *  interval), and a result that is not ACCEPTED is withheld. 2D: a grid of starting surfaces (front exit x back
+   *  exit x curvature), then Nelder-Mead from the `starts` best grid surfaces that are not neighbours, each restarted
+   *  from its minimum with half the initial step until it stops improving. 3D: Nelder-Mead from the 2D minima.
+   *  Then each critical surface is probed one step 2 tol along every parameter (to name the limits it lies on) and
+   *  re-solved on a finer mesh. A local search: the lowest FoS among the surfaces tried, not a proof of the global
+   *  minimum. Same as critical_search in ejc_app/engine.py. */
+  function criticalSearch(inp, opts = {}, progress = null) {
+    const o = Object.assign({}, SEARCH), dims = opts.dims || [2];
+    for (const [k, v] of Object.entries(opts)) if (v !== undefined && v !== null) o[k] = v;
+    const t0 = Date.now(), H = inp.H, base = !!inp.base_circle;
+    const [na, nb, nt] = base ? o.grid_base : o.grid;
+    const lo0 = base ? -o.front : 0, hi1 = 1 + o.back;
+    const sp = [(1 - lo0) / na, hi1 / nb, 1 / nt], step = sp.map((v) => v / 2);
+    const local = o.max_eval * (1 + o.restarts);
+    const budget = { 2: na * nb * nt + o.starts * local + 8, 3: o.starts * local + 8 };
+    const total = dims.reduce((s, d) => s + budget[d], 0);
+    let done = 0;
+    const say = (label) => { if (progress) progress({ done: Math.min(done, total), total, label }); };
+    const vertical = Math.max(0, groundZ(inp.xc - inp.R, H, inp.beta) - inp.zc);
+    const out = { settings: { back: o.back, front: o.front, grid: [na, nb, nt], starts: o.starts, tol: o.tol,
+      max_eval: o.max_eval, restarts: o.restarts, coverage: o.coverage, dims: dims.slice(), base_circle: base },
+    domain: { front: [lo0, 1], back: [0, hi1], curvature: [0, 1] },
+    prescribed: { xc: inp.xc, zc: inp.zc, R: inp.R, vertical_back: vertical }, r2: null, r3: null, ms: 0 };
+    const solveAt = (dim, kw) => {
+      try {
+        const r = (dim === 3 ? run3d : run2d)(inputs(Object.assign({}, inp, kw)));
+        return { fos: r.fos, status: r.status, reason: r.fos !== null ? "" : r.reason };
+      } catch (e) { return { fos: null, status: "INPUT ERROR", reason: String((e && e.message) || e) }; }
+    };
+    for (const dim of dims) {
+      const pr = solveAt(dim, {});
+      out.prescribed["fos" + dim] = pr.fos; out.prescribed["status" + dim] = pr.status;
+      out.prescribed["reason" + dim] = pr.reason;
+    }
+    const stageEnd = { 2: budget[2], 3: (dims.includes(2) ? budget[2] : 0) + budget[3] };
+    let seeds = null;
+    for (const dim of dims) {
+      const td = Date.now(), cache = new Map();
+      const counts = { solved: 0, withheld: 0, skipped: 0 }, why = { coverage: 0, masses: 0, grid: 0 };
+      const cloud = { xc: [], zc: [], R: [], fos: [] };
+      let stage = "";
+      const evaluate = (p) => {
+        const [a, b, t] = p;
+        if (!(a >= lo0 && a < 1 && b > Math.max(a, 0) && b <= hi1 && t > 0 && t <= 1)) return { v: Infinity, kind: "outside" };
+        const s = searchSurface(inp, p), kw = { xc: s.xc, zc: s.zc, R: s.R };
+        let skip = null;
+        if (base) { if (!singleMass(inputs(Object.assign({}, inp, kw)))) skip = "masses"; }
+        else if (s.R > s.zc) {
+          const span = (s.xc - Math.sqrt(s.R * s.R - s.zc * s.zc)) - (s.xc - s.R);
+          if (s.front[0] - s.back[0] < o.coverage * span) skip = "coverage";
+        }
+        let e;
+        if (skip) e = { v: Infinity, kind: "skipped", why: skip };
+        else {
+          const r = solveAt(dim, kw);
+          if (r.status === "INPUT ERROR") e = { v: Infinity, kind: "skipped", why: "grid" };
+          else if (r.fos === null) e = { v: Infinity, kind: "withheld" };
+          else e = { v: r.fos, kind: "solved" };
+        }
+        counts[e.kind]++;
+        if (e.kind === "skipped") why[e.why]++;
+        cloud.xc.push(s.xc); cloud.zc.push(s.zc); cloud.R.push(s.R); cloud.fos.push(e.kind === "solved" ? e.v : null);
+        done++;
+        if (progress && (done % 5 === 0)) say(stage);
+        return e;
+      };
+      const look = (p) => {
+        const key = p.join(",");
+        let e = cache.get(key);
+        if (e === undefined) { e = evaluate(p); cache.set(key, e); }
+        return e;
+      };
+      const f = (p) => look(p).v;
+      const runs = [];
+      const res = { dim, fos: null, message: "", runs, counts, skipped_why: why, evaluations: 0, edges: [], check: null,
+        cloud };
+      let starts = [];
+      if (dim === 2) {
+        stage = "2D: grid of starting surfaces";
+        const cells = [];
+        for (let i = 0; i < na; i++) for (let j = 1; j <= nb; j++) for (let k = 0; k < nt; k++) {
+          const p = [lo0 + sp[0] * i, sp[1] * j, sp[2] * (k + 0.5)];
+          cells.push({ p, ijk: [i, j, k], v: f(p) });
+        }
+        const order = cells.map((c, i) => i).sort((a, b) => (cells[a].v < cells[b].v ? -1 : cells[a].v > cells[b].v ? 1 : a - b));
+        for (const i of order) {
+          if (!(cells[i].v < Infinity) || starts.length >= o.starts) break;
+          const ijk = cells[i].ijk;
+          if (starts.some((c) => Math.max(Math.abs(c.ijk[0] - ijk[0]), Math.abs(c.ijk[1] - ijk[1]), Math.abs(c.ijk[2] - ijk[2])) < 2)) continue;
+          starts.push({ p: cells[i].p, ijk, v: cells[i].v });
+        }
+        done = Math.max(done, na * nb * nt);
+        if (!starts.length) res.message = "No surface of the starting grid gave an accepted FoS.";
+      } else if (seeds && seeds.length) starts = seeds.map((p) => ({ p, v: f(p) }));
+      else res.message = "The 2D search found no critical circle to start the 3D search from.";
+      let best = null;
+      starts.forEach((c, q) => {
+        stage = `${dim}D: Nelder–Mead from start ${q + 1} of ${starts.length}`;
+        say(stage);
+        const from = done;
+        let r = nelderMead(f, c.p, step, o.tol, o.max_eval);
+        for (let k = 0; k < o.restarts; k++) {
+          const r2 = nelderMead(f, r.x, step.map((v) => v / 2), o.tol, o.max_eval);
+          if (!(r2.f < r.f)) break;
+          r = r2;
+        }
+        done = Math.max(done, from + local);
+        runs.push({ p0: c.p, f0: c.v < Infinity ? c.v : null, p: r.x, f: r.f < Infinity ? r.f : null });
+        if (r.f < Infinity && (!best || r.f < best.f)) best = r;
+      });
+      if (dim === 2) seeds = runs.filter((r) => r.f !== null).map((r) => r.p);
+      if (best) {
+        stage = `${dim}D: limits and mesh check`;
+        say(stage);
+        const names = ["front", "back", "curvature"];
+        let top = best;
+        for (let i = 0; i < 3; i++) for (const sg of [-1, 1]) {
+          const q = best.x.slice();
+          q[i] = best.x[i] + sg * 2 * o.tol;
+          const e = look(q);
+          if (e.kind === "solved") { if (e.v < top.f) top = { x: q, f: e.v }; continue; }
+          let w = e.kind === "skipped" ? e.why : e.kind;
+          if (e.kind === "outside") {
+            w = q[0] < lo0 ? (base ? "front limit" : "toe") : q[0] >= 1 ? "crest" : q[1] <= Math.max(q[0], 0) ? "exits meet"
+              : q[1] > hi1 ? "back limit" : q[2] > 1 ? "vertical back" : "flat";
+          }
+          res.edges.push({ param: names[i], side: sg, why: w });
+        }
+        best = top;
+        const s = searchSurface(inp, best.x);
+        Object.assign(res, { fos: best.f, p: best.x, xc: s.xc, zc: s.zc, R: s.R, front: s.front, back: s.back });
+        if (!base && s.R > s.zc) res.coverage = (s.front[0] - s.back[0]) / ((s.xc - Math.sqrt(s.R * s.R - s.zc * s.zc)) - (s.xc - s.R));
+        const n = dim === 3 ? Math.min(2 * inp.n3, 320) : Math.min(4 * inp.n2, 10000);
+        const ck = solveAt(dim, dim === 3 ? { xc: s.xc, zc: s.zc, R: s.R, n3: n } : { xc: s.xc, zc: s.zc, R: s.R, n2: n });
+        res.check = { n, fos: ck.fos, status: ck.status, reason: ck.reason, change: ck.fos !== null ? (ck.fos - best.f) / ck.fos : null };
+      }
+      res.evaluations = counts.solved + counts.withheld + counts.skipped;
+      res.ms = Date.now() - td;
+      out["r" + dim] = res;
+      done = stageEnd[dim];
+      say(`${dim}D: done`);
+    }
+    out.ms = Date.now() - t0;
+    return out;
+  }
+
   const api = { GAMMA_W, MODELS, REASONS, ITERATIONS, OK, SHEAR, NO_STATE, DOMAIN, hoekBrownParameters, makeStrength,
     closureConstants, principalState, scanSigma3, admissibleSnMin, solveStrength, originalClosureMinimum,
     DEFAULT_INPUTS, inputs, hb, strengthOf, groundZ, waterZ, sphereZ, slipExtent, buildMesh, projectionLimit, solve,
-    run3d, run2d, run, gravityCap, columnForces, massForces, sum, fmtG, DEG, RAD };
+    run3d, run2d, run, gravityCap, columnForces, massForces, SEARCH, groundAt, circleFromExits, searchSurface,
+    singleMass, nelderMead, criticalSearch, sum, fmtG, DEG, RAD };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   root.EJC = api;
 })(typeof window !== "undefined" ? window : globalThis);

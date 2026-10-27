@@ -17,8 +17,8 @@ Limitations page.
 cd ejc_app
 pip install -r requirements.txt
 streamlit run app.py              # opens http://localhost:8501
-pytest                            # about 90 s, includes the fine-mesh runs
-pytest -m "not slow"              # skips the fine-mesh runs
+pytest                            # about 3 minutes, includes the fine-mesh runs and a search
+pytest -m "not slow"              # skips the fine-mesh runs and that search
 python verification.py --slow     # the verification table as Markdown
 ```
 
@@ -34,7 +34,7 @@ Nothing in this folder deploys it to a public host.
      a quarter of the bases (thesis §5.8);
    - PASS/FAIL for every final check, with the largest residuals;
    - CSV downloads of the column and slice results;
-   - studies: a mesh study (eq. 4.17) and a ν sweep.
+   - studies: a critical-surface search (below), a mesh study (eq. 4.17) and a ν sweep.
 
    Updates live for N ≤ 40; for larger N press **Run**. With the original closure selected, the page shows the
    admissibility check instead of a FoS.
@@ -56,6 +56,53 @@ Nothing in this folder deploys it to a public host.
    and GHB, plus the Mohr circle, tangent and envelope at a chosen σ_n.
 6. **Limitations.**
 7. **Verification.** Runs every target in one go and shows target, computed value, difference and PASS/FAIL.
+
+## Critical-surface search
+
+QA/QC finding R1: the thesis's main sphere is not the critical surface. The Calculator's **Critical surface (search)**
+study (`engine.critical_search`, also in the web app) finds the circle (2D, Bishop) and the sphere centred on y = 0
+(3D, Hungr) with the lowest accepted FoS for the current inputs, mesh and grid option.
+
+- **Surfaces tried.** Each surface is set by its front exit on the ground (the toe or the face; with the base-circle
+  option also the pit floor, up to 2 H ahead of the toe), its back exit (the face or the crest, up to 2 H behind the
+  crest edge) and the curvature of the arc between them. The arc meets the ground at both exits, so the mass never
+  has a vertical back face. A circle whose centre lies below the ground at its back extreme x_c − R would have one:
+  the engine accepts such a circle as a prescribed surface and gives the mass a back face that carries no force, as
+  a tension crack would (for Taylor's 75° slope, a circle with a 2.8 m face gives 1.6245 against 1.6906 for the
+  critical circle). The search reports this for the prescribed surface and does not try such circles.
+- **Skipped surfaces.** A surface is skipped when the grid option cannot analyse it: the default grid refuses it, or
+  its mass covers less than half of the default grid's span from x_c − R to the toe-level crossing, or (base-circle
+  option) the ground is not above it over one interval. With the coverage rule, nearly flat circles resolved by a
+  few slices are not tried: on Taylor's 60° slope a circle with R = 994 m, cut by one of 40 slices, gives 1.34 (2.55
+  on 640 slices), against 1.94 for the critical circle. A result that is not ACCEPTED is withheld and does not count.
+- **Method.** 2D: a grid of 4 × 9 × 4 = 144 starting circles (6 × 9 × 4 with the base-circle option), then
+  Nelder–Mead from the two best grid circles that are not neighbours, each restarted from its minimum until it stops
+  improving. 3D: Nelder–Mead from the 2D minima. The critical surface is the lowest accepted FoS among the surfaces
+  tried. The result names any limit the surface lies on (a domain limit to widen, the steepest arc, the coverage rule,
+  the default grid's limit) and re-solves it on a finer mesh (4 × N_2D slices, 2N × 2N columns), with a warning when
+  the FoS changes by more than the 0.5 % screening threshold of eq. 4.17.
+- **Mesh dependence.** The search minimises the FoS on the current mesh, so it favours surfaces whose FoS the mesh
+  underestimates. On Taylor's 75° slope (φ = 0) with 40 slices it reports 1.6925, on a circle that gives 1.7503 on
+  160 slices, and the mesh check warns; with 640 slices it reports 1.6889, against the exact 1.6906. On a 20 × 20
+  mesh the 3D FoS changes in steps of a few tenths of a percent as columns enter or leave the mass, so searches from
+  different starts can stop at FoS that differ by that much. Check the critical surface with the mesh check or a
+  mesh study.
+- **Results on the thesis slope** (40 slices and 20 × 20 columns; the main sphere in brackets; mesh check change):
+
+  | Case | 2D critical FoS | 3D critical FoS |
+  |---|---|---|
+  | EJC dry | 2.1186 (2.4479), +0.3 % | 2.2600 (2.7060), +0.4 % |
+  | EJC wet | 0.9929 (1.0981), +0.9 % | 1.0770 (1.2723), +1.8 % |
+  | GHB dry | 2.0002 (2.3103), +0.3 % | 2.1359 (2.5537), +0.2 % |
+  | GHB wet | 0.9369 (1.0359), +0.8 % | 1.0214 (1.2001), +1.1 % |
+
+  The GHB dry circle's exits lie within 2 m of those of the Carranza-Torres & Hormazábal critical circle (FoS 2.01);
+  the centres differ by 33 m, as circles through nearly the same exits differ only in curvature. The wet cases exceed
+  the 0.5 % threshold on the finer mesh, so their critical FoS need a finer search mesh.
+- **Time.** In the web app about 7 s (dry) to 17 s (wet) for 2D, and 17 to 37 s more for 3D. This engine is about
+  20 times slower: a 2D search on the thesis slope takes about 1.5 minutes with GHB and 2.5 minutes with the EJC
+  (dry), longer when wet.
+- **Use this surface** makes the critical circle or sphere the prescribed surface and reruns the analysis.
 
 ## Presets
 
@@ -234,7 +281,8 @@ INFO rows are reference values, never targets:
 
 ## Known limitations
 
-- The surface is prescribed (spherical, symmetric); there is no critical-surface search.
+- Each analysis uses a prescribed sphere, symmetric about y = 0. The critical-surface search tries only circles
+  and spheres centred on y = 0; it is a local search on the current mesh, not a proof of the global minimum.
 - σ2 is imposed by the closure rather than solved from a 3D stress field, and ν is inherited, not measured.
 - Hungr's simplified method neglects vertical intercolumn shear and does not satisfy all force and moment
   conditions. F_H and F_M differ by about 0.14–0.27 %.

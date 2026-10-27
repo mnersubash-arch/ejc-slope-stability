@@ -280,6 +280,13 @@ def _cached_scan(st: Strength, span_exp: int, n_scan: int) -> tuple[np.ndarray, 
     return scan_sigma3(st, st.sigma3_tensile + 2.0 ** span_exp, n_scan)
 
 
+@lru_cache(maxsize=64)
+def _cached_pieces(st: Strength, span_exp: int, n_scan: int) -> tuple[tuple[int, int], ...]:
+    """The monotone pieces of that scan (``_monotone_pieces``), reused with it."""
+    _, gs = _cached_scan(st, span_exp, n_scan)
+    return tuple(_monotone_pieces(gs.code == OK, gs.sn))
+
+
 def admissible_sn_min(st: Strength, top: Optional[float] = None) -> float:
     """Lowest sigma_n [kPa] of any admissible state found by the sigma3 scan (NaN if none)."""
     top = 10.0 * st.sigma_ci if top is None else top
@@ -331,8 +338,7 @@ def solve_strength(sn_kpa, st: Strength, n_scan: int = N_SCAN) -> StrengthResult
     if cand.any():
         span_exp = int(math.ceil(math.log2(float(t[cand].max()) - s3t)))
         grid, gs = _cached_scan(st, span_exp, n_scan)
-        gok = gs.code == OK
-        for i0, i1 in _monotone_pieces(gok, gs.sn):
+        for i0, i1 in _cached_pieces(st, span_exp, n_scan):
             v = gs.sn[i0:i1 + 1]
             inc = v[-1] >= v[0]
             w = v if inc else v[::-1]
@@ -1043,3 +1049,319 @@ def mass_forces(inp: Inputs, r: LemResult) -> dict:
             "vertical_max_rel": float(np.max(np.abs(vert) / W)) if m.count else 0.0,
             "el": {"x": m.x, "y": m.y, "zb": m.zb, "zm": (m.zb + m.zt) / 2, "W": W, "N": N, "U": U, "S": S, "nx": nx,
                    "ny": ny, "nz": nz, "sx": sx, "sz": sz}}
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# critical-surface search (QA/QC finding R1)
+# ---------------------------------------------------------------------------------------------------------------
+SEARCH = {"back": 2.0, "front": 2.0, "grid": (4, 9, 4), "grid_base": (6, 9, 4), "starts": 2, "tol": 1e-3,
+          "max_eval": 100, "restarts": 2, "coverage": 0.5}
+"""Settings of critical_search: limits of the exits (multiples of H behind the crest edge, and ahead of the toe for
+base circles), grid of starting surfaces (front exit x back exit x curvature; grid_base with the base-circle option),
+Nelder-Mead starts, tolerance on the normalised parameters, evaluations per run, restarts, and the least share of the
+default grid's span that the mass must cover. Same as SEARCH in webapp/engine.js."""
+
+
+def ground_at(s: float, H: float, tan_b: float) -> tuple[float, float]:
+    """Point of the ground surface at s (m): s <= 0 on the pit floor ahead of the toe (x = -s), 0 < s <= H up the face
+    by height (z = s), s > H on the crest at s - H behind the crest edge."""
+    if s <= 0:
+        return (-s, 0.0)
+    if s <= H:
+        return (-s / tan_b, s)
+    return (-H / tan_b - (s - H), H)
+
+
+def circle_from_exits(pf, pb, t: float) -> dict:
+    """Circle through the front exit pf and the back exit pb (x_b < x_f, z_b >= z_f) whose lower arc joins them. The
+    centre lies on the chord's perpendicular bisector, d = (c/2)(dz/dx + 1/t - 1) above the chord's midpoint, so that
+    z_c - z_b = (1/t - 1) dx/2: t = 1 makes the arc vertical at pb, t -> 0 flattens it towards the chord. For t <= 1
+    the arc meets the ground at pb before its back extreme x_c - R, so the mass has no vertical back face."""
+    dx = pf[0] - pb[0]
+    dz = pb[1] - pf[1]
+    c = math.sqrt(dx * dx + dz * dz)
+    h = c / 2
+    d = h * (dz / dx + 1 / t - 1)
+    return {"xc": (pf[0] + pb[0]) / 2 + d * dz / c, "zc": (pf[1] + pb[1]) / 2 + d * dx / c, "R": math.sqrt(h * h + d * d)}
+
+
+def search_surface(inp: Inputs, p) -> dict:
+    """The surface of search parameters p = (a, b, t): front exit at s = aH, back exit at s = bH (ground_at),
+    curvature t (circle_from_exits)."""
+    H, tan_b = inp.H, math.tan(math.radians(inp.beta))
+    front, back = ground_at(p[0] * H, H, tan_b), ground_at(p[1] * H, H, tan_b)
+    return {**circle_from_exits(front, back, p[2]), "front": front, "back": back}
+
+
+def single_mass(inp: Inputs) -> bool:
+    """True if the ground is above the circle on y = 0 over one interval that ends inside (x_c - R, x_c + R), sampled
+    as slip_extent samples it: one sliding mass, with no vertical face at the circle's extremes (base-circle grid)."""
+    xs = np.linspace(inp.xc - inp.R, inp.xc + inp.R, 20001)
+    with np.errstate(invalid="ignore"):
+        d = ground_z(xs, inp.H, inp.beta) - sphere_z(xs, 0.0, inp.xc, inp.zc, inp.R)
+    on = np.isfinite(d) & (d > 0)
+    runs = int(on[0]) + int(np.count_nonzero(on[1:] & ~on[:-1]))
+    return runs == 1 and not on[0] and not on[-1]
+
+
+def _nelder_mead(f, x0, step, tol: float, max_eval: int):
+    """Nelder-Mead (reflection 1, expansion 2, contractions 1/2, shrink 1/2) from x0 and x0 + step_i e_i, stopped when
+    every vertex lies within tol of the best in every parameter or after max_eval calls; ties go to the lower index.
+    Same as nelderMead in webapp/engine.js."""
+    n = len(x0)
+    pts = [list(x0)]
+    for i in range(n):
+        p = list(x0)
+        p[i] = x0[i] + step[i]
+        pts.append(p)
+    vals = [f(p) for p in pts]
+    evals = n + 1
+    while evals < max_eval:
+        idx = sorted(range(n + 1), key=lambda i: (vals[i], i))
+        pts = [pts[i] for i in idx]
+        vals = [vals[i] for i in idx]
+        spread = 0.0
+        for i in range(1, n + 1):
+            for j in range(n):
+                spread = max(spread, abs(pts[i][j] - pts[0][j]))
+        if spread < tol:
+            break
+        c = []
+        for j in range(n):
+            s = 0.0
+            for i in range(n):
+                s += pts[i][j]
+            c.append(s / n)
+        worst = pts[n]
+
+        def at(t, c=c, worst=worst):
+            return [c[j] + t * (worst[j] - c[j]) for j in range(n)]
+
+        xr = at(-1)
+        fr = f(xr)
+        evals += 1
+        if fr < vals[0]:
+            xe = at(-2)
+            fe = f(xe)
+            evals += 1
+            if fe < fr:
+                pts[n], vals[n] = xe, fe
+            else:
+                pts[n], vals[n] = xr, fr
+        elif fr < vals[n - 1]:
+            pts[n], vals[n] = xr, fr
+        else:
+            outside = fr < vals[n]
+            xk = at(-0.5 if outside else 0.5)
+            fk = f(xk)
+            evals += 1
+            if (fk <= fr) if outside else (fk < vals[n]):
+                pts[n], vals[n] = xk, fk
+            else:
+                for i in range(1, n + 1):
+                    pts[i] = [pts[0][j] + 0.5 * (pts[i][j] - pts[0][j]) for j in range(n)]
+                    vals[i] = f(pts[i])
+                    evals += 1
+    b = 0
+    for i in range(1, n + 1):
+        if vals[i] < vals[b]:
+            b = i
+    return pts[b], vals[b]
+
+
+def critical_search(inp: Inputs, dims=(2,), progress=None, **opts) -> dict:
+    """Critical-surface search: the lowest accepted FoS over circles (2D, Bishop) and spheres centred on y = 0 (3D,
+    Hungr) that leave the ground at a front exit (the toe or the face; with the base-circle option also the pit
+    floor, up to front H ahead of the toe) and a back exit (face or crest, up to back H behind the crest edge), with
+    the lower arc between them (circle_from_exits, so no vertical back face). Each surface is solved with the current
+    inputs, mesh and grid option; it is skipped when the grid option cannot analyse it (the default grid refuses it,
+    or its mass covers less than ``coverage`` of the default grid's span from x_c - R to the toe-level crossing, so
+    that few slices or columns resolve it; with the base-circle option, the ground is not above it over one
+    interval), and a result that is not ACCEPTED is withheld. 2D: a grid of starting surfaces (front exit x back exit
+    x curvature), then Nelder-Mead from the ``starts`` best grid surfaces that are not neighbours, each restarted from
+    its minimum with half the initial step until it stops improving. 3D: Nelder-Mead from the 2D minima. Then each
+    critical surface is probed one step 2 tol along every parameter (to name the limits it lies on) and re-solved on a
+    finer mesh. A local search: the lowest FoS among the surfaces tried, not a proof of the global minimum.
+
+    ``progress(done, total, label)`` is called as the search advances. Same as criticalSearch in webapp/engine.js;
+    the result has the same keys.
+    """
+    import time
+
+    o = {**SEARCH, **opts}
+    dims = list(dims)
+    t0 = time.perf_counter()
+    H, base = inp.H, bool(inp.base_circle)
+    na, nb, nt = o["grid_base"] if base else o["grid"]
+    lo0 = -o["front"] if base else 0
+    hi1 = 1 + o["back"]
+    sp = [(1 - lo0) / na, hi1 / nb, 1 / nt]
+    step = [v / 2 for v in sp]
+    local = o["max_eval"] * (1 + o["restarts"])
+    budget = {2: na * nb * nt + o["starts"] * local + 8, 3: o["starts"] * local + 8}
+    total = sum(budget[d] for d in dims)
+    state = {"done": 0, "stage": ""}
+
+    def say(label):
+        if progress:
+            progress(min(state["done"], total), total, label)
+
+    vertical = max(0.0, float(ground_z(inp.xc - inp.R, H, inp.beta)) - inp.zc)
+    out = {"settings": {"back": o["back"], "front": o["front"], "grid": [na, nb, nt], "starts": o["starts"],
+                        "tol": o["tol"], "max_eval": o["max_eval"], "restarts": o["restarts"],
+                        "coverage": o["coverage"], "dims": list(dims), "base_circle": base},
+           "domain": {"front": [lo0, 1], "back": [0, hi1], "curvature": [0, 1]},
+           "prescribed": {"xc": inp.xc, "zc": inp.zc, "R": inp.R, "vertical_back": vertical},
+           "r2": None, "r3": None, "ms": 0}
+
+    def solve_at(dim, **kw):
+        try:
+            r = (run_3d if dim == 3 else run_2d)(inp.with_(**kw))
+            return {"fos": r.fos, "status": r.status, "reason": "" if r.fos is not None else r.reason}
+        except Exception as e:                    # as the web app's jobs, which report any error as an input error
+            return {"fos": None, "status": "INPUT ERROR", "reason": str(e)}
+
+    for dim in dims:
+        pr = solve_at(dim)
+        out["prescribed"][f"fos{dim}"] = pr["fos"]
+        out["prescribed"][f"status{dim}"] = pr["status"]
+        out["prescribed"][f"reason{dim}"] = pr["reason"]
+    stage_end = {2: budget[2], 3: (budget[2] if 2 in dims else 0) + budget[3]}
+    seeds = None
+    inf = math.inf
+    for dim in dims:
+        td = time.perf_counter()
+        cache = {}
+        counts = {"solved": 0, "withheld": 0, "skipped": 0}
+        why = {"coverage": 0, "masses": 0, "grid": 0}
+        cloud = {"xc": [], "zc": [], "R": [], "fos": []}
+
+        def evaluate(p, dim=dim, counts=counts, why=why, cloud=cloud):
+            a, b, t = p
+            if not (lo0 <= a < 1 and max(a, 0) < b <= hi1 and 0 < t <= 1):
+                return {"v": inf, "kind": "outside"}
+            s = search_surface(inp, p)
+            kw = {"xc": s["xc"], "zc": s["zc"], "R": s["R"]}
+            skip = None
+            if base:
+                if not single_mass(inp.with_(**kw)):
+                    skip = "masses"
+            elif s["R"] > s["zc"]:
+                span = (s["xc"] - math.sqrt(s["R"] * s["R"] - s["zc"] * s["zc"])) - (s["xc"] - s["R"])
+                if s["front"][0] - s["back"][0] < o["coverage"] * span:
+                    skip = "coverage"
+            if skip:
+                e = {"v": inf, "kind": "skipped", "why": skip}
+            else:
+                r = solve_at(dim, **kw)
+                if r["status"] == "INPUT ERROR":
+                    e = {"v": inf, "kind": "skipped", "why": "grid"}
+                elif r["fos"] is None:
+                    e = {"v": inf, "kind": "withheld"}
+                else:
+                    e = {"v": r["fos"], "kind": "solved"}
+            counts[e["kind"]] += 1
+            if e["kind"] == "skipped":
+                why[e["why"]] += 1
+            for k in ("xc", "zc", "R"):
+                cloud[k].append(s[k])
+            cloud["fos"].append(e["v"] if e["kind"] == "solved" else None)
+            state["done"] += 1
+            if progress and state["done"] % 5 == 0:
+                say(state["stage"])
+            return e
+
+        def look(p, cache=cache, evaluate=evaluate):
+            key = tuple(p)
+            e = cache.get(key)
+            if e is None:
+                e = evaluate(p)
+                cache[key] = e
+            return e
+
+        def f(p, look=look):
+            return look(p)["v"]
+
+        runs = []
+        res = {"dim": dim, "fos": None, "message": "", "runs": runs, "counts": counts, "skipped_why": why,
+               "evaluations": 0, "edges": [], "check": None, "cloud": cloud}
+        starts = []
+        if dim == 2:
+            state["stage"] = "2D: grid of starting surfaces"
+            cells = []
+            for i in range(na):
+                for j in range(1, nb + 1):
+                    for k in range(nt):
+                        p = [lo0 + sp[0] * i, sp[1] * j, sp[2] * (k + 0.5)]
+                        cells.append({"p": p, "ijk": (i, j, k), "v": f(p)})
+            for i in sorted(range(len(cells)), key=lambda q: (cells[q]["v"], q)):
+                if not cells[i]["v"] < inf or len(starts) >= o["starts"]:
+                    break
+                ijk = cells[i]["ijk"]
+                if any(max(abs(c["ijk"][0] - ijk[0]), abs(c["ijk"][1] - ijk[1]), abs(c["ijk"][2] - ijk[2])) < 2
+                       for c in starts):
+                    continue
+                starts.append({"p": cells[i]["p"], "ijk": ijk, "v": cells[i]["v"]})
+            state["done"] = max(state["done"], na * nb * nt)
+            if not starts:
+                res["message"] = "No surface of the starting grid gave an accepted FoS."
+        elif seeds:
+            starts = [{"p": p, "v": f(p)} for p in seeds]
+        else:
+            res["message"] = "The 2D search found no critical circle to start the 3D search from."
+        best = None
+        for q, c in enumerate(starts):
+            state["stage"] = f"{dim}D: Nelder–Mead from start {q + 1} of {len(starts)}"
+            say(state["stage"])
+            start_done = state["done"]
+            x, fx = _nelder_mead(f, c["p"], step, o["tol"], o["max_eval"])
+            for _ in range(o["restarts"]):
+                x2, f2 = _nelder_mead(f, x, [v / 2 for v in step], o["tol"], o["max_eval"])
+                if not f2 < fx:
+                    break
+                x, fx = x2, f2
+            state["done"] = max(state["done"], start_done + local)
+            runs.append({"p0": c["p"], "f0": c["v"] if c["v"] < inf else None, "p": x, "f": fx if fx < inf else None})
+            if fx < inf and (best is None or fx < best[1]):
+                best = (x, fx)
+        if dim == 2:
+            seeds = [r["p"] for r in runs if r["f"] is not None]
+        if best is not None:
+            state["stage"] = f"{dim}D: limits and mesh check"
+            say(state["stage"])
+            names = ("front", "back", "curvature")
+            top = best
+            for i in range(3):
+                for sg in (-1, 1):
+                    q = list(best[0])
+                    q[i] = best[0][i] + sg * 2 * o["tol"]
+                    e = look(q)
+                    if e["kind"] == "solved":
+                        if e["v"] < top[1]:
+                            top = (q, e["v"])
+                        continue
+                    w = e["why"] if e["kind"] == "skipped" else e["kind"]
+                    if e["kind"] == "outside":
+                        w = (("front limit" if base else "toe") if q[0] < lo0 else "crest" if q[0] >= 1
+                             else "exits meet" if q[1] <= max(q[0], 0) else "back limit" if q[1] > hi1
+                             else "vertical back" if q[2] > 1 else "flat")
+                    res["edges"].append({"param": names[i], "side": sg, "why": w})
+            best = top
+            s = search_surface(inp, best[0])
+            res.update({"fos": best[1], "p": best[0], "xc": s["xc"], "zc": s["zc"], "R": s["R"], "front": s["front"],
+                        "back": s["back"]})
+            if not base and s["R"] > s["zc"]:
+                res["coverage"] = (s["front"][0] - s["back"][0]) / (
+                    (s["xc"] - math.sqrt(s["R"] * s["R"] - s["zc"] * s["zc"])) - (s["xc"] - s["R"]))
+            n = min(2 * inp.n3, 320) if dim == 3 else min(4 * inp.n2, 10000)
+            kw = {"xc": s["xc"], "zc": s["zc"], "R": s["R"], ("n3" if dim == 3 else "n2"): n}
+            ck = solve_at(dim, **kw)
+            res["check"] = {"n": n, "fos": ck["fos"], "status": ck["status"], "reason": ck["reason"],
+                            "change": (ck["fos"] - best[1]) / ck["fos"] if ck["fos"] is not None else None}
+        res["evaluations"] = counts["solved"] + counts["withheld"] + counts["skipped"]
+        res["ms"] = (time.perf_counter() - td) * 1000.0
+        out[f"r{dim}"] = res
+        state["done"] = stage_end[dim]
+        say(f"{dim}D: done")
+    out["ms"] = (time.perf_counter() - t0) * 1000.0
+    return out

@@ -51,12 +51,74 @@ def original_closure_panel(inp: E.Inputs):
     st.info(verdict + " Ordering requires σ3/(2ν) ≤ σ1 ≤ σ3(1 − ν)/ν, and the EJC requires σ1 − σ3 ≥ σ_ci Q^a.")
 
 
+def search_panel(inp: E.Inputs):
+    """Critical-surface search (engine.critical_search; QA/QC finding R1), as the web app's Studies panel."""
+    st.write("Finds the circle (2D) and the sphere centred on y = 0 (3D) with the lowest accepted FoS for the current "
+             "inputs, mesh and grid option. The search tries surfaces that leave the ground at a front exit (the toe or "
+             "the face; with the base-circle option also the pit floor) and at a back exit (the face or the crest), and "
+             "that meet the ground at both exits, so the mass has no vertical back face.")
+    c1, c2, c3 = st.columns(3)
+    back = c1.number_input("Back exit up to (× H behind the crest)", 0.25, 10.0, E.SEARCH["back"], 0.25, key="srch_back")
+    front = c2.number_input("Front exit up to (× H ahead of the toe)", 0.25, 10.0, E.SEARCH["front"], 0.25,
+                            key="srch_front", disabled=not inp.base_circle,
+                            help="Base-circle option only: with the default grid the front exit is the toe or the face.")
+    with3d = c3.checkbox("Include 3D (slower: it starts from the 2D minima)", key="srch_3d")
+    st.caption("This engine takes about 0.1 to 1 s per surface (Hoek-Brown and EJC; Mohr-Coulomb is faster), and a 2D "
+               "search tries about 500 to 700 surfaces, so it takes minutes; 3D adds about 300 more. Keep this page "
+               "open while it runs. The web app (webapp/) runs the same search, with the same results, about 15 times "
+               "faster.")
+    if st.button("Search", type="primary", key="srch_run"):
+        bar = st.progress(0.0, text="Searching…")
+
+        def progress(done, total, label):
+            bar.progress(min(done / total, 1.0), text=f"{label}… ({done} of about {total} surfaces)")
+
+        res = E.critical_search(inp, dims=(2, 3) if with3d else (2,), progress=progress, back=back, front=front)
+        bar.empty()
+        st.session_state.search = {"inputs": inp, "res": res}
+    found = st.session_state.get("search")
+    if not found:
+        return
+    res, searched = found["res"], found["inputs"]
+    dims = res["settings"]["dims"]
+    st.write(f"Finished in {res['ms'] / 1000:.1f} s: "
+             + ", ".join(f"{res[f'r{d}']['evaluations']} surfaces in {d}D" for d in dims) + ".")
+    st.dataframe(pd.DataFrame(P.search_rows(searched, res)), hide_index=True, width="stretch")
+    cols = st.columns(len(dims))
+    for col, d in zip(cols, dims):
+        r = res[f"r{d}"]
+        if r["fos"] is not None:
+            col.button(f"Use this {'circle' if d == 2 else 'sphere'} ({d}D)", key=f"srch_use{d}", on_click=ui.use_surface,
+                       args=(r["xc"], r["zc"], r["R"]), disabled=not ui.surface_in_limits(r), width="stretch")
+    pr = res["prescribed"]
+    if len(dims) == 2 and all(res[f"r{d}"]["fos"] is not None for d in dims) and pr.get("fos2") and pr.get("fos3"):
+        st.write(f"3D/2D ratio: **{pr['fos3'] / pr['fos2']:.3f}** on the prescribed surface, "
+                 f"**{res['r3']['fos'] / res['r2']['fos']:.3f}** on the critical surfaces (the 2D circle and the 3D "
+                 "sphere each with its own lowest FoS).")
+    for kind, text in ui.search_notes(inp, searched, res):
+        (st.warning if kind == "warning" else st.info)(text)
+    st.plotly_chart(P.search_figure(searched, res), width="stretch", key="search_fig")
+    s = res["settings"]
+    n_grid = s["grid"][0] * s["grid"][1] * s["grid"][2]
+    st.caption(f"2D: a grid of {' × '.join(str(v) for v in s['grid'])} = {n_grid} starting circles (front exit × back "
+               f"exit × curvature), then Nelder–Mead from the {s['starts']} best that are not neighbours, each restarted "
+               "until it stops improving." + (" 3D: Nelder–Mead from the 2D minima." if 3 in dims else "")
+               + " The critical surface is the lowest accepted FoS among the surfaces tried: a local search, not a proof "
+               "of the global minimum. Withheld results and surfaces the grid option cannot analyse are skipped. Every "
+               f"surface is solved on the current mesh ({searched.n2} slices, {searched.n3} × {searched.n3} columns); "
+               "the mesh check re-solves the critical surface on a finer one. On a coarse 3D mesh the FoS changes in "
+               "small steps as columns enter or leave the mass, so searches from different starts can stop at FoS that "
+               "differ by a few tenths of a percent.")
+
+
 if inp.model == "ejc_original":
     original_closure_panel(inp)
     st.stop()
 
 A, stale = ui.analysis(inp)
 if A is None:
+    st.subheader("Critical surface (search)")
+    search_panel(inp)
     st.stop()
 r3, r2 = A.r3, A.r2
 
@@ -124,7 +186,10 @@ with st.expander("Show the 3D column table"):
 
 # ---- studies
 st.subheader("Studies")
-tab_mesh, tab_nu = st.tabs(["Mesh study (eq. 4.17)", "ν sweep (Moscarda closure)"])
+tab_search, tab_mesh, tab_nu = st.tabs(["Critical surface (search)", "Mesh study (eq. 4.17)",
+                                        "ν sweep (Moscarda closure)"])
+with tab_search:
+    search_panel(inp)
 with tab_mesh:
     base = A.inputs
     c1, c2 = st.columns(2)

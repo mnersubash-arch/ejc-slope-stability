@@ -632,6 +632,141 @@ def mass_balance(mf: dict) -> list[str]:
 
 
 # ---------------------------------------------------------------------------------------------------------------
+# page 1: critical-surface search (engine.critical_search; QA/QC finding R1)
+# ---------------------------------------------------------------------------------------------------------------
+SEARCH_RAMP = ["#0d366b", "#104281", "#184f95", "#1c5cab", "#256abf", "#2a78d6", "#3987e5", "#5598e7", "#6da7ec",
+               "#86b6ef", "#9ec5f4", "#b7d3f6", "#cde2fb"]          # the web app's blue ramp, darkest = lowest FoS
+CRITICAL_3D = "#1f77b4"
+
+
+def _f2(v: float) -> str:
+    return "0.00" if abs(v) < 0.005 else f"{v:.2f}"
+
+
+def _exit_text(inp: E.Inputs, p) -> str:
+    crest = -inp.H / math.tan(math.radians(inp.beta))
+    where = ("toe" if abs(p[0]) < 0.005 and abs(p[1]) < 0.005 else f"crest, {_f2(crest - p[0])} m behind the edge"
+             if p[1] >= inp.H else "face" if p[1] > 0 else f"floor, {_f2(p[0])} m ahead of the toe")
+    return f"({_f2(p[0])}, {_f2(p[1])}) {where}"
+
+
+def _pct(a, b) -> str:
+    if a is None or b is None:
+        return "–"
+    return f"{'+' if a >= b else '−'}{abs((a / b - 1) * 100):.1f} %"
+
+
+def search_rows(inp: E.Inputs, res: dict) -> list[dict]:
+    """The search results as table rows (as the web app's search table): FoS on the prescribed and the critical
+    surface, the change, the critical circle and its exits, the mesh check and the surfaces tried."""
+    P, dims = res["prescribed"], res["settings"]["dims"]
+    cols = {2: "2D, Bishop", 3: "3D, Hungr"}
+
+    def mesh(d, n):
+        return f"{n} x {n}" if d == 3 else f"{n} slices"
+
+    def fos_or_status(v, s):
+        return f"{v:.6f}" if v is not None else (s or "withheld")
+
+    def cell(d, what):
+        r = res[f"r{d}"]
+        found = r["fos"] is not None
+        if what == "prescribed":
+            return fos_or_status(P.get(f"fos{d}"), P.get(f"status{d}"))
+        if what == "critical":
+            return f"{r['fos']:.6f}" if found else "none found"
+        if what == "change":
+            return _pct(r["fos"], P.get(f"fos{d}")) if found else "–"
+        if what == "circle":
+            return f"{r['xc']:.3f}, {r['zc']:.3f}, {r['R']:.3f}" if found else "–"
+        if what in ("front", "back"):
+            return _exit_text(inp, r[what]) if found else "–"
+        if what == "check":
+            c = r["check"]
+            if not c:
+                return "–"
+            return (f"{mesh(d, c['n'])}: {fos_or_status(c['fos'], c['status'])}"
+                    + (f" ({_pct(c['fos'], r['fos'])})" if c["change"] is not None else ""))
+        if what == "tried":
+            n = r["counts"]
+            return f"{r['evaluations']}: {n['solved']} solved, {n['withheld']} withheld, {n['skipped']} skipped"
+        return f"{r['ms'] / 1000:.1f} s"
+
+    labels = [("prescribed", "FoS on the prescribed surface"), ("critical", "FoS on the critical surface"),
+              ("change", "Change"), ("circle", "x_c, z_c, R (m)"), ("front", "Front exit (x, z) (m)"),
+              ("back", "Back exit (x, z) (m)"), ("check", "Mesh check (finer mesh)"), ("tried", "Surfaces tried"),
+              ("time", "Time")]
+    return [{"": lab, **{cols[d]: cell(d, what) for d in dims}} for what, lab in labels]
+
+
+def search_figure(inp: E.Inputs, res: dict) -> go.Figure:
+    """The prescribed surface, the 2D critical circle and the 3D critical sphere's section y = 0 on the slope, with the
+    centres of the circles the 2D search tried, coloured by their FoS (as the web app's search chart)."""
+    P = res["prescribed"]
+    crest = -inp.H / math.tan(math.radians(inp.beta))
+    surfs = [("prescribed surface", P, "#7f7f7f", "dash")]
+    for d, name, col in ((2, "2D critical circle", SLIP), (3, "3D critical sphere, section y = 0", CRITICAL_3D)):
+        r = res.get(f"r{d}")
+        if r and r["fos"] is not None:
+            surfs.append((name, r, col, "solid"))
+    xs, zs, arcs = [crest, 0.0], [0.0, inp.H], []
+    for name, c, col, dash in surfs:
+        x = np.linspace(c["xc"] - c["R"], c["xc"] + c["R"], 1601)
+        z = E.sphere_z(x, 0.0, c["xc"], c["zc"], c["R"])
+        with np.errstate(invalid="ignore"):
+            ok = np.isfinite(z) & (z < E.ground_z(x, inp.H, inp.beta)) & ((x <= 0) | inp.base_circle)
+        xs += list(x[ok]) + [c["xc"]]
+        zs += list(z[ok]) + [c["zc"]]
+        arcs.append(go.Scatter(x=x, y=np.where(ok, z, np.nan), mode="lines", name=name, hoverinfo="skip",
+                               line=dict(color=col, width=2 if c is P else 3, dash=dash)))
+    xa, xb, za, zb = min(xs), max(xs), min(zs), max(zs)
+    pad = 0.08 * max(xb - xa, zb - za, inp.H)
+    gx = np.r_[xa - 3 * (xb - xa) - pad, np.linspace(min(xa - pad, crest - 1e-9), max(xb + pad, 1e-9), 600),
+               xb + 3 * (xb - xa) + pad]
+    gz = E.ground_z(gx, inp.H, inp.beta)
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=np.r_[gx, gx[::-1]], y=np.r_[gz, np.full(len(gx), za - 3 * (zb - za) - pad)],
+                             fill="toself", fillcolor=ROCK, line=dict(width=0), hoverinfo="skip", name="rock mass",
+                             showlegend=False))
+    fig.add_trace(go.Scatter(x=gx, y=gz, mode="lines", line=dict(color=GROUND, width=2), name="ground surface",
+                             hoverinfo="skip", showlegend=False))
+    for d, name in ((2, "centres tried (2D)"), (3, "centres tried (3D)")):
+        r = res.get(f"r{d}")
+        if not r:
+            continue
+        c = r["cloud"]
+        keep = [q for q, v in enumerate(c["fos"]) if v is not None]
+        text = [f"centre ({c['xc'][q]:.2f}, {c['zc'][q]:.2f}), R = {c['R'][q]:.2f} m<br>FoS {d}D {c['fos'][q]:.4f}"
+                for q in keep]
+        if d == 2:
+            best = r["fos"]
+            marker = dict(size=6, color=[c["fos"][q] for q in keep], colorscale=[[i / (len(SEARCH_RAMP) - 1), col]
+                                                                               for i, col in enumerate(SEARCH_RAMP)],
+                          cmin=best, cmax=1.5 * best if best is not None else None, line=dict(width=0.5, color="white"),
+                          colorbar=dict(title="FoS 2D", len=0.6))
+            fig.add_trace(go.Scatter(x=[c["xc"][q] for q in keep], y=[c["zc"][q] for q in keep], mode="markers",
+                                     name=name, marker=marker, text=text, hoverinfo="text"))
+        else:
+            fig.add_trace(go.Scatter(x=[c["xc"][q] for q in keep], y=[c["zc"][q] for q in keep], mode="markers",
+                                     name=name, visible="legendonly", text=text, hoverinfo="text",
+                                     marker=dict(size=6, color="rgba(0,0,0,0)", line=dict(width=1.2, color=CRITICAL_3D))))
+    for a in arcs:
+        fig.add_trace(a)
+    for name, c, col, _ in surfs:
+        fos = c.get("fos")
+        fig.add_trace(go.Scatter(x=[c["xc"]], y=[c["zc"]], mode="markers", showlegend=False, name=name,
+                                 marker=dict(symbol="x", size=9 if c is P else 11, color=col), hoverinfo="text",
+                                 hovertext=[f"{name}: centre ({c['xc']:.3f}, {c['zc']:.3f}), R = {c['R']:.3f} m"
+                                            + (f", FoS {fos:.4f}" if fos is not None else "")]))
+    fig.update_layout(xaxis_title="x (m), toe at 0, slope rises to -x", yaxis_title="z (m)",
+                      xaxis=dict(range=[xa - pad, xb + pad]),
+                      yaxis=dict(scaleanchor="x", scaleratio=1, range=[za - pad, zb + pad]), height=560,
+                      margin=dict(l=10, r=10, t=30, b=10), legend=dict(orientation="h", y=1.02, x=0),
+                      hovermode="closest")
+    return fig
+
+
+# ---------------------------------------------------------------------------------------------------------------
 # page 5: strength explorer
 # ---------------------------------------------------------------------------------------------------------------
 def strength_curves(sigma_ci, mb, s, a, nu, s3_max, n=1500) -> go.Figure:

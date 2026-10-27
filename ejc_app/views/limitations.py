@@ -6,8 +6,10 @@ import ui
 st.markdown(f"**{ui.DISCLAIMER}**")
 st.title("Limitations")
 st.markdown("""
-- **Prescribed surface.** The slip surface is a prescribed sphere, symmetric about y = 0. There is no
-  critical-surface search.
+- **Spherical surfaces only.** Each analysis uses a prescribed sphere, symmetric about y = 0. The Calculator's
+  critical-surface search looks for the lowest FoS among circles (2D) and spheres centred on y = 0 (3D) that meet
+  the ground at both exits. It is a local search on the current mesh, not a proof of the global minimum, and it
+  does not try non-spherical or asymmetric surfaces.
 - **σ2 is imposed, not solved.** σ2 comes from the closure, not from a 3D stress field, and ν is inherited, not
   measured.
 - **Hungr's simplified method** neglects vertical intercolumn shear and does not satisfy every force and moment

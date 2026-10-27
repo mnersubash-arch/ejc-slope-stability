@@ -1,7 +1,8 @@
 // Compare engine.js with the Python engine's reference results (reference.json from dump_reference.py).
 // Usage (from webapp/): python3 tools/dump_reference.py && node tools/verify_engine.js [tools/ref/reference.json]
 // Passes when every analysis matches: FoS and trial F to 1e-12 (relative), the same status, iteration count,
-// projection count, mesh and check results, sigma_n and tau_s arrays to 1e-9; strength fixtures to 1e-11.
+// projection count, mesh and check results, sigma_n and tau_s arrays to 1e-9; strength fixtures to 1e-11; the
+// critical-surface searches field by field (every surface tried, numbers to 1e-12).
 "use strict";
 const fs = require("fs");
 const path = require("path");
@@ -133,9 +134,57 @@ for (const x of ref.extents) {
 const hb = E.hoekBrownParameters(42, 10, 0);
 hb.forEach((v, k) => { if (rel(v, ref.hb[k]) > 1e-15) fail(`hb ${k}`); });
 
+// critical-surface searches: every field, the clouds of surfaces tried included; FoS and other numbers to 1e-12
+// (relative), lengths and search parameters to 1e-12 of H (V8's tan and the C library's can differ in the last bit, so
+// a coordinate near zero can differ by more than 1e-12 of itself)
+let searches = 0, surfaces = 0, worstLen = 0;
+const sameNum = (a, b) => rel(a === undefined ? null : a, b === undefined ? null : b) <= 1e-12;
+const sameArr = (a, b) => (a === undefined || a === null ? b === null || b === undefined
+  : !!b && a.length === b.length && a.every((x, k) => sameNum(x, b[k])));
+for (const s of ref.searches || []) {
+  const res = E.criticalSearch(inputsOf(s.inputs), Object.assign({ dims: s.dims }, s.opts));
+  const py = s.result, tag = `search ${s.name}`, H = s.inputs.H;
+  const sameLen = (a, b) => {
+    if (a === undefined || a === null || b === undefined || b === null) return (a === undefined || a === null) === (b === undefined || b === null);
+    const d = Math.abs(a - b) / H;
+    worstLen = Math.max(worstLen, d);
+    return d <= 1e-12;
+  };
+  const sameLens = (a, b) => (a === undefined || a === null ? b === null || b === undefined
+    : !!b && a.length === b.length && a.every((x, k) => sameLen(x, b[k])));
+  searches++;
+  for (const [k, pv] of Object.entries(py.prescribed)) {
+    const jv = res.prescribed[k];
+    if (typeof pv === "string" ? jv !== pv : !sameNum(jv, pv)) fail(`${tag}: prescribed ${k} js ${jv} py ${pv}`);
+  }
+  for (const k of ["back", "front", "starts", "tol", "max_eval", "restarts", "coverage", "base_circle"]) if (res.settings[k] !== py.settings[k]) fail(`${tag}: setting ${k}`);
+  if (res.settings.grid.join() !== py.settings.grid.join()) fail(`${tag}: grid`);
+  for (const d of s.dims) {
+    const j = res["r" + d], p = py["r" + d], t = `${tag} ${d}D`;
+    surfaces += p.evaluations;
+    for (const k of ["fos", "coverage", "evaluations"]) if (!sameNum(j[k], p[k])) fail(`${t}: ${k} js ${j[k]} py ${p[k]}`);
+    for (const k of ["xc", "zc", "R"]) if (!sameLen(j[k], p[k])) fail(`${t}: ${k} js ${j[k]} py ${p[k]}`);
+    for (const k of ["p", "front", "back"]) if (!sameLens(j[k], p[k])) fail(`${t}: ${k} js ${j[k]} py ${p[k]}`);
+    for (const k of ["counts", "skipped_why", "edges", "message"]) if (JSON.stringify(j[k]) !== JSON.stringify(p[k])) fail(`${t}: ${k} js ${JSON.stringify(j[k])} py ${JSON.stringify(p[k])}`);
+    if (!!j.check !== !!p.check) fail(`${t}: mesh check present js ${!!j.check} py ${!!p.check}`);
+    else if (p.check) for (const [k, pv] of Object.entries(p.check)) {
+      const jv = j.check[k];
+      if (typeof pv === "string" ? jv !== pv : !sameNum(jv, pv)) fail(`${t}: mesh check ${k} js ${jv} py ${pv}`);
+    }
+    if (j.runs.length !== p.runs.length) fail(`${t}: ${j.runs.length} runs in js, ${p.runs.length} in py`);
+    else p.runs.forEach((q, k) => {
+      const r = j.runs[k];
+      if (!sameLens(r.p0, q.p0) || !sameLens(r.p, q.p) || !sameNum(r.f0, q.f0) || !sameNum(r.f, q.f)) fail(`${t}: run ${k} js ${JSON.stringify(r)} py ${JSON.stringify(q)}`);
+    });
+    for (const k of ["xc", "zc", "R"]) if (!sameLens(j.cloud[k], p.cloud[k])) fail(`${t}: cloud ${k} differs`);
+    if (!sameArr(j.cloud.fos, p.cloud.fos)) fail(`${t}: cloud fos differs`);
+  }
+}
+
 console.log(`${compared} runs, ${fx} fixture arrays, ${ref.original_closure.length} original-closure minima ` +
   `(and ${Object.keys(EDGE_MINIMA).length} against 50-digit values), ` +
-  `${ref.extents.length} extents, ${masses} whole-mass force sets compared (worst ${worstMass.toExponential(1)} of the weight); ` +
+  `${ref.extents.length} extents, ${masses} whole-mass force sets compared (worst ${worstMass.toExponential(1)} of the weight), ` +
+  `${searches} critical-surface searches (${surfaces} surfaces, every field; worst length diff ${worstLen.toExponential(1)} of H); ` +
   `worst FoS rel diff ${worstFos.toExponential(2)}, worst sigma_n rel diff ` +
   `${worstArr.toExponential(2)}; ${fails} failures`);
 process.exit(fails ? 1 : 0);

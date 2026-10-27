@@ -2,8 +2,8 @@
 
 Usage (from the repository root): python webapp/tools/dump_reference.py [path to ejc_app] [output dir]
 Defaults: ejc_app/ next to webapp/, output webapp/tools/ref/. Writes reference.json (analyses, strength fixtures,
-original-closure minima, slip extents) for verify_engine.js and verification_rows.json (the verification.py table,
-without the slow rows) for verify_checks.js. Takes about 1.5 minutes.
+original-closure minima, slip extents, critical-surface searches) for verify_engine.js and verification_rows.json (the
+verification.py table, without the slow rows) for verify_checks.js. Takes about 5 minutes.
 """
 import dataclasses
 import json
@@ -164,8 +164,44 @@ extents = []
 for p in PR.desterre_presets():
     extents.append(dict(key=p.key, inputs=inputs_dict(p.inputs), extent=[num(v) for v in E.slip_extent(p.inputs)]))
 
+
+
+def search_dict(res):
+    """Every field of a critical_search result (the clouds included)."""
+    def nums(a):
+        return None if a is None else [num(v) for v in a]
+
+    def one(r):
+        if r is None:
+            return None
+        out = {k: num(r.get(k)) for k in ("fos", "xc", "zc", "R", "coverage", "evaluations")}
+        out.update(p=nums(r.get("p")), front=nums(r.get("front")), back=nums(r.get("back")), counts=r["counts"],
+                   skipped_why=r["skipped_why"], edges=r["edges"], message=r["message"],
+                   check=None if r["check"] is None else {k: v if isinstance(v, str) else num(v)
+                                                          for k, v in r["check"].items()},
+                   runs=[dict(p0=nums(q["p0"]), f0=num(q["f0"]), p=nums(q["p"]), f=num(q["f"])) for q in r["runs"]],
+                   cloud={k: nums(r["cloud"][k]) for k in ("xc", "zc", "R", "fos")})
+        return out
+    return dict(prescribed={k: v if isinstance(v, str) else num(v) for k, v in res["prescribed"].items()},
+                settings=res["settings"], domain=res["domain"], r2=one(res["r2"]), r3=one(res["r3"]))
+
+
+searches = []
+t1 = time.time()
+TAYLOR75 = E.Inputs(H=10.0, beta=75.0, gamma=27.0, model="mc", c_mc=100.0, phi_mc=0.0, n2=640, xc=0.40, zc=7.20, R=7.21)
+for name, inp, dims, opts in (
+        ("taylor 75, vertical-back prescribed circle", TAYLOR75, (2,), {}),
+        ("taylor 75, back limit 1", TAYLOR75, (2,), {"back": 1.0}),
+        ("taylor 60", TAYLOR75.with_(beta=60.0), (2,), {}),
+        ("desterre DE-1.5-c1-ru0, 2D and 3D", PR.BY_KEY["desterre_DE-1.5-c1-ru0"].inputs, (2, 3), {}),
+        ("desterre DE-2.5-c4-ru0.5, front limit 1", PR.BY_KEY["desterre_DE-2.5-c4-ru0.5"].inputs, (2,), {"front": 1.0}),
+        ("main ghb dry, 2D and 3D", MAIN.with_(model="ghb"), (2, 3), {})):
+    searches.append(dict(name=name, inputs=inputs_dict(inp), dims=list(dims), opts=opts,
+                         result=search_dict(E.critical_search(inp, dims=dims, **opts))))
+print(f"{len(searches)} searches in {time.time() - t1:.1f} s", file=sys.stderr)
+
 ref = dict(hb=[num(v) for v in E.hoek_brown_parameters(42.0, 10.0, 0.0)], cases=cases, fixtures=fixtures,
-           original_closure=ocm, extents=extents)
+           original_closure=ocm, extents=extents, searches=searches)
 OUT.mkdir(parents=True, exist_ok=True)
 (OUT / "reference.json").write_text(json.dumps(ref))
 

@@ -166,3 +166,21 @@ def test_fbd_page_whole_mass_views():
     at.radio(key="mass_view").set_value("3D full mass").run()
     assert not at.exception, [e.value for e in at.exception]
     assert any("F_H balances ΣS = ΣWκ instead" in m.value for m in at.markdown)
+
+
+def test_calculator_search_tab():
+    """Critical-surface search on a Mohr-Coulomb preset (fast), then Use this circle reruns the analysis on it."""
+    at_mod = pytest.importorskip("streamlit.testing.v1")
+    at = at_mod.AppTest.from_file(str(APP), default_timeout=300)
+    at.run()
+    at.sidebar.selectbox(key="w_preset").select("desterre_DE-1.5-c1-ru0").run()
+    at.button(key="srch_run").click().run()
+    assert not at.exception, [e.value for e in at.exception]
+    table = next(d.value for d in at.dataframe if "FoS on the critical surface" in list(d.value.iloc[:, 0]))
+    rows = dict(zip(table.iloc[:, 0], table["2D, Bishop"]))
+    assert rows["FoS on the prescribed surface"] == "2.610501" and rows["FoS on the critical surface"] == "2.605316"
+    assert rows["Mesh check (finer mesh)"] == "160 slices: 2.606797 (+0.1 %)"
+    at.button(key="srch_use2").click().run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert dict((m.label, m.value) for m in at.metric)["FoS 2D (Bishop)"] == "2.605316"
+    assert at.number_input(key="nb_R").value == pytest.approx(3.540311152206755, rel=1e-15)

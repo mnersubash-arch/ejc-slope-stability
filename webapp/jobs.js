@@ -1,5 +1,6 @@
-/* Jobs for the page: one analysis (3D + 2D, or the original-closure check), the mesh study, the nu sweep and the
- * verification table. Runs in the Web Worker (worker.js) or, if the worker cannot start, on the page itself. */
+/* Jobs for the page: one analysis (3D + 2D, or the original-closure check), the mesh study, the nu sweep, the
+ * critical-surface search and the verification table. Runs in the Web Worker (worker.js) or, if the worker cannot
+ * start, on the page itself. */
 (function (root) {
   "use strict";
 
@@ -66,6 +67,10 @@
           say({ done: q + 1, total: jobs.length, label: `${dim}D ${n}` });
         });
         return { type: "mesh", id: job.id, rows, ms: Date.now() - t0 };
+      }
+      if (job.type === "search") {
+        const res = E.criticalSearch(E.inputs(job.inputs), { dims: job.dims, back: job.back, front: job.front }, say);
+        return Object.assign(res, { type: "search", id: job.id, ms: Date.now() - t0 });
       }
       if (job.type === "verify") {
         let step = 0;

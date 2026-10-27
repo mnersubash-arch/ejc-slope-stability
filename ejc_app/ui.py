@@ -385,3 +385,86 @@ def checks_frame(r: E.LemResult) -> pd.DataFrame:
 def color_status(v):
     return {"PASS": "background-color: #d4edda", "FAIL": "background-color: #f8d7da",
             "INFO": "background-color: #e9ecef", "SKIPPED": "background-color: #fff3cd"}.get(v, "")
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# critical-surface search (engine.critical_search; QA/QC finding R1). Messages as in webapp/index.html.
+# ---------------------------------------------------------------------------------------------------------------
+SEARCH_EDGE = {
+    "front limit": lambda s: f"lies on the front limit ({s['front']:g} H ahead of the toe): widen it and search again",
+    "back limit": lambda s: f"lies on the back limit ({s['back']:g} H behind the crest): widen it and search again",
+    "crest": lambda s: "has its front exit at the crest edge",
+    "exits meet": lambda s: "has its two exits next to each other",
+    "vertical back": lambda s: "has an arc that is vertical at the back exit, the steepest arc the search tries",
+    "flat": lambda s: "is nearly flat, the flattest arc the search tries",
+    "coverage": lambda s: ("lies on the default grid's coverage limit: a flatter or longer circle would cover less than "
+                           f"{round(s['coverage'] * 100)} % of the grid's span from x_c − R to the toe-level crossing, "
+                           "so few slices or columns would resolve it, and the search skips it (the base-circle option "
+                           "meshes the mass itself)"),
+    "masses": lambda s: "lies on the base-circle grid's limit of one sliding mass",
+    "grid": lambda s: ("lies on the default grid's limit (it analyses circles that cross the toe level at or ahead of the "
+                       "toe); the base-circle option also analyses circles that pass below the toe, or stay above the "
+                       "toe level"),
+    "withheld": lambda s: "lies next to surfaces whose results were withheld (not accepted)",
+}
+SURFACE_KEYS = ("xc", "zc", "R")
+
+
+def _without_surface(inp: E.Inputs) -> E.Inputs:
+    return inp.with_(xc=0.0, zc=0.0, R=0.0)
+
+
+def surface_in_limits(r: dict) -> bool:
+    """True if the surface's x_c, z_c and R lie within the sidebar's input limits."""
+    return all(NUM[k][2] <= r[k] <= NUM[k][3] for k in SURFACE_KEYS)
+
+
+def search_notes(current: E.Inputs, searched: E.Inputs, res: dict) -> list[tuple[str, str]]:
+    """(kind, markdown) notes on a search result: stale inputs, the prescribed circle's vertical back face, the limits
+    the critical surfaces lie on and the mesh check (as the web app's search panel)."""
+    notes = []
+    if _without_surface(current) != _without_surface(searched):
+        notes.append(("warning", "The inputs have changed since this search (other than the surface). Search again for "
+                                 "the current inputs."))
+    P, s = res["prescribed"], res["settings"]
+    if P["vertical_back"] > 0:
+        notes.append(("info", f"The prescribed circle ends below the ground at its back extreme (x_c − R = "
+                              f"{P['xc'] - P['R']:.2f} m): the mass analysed for it has a vertical back face "
+                              f"{P['vertical_back']:.2f} m high that carries no force, as a tension crack would. The "
+                              "search does not try such circles."))
+    for d in s["dims"]:
+        r = res[f"r{d}"]
+        if r["message"]:
+            notes.append(("warning", f"{d}D: {r['message']}"))
+        if r["fos"] is None:
+            continue
+        if not surface_in_limits(r):
+            notes.append(("warning", f"{d}D: the critical surface lies outside the sidebar's input limits (x_c "
+                                     f"{NUM['xc'][2]:g} to {NUM['xc'][3]:g} m, z_c {NUM['zc'][2]:g} to {NUM['zc'][3]:g} m, "
+                                     f"R {NUM['R'][2]:g} to {NUM['R'][3]:g} m), so it cannot be used as the prescribed "
+                                     "surface."))
+        edges = []
+        for e in r["edges"]:
+            text = SEARCH_EDGE.get(e["why"])
+            if e["why"] != "toe" and text and text(s) not in edges:
+                edges.append(text(s))
+        if edges:
+            notes.append(("warning", f"{d}D: the critical {'circle' if d == 2 else 'sphere'} " + "; it ".join(edges) + "."))
+        c = r["check"]
+        mesh = f"{c['n']} x {c['n']}" if d == 3 else f"{c['n']} slices"
+        if c["change"] is not None and abs(c["change"]) > 0.005:
+            change = f"{'+' if c['fos'] >= r['fos'] else '−'}{abs((c['fos'] / r['fos'] - 1) * 100):.1f} %"
+            notes.append(("warning", f"{d}D: on {mesh} the critical surface's FoS changes by {change}, more than the "
+                                     "0.5 % screening threshold of eq. 4.17. The current mesh under-resolves this surface, "
+                                     "and the search may favour surfaces whose FoS the mesh underestimates. Refine the "
+                                     f"mesh ({'N_2D' if d == 2 else 'N'}) and search again."))
+        elif c["fos"] is None:
+            notes.append(("warning", f"{d}D: on {mesh} the critical surface gave no accepted FoS ({c['status']})."))
+    return notes
+
+
+def use_surface(xc: float, zc: float, R: float):
+    """Button callback: make (x_c, z_c, R) the prescribed surface."""
+    d = st.session_state.inp
+    d["xc"], d["zc"], d["R"] = float(xc), float(zc), float(R)
+    _write_widgets()

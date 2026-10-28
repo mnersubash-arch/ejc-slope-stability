@@ -47,6 +47,7 @@ async function check(cond, label) { console.log(`${cond ? "ok  " : "FAIL"} ${lab
   await check(/Accepted/i.test(await text(page, "#chip3")), "3D accepted chip");
   await check(/6 of 76 \(8%\) \/ 1 of 30 \(3%\)/.test(await text(page, "#facts")), "summary: tensile bases 6 of 76 (3D) and 1 of 30 (2D)");
   await check(/Tensile bases: 3D 6 of 76 \(8%\), 2D 1 of 30 \(3%\)/.test(await text(page, "#notes")), "summary: tensile-base note (info)");
+  await check(!/Vertical/.test(await text(page, "#notes")), "summary: no vertical-face note for the main sphere");
   console.log("     runstate:", await text(page, "#runstate"), "| worker:", await page.evaluate(() => document.querySelector("#runstate").textContent.includes("on this page") ? "fallback" : "worker"));
   await page.waitForTimeout(600);
   await page.screenshot({ path: path.join(SHOTS, "w1-3d-light.png"), fullPage: true });
@@ -156,6 +157,12 @@ async function check(cond, label) { console.log(`${cond ? "ok  " : "FAIL"} ${lab
   await page.fill("#nb-R", "600"); await page.dispatchEvent("#nb-R", "change");
   await waitSolved(page);
   await check(/require R > z_c .*use the base-circle option/.test(await text(page, "#notes")), "R < z_c: the error names the base-circle option");
+  // a circle whose arc ends below the ground at its back extreme: the summary warns about the vertical face
+  for (const [k, v] of [["xc", "25"], ["zc", "250"], ["R", "251"]]) { await page.fill(`#nb-${k}`, v); await page.dispatchEvent(`#nb-${k}`, "change"); }
+  await waitSolved(page);
+  await check(/Vertical back face\..*19\.34 m high.*\(269\.34 m\)/.test(await text(page, "#notes")) && await text(page, "#fos3") === "2.758886",
+    "vertical back face warning (19.34 m), FoS unchanged");
+  await page.screenshot({ path: path.join(SHOTS, "w1-vertical-face-light.png"), fullPage: false });
   await page.selectOption("#preset", "thesis_wet_05");
   await waitSolved(page);
   await check(/Tensile bases: 3D 23 of 76 \(30%\).*More than a quarter/.test(await text(page, "#notes")), "wet baseline: tensile-base warning (23 of 76)");

@@ -16,6 +16,8 @@ Research tool for the prescribed-surface comparison in Mahat (2026) thesis; not 
   (`worker.js`), or on the page itself if the worker cannot start.
 - **Summary:** both factors of safety and their ratio, iterations, projections and the bases with tensile effective
   normal stress (σ′n < 0), with a note when there are any and a warning above a quarter of the bases (thesis §5.8).
+  A warning appears when the slip circle ends below the ground at its back extreme (or, with the base-circle option,
+  its front extreme): the mass then has a vertical face on which no force acts (`verticalFaces`).
 - **Views:** 3D view (columns coloured by σn, φi, ci, τs, u, τs A or the tension flag, with a mirror toggle and a plan
   view to pick a column); cross-section (slices with hover values; a click opens the slice's free-body diagram);
   free-body diagram (every force on the sliding mass, on the 2D central section or the 3D full mass: the weight W of
@@ -57,7 +59,7 @@ Run from this folder:
    closure, F_M, C0/T0, the native v15 path, the safeguard off, other meshes, ν, GSI, D, r_u, base and face circles,
    Mohr-Coulomb, the Carranza-Torres, Law and D'Esterre presets and the input errors), the whole-mass forces of the
    139 of them that reach a final state, 63 strength-fixture arrays, 7 original-closure minima (also checked against
-   50-digit values), 24 slip extents and 6 critical-surface searches (Taylor's φ = 0 slopes, two D'Esterre slopes
+   50-digit values), 24 slip extents, 7 vertical-face cases and 6 critical-surface searches (Taylor's φ = 0 slopes, two D'Esterre slopes
    with the base-circle option, the thesis slope with GHB in 2D and 3D, and two searches that stop on a domain
    limit: 3,366 surfaces, every field compared). Result: largest FoS difference 4.4e-16 (relative), whole-mass totals
    within 4e-16 of the weight, with the same statuses, iteration counts, projection counts, error texts and check

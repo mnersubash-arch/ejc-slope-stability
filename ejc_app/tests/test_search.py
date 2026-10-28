@@ -50,8 +50,23 @@ def test_vertical_back_circle_is_reported_and_not_searched():
     reports it for the prescribed surface and does not try such circles."""
     res = E.critical_search(taylor(75.0, xc=0.40, zc=7.20, R=7.21))
     P = res["prescribed"]
-    assert P["vertical_back"] == pytest.approx(10.0 - 7.20) and P["fos2"] < TAYLOR[75.0]
+    assert P["vertical_back"] == pytest.approx(10.0 - 7.20) and P["vertical_front"] == 0.0 and P["fos2"] < TAYLOR[75.0]
     assert res["r2"]["fos"] > P["fos2"]
+
+
+def test_vertical_faces():
+    """Height of the vertical face where the slip circle ends below the ground (the results summary warns about it)."""
+    assert E.vertical_faces(E.Inputs()) == {"back": 0.0, "front": 0.0}                    # the thesis main sphere
+    f = E.vertical_faces(E.Inputs(xc=25.0, zc=250.0, R=251.0))                             # the thesis slope
+    assert f["back"] == pytest.approx(226.0 * math.tan(math.radians(50.0)) - 250.0) and f["front"] == 0.0
+    assert E.vertical_faces(E.Inputs(xc=500.0, zc=-10.0, R=400.0))["back"] == 0.0         # default grid, ahead of the toe
+    assert E.vertical_faces(taylor(75.0, xc=0.40, zc=7.20, R=7.21))["back"] == pytest.approx(2.8)
+    base = PR.BY_KEY["desterre_DE-1.5-c1-ru0"].inputs
+    assert E.vertical_faces(base) == {"back": 0.0, "front": 0.0}
+    f = E.vertical_faces(base.with_(xc=-2.0, zc=-0.5, R=3.0))                             # centre below the pit floor
+    assert f["back"] == pytest.approx(2.6) and f["front"] == pytest.approx(0.5)
+    s = E.search_surface(E.Inputs(), (0.0, 1.5, 1.0))          # t = 1: the arc is vertical at the back exit, no face
+    assert E.vertical_faces(E.Inputs(xc=s["xc"], zc=s["zc"], R=s["R"]))["back"] == 0.0
 
 
 @pytest.mark.parametrize("beta", [75.0, 60.0])

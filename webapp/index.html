@@ -999,6 +999,31 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
       "FoS counts their resistance; the C0 and T0 options show how much it depends on them (thesis §5.8).");
   }
 
+  // Vertical faces where the slip circle ends below the ground (engine.verticalFaces): no force acts on them, so the
+  // FoS is for a mass with an open crack at the back or a free face at the front, not for a circular slip surface.
+  // The same text is in ejc_app/ui.py (vertical_face_note).
+  const len2 = (v) => (v === 0 || Math.abs(v) >= 0.01 ? v.toFixed(2) : E.fmtG(v, 2));
+  function faceNote(c, f) {
+    const back = f.back > 0, front = f.front > 0;
+    if (!back && !front) return null;
+    const bk = `a vertical back face ${len2(f.back)} m high`, fr = `a vertical front face ${len2(f.front)} m high`;
+    const title = back && front ? "Vertical back and front faces" : back ? "Vertical back face" : "Vertical front face";
+    let html = `<b>${title}.</b> `;
+    if (back && front) {
+      html += `The slip circle ends below the ground at both extremes (on y = 0), so the analysed mass has ${bk} at x<sub>c</sub> − R = ${fx(c.xc - c.R, 2)} m ` +
+        `and ${fr} at x<sub>c</sub> + R = ${fx(c.xc + c.R, 2)} m. No force acts on them: the back face works as an open tension crack and the front face as if ` +
+        "the ground ahead of it were removed, so the FoS is for that mass, not for a circular slip surface. The arc meets the ground before its extremes " +
+        `only when z<sub>c</sub> is at least the ground height there (${len2(c.zc + f.back)} m and ${len2(c.zc + f.front)} m).`;
+    } else {
+      const end = back ? "back" : "front";
+      html += `The slip circle ends below the ground at its ${end} extreme (x<sub>c</sub> ${back ? "−" : "+"} R = ${fx(back ? c.xc - c.R : c.xc + c.R, 2)} m on y = 0), ` +
+        `so the analysed mass has ${back ? bk : fr}. No force acts on it: it works ${back ? "as an open tension crack" : "as if the ground ahead of it were removed"}, ` +
+        `and the FoS is for that mass, not for a circular slip surface. The arc meets the ground before its ${end} extreme only when z<sub>c</sub> is at least ` +
+        `the ground height there (${len2(c.zc + (back ? f.back : f.front))} m).`;
+    }
+    return note("warning", html + " The critical-surface search (Studies) tries only circles that meet the ground at both exits.");
+  }
+
   function renderSummary() {
     const errs = validate(S);
     const invalid = Object.keys(errs).length > 0;
@@ -1071,6 +1096,7 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
         notes.push(note(kind, `<b>${lab}: ${esc(r.status)}, no accepted FoS.</b> ${esc(r.reason)}`));
       }
     }
+    if (!orig && ((r3 && r3.mesh.count) || (r2 && r2.mesh.count))) { const fn = faceNote(inp, E.verticalFaces(inp)); if (fn) notes.push(fn); }
     if (!orig) { const tn = tensileNote(inp, r3, r2); if (tn) notes.push(tn); }
     $("#notes").innerHTML = notes.join("");
     renderMinibar();
@@ -1968,7 +1994,10 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
     let current = null;
     try { current = toInputs(S); } catch (e) { current = null; }
     if (current && withoutSurface(current) !== withoutSurface(inp)) notes.push(note("warning", "The inputs have changed since this search (other than the surface). Search again for the current inputs."));
-    if (P.vertical_back > 0) notes.push(note("info", `The prescribed circle ends below the ground at its back extreme (x<sub>c</sub> − R = ${fx(P.xc - P.R, 2)} m): the mass analysed for it has a vertical back face ${fx(P.vertical_back, 2)} m high that carries no force, as a tension crack would. The search does not try such circles.`));
+    if (P.vertical_back > 0 || P.vertical_front > 0) {
+      const faces = [P.vertical_back > 0 ? `a vertical back face ${len2(P.vertical_back)} m high` : "", P.vertical_front > 0 ? `a vertical front face ${len2(P.vertical_front)} m high` : ""].filter(Boolean).join(" and ");
+      notes.push(note("info", `The prescribed circle ends below the ground on y = 0, so the mass analysed for it has ${faces} that ${P.vertical_back > 0 && P.vertical_front > 0 ? "carry" : "carries"} no force (see the results summary). The search does not try such circles.`));
+    }
     const T = theme();
     const pct = (a, b) => (isNum(a) && isNum(b) ? `${a >= b ? "+" : "−"}${Math.abs((a / b - 1) * 100).toFixed(1)} %` : "–");
     const fosOrStatus = (v, s) => (isNum(v) ? v.toFixed(6) : esc(s || "withheld"));

@@ -184,3 +184,17 @@ def test_calculator_search_tab():
     assert not at.exception, [e.value for e in at.exception]
     assert dict((m.label, m.value) for m in at.metric)["FoS 2D (Bishop)"] == "2.605316"
     assert at.number_input(key="nb_R").value == pytest.approx(3.540311152206755, rel=1e-15)
+
+
+def test_vertical_back_face_warning():
+    """A circle whose arc ends below the ground at its back extreme: the Calculator warns about the vertical face."""
+    at_mod = pytest.importorskip("streamlit.testing.v1")
+    at = at_mod.AppTest.from_file(str(APP), default_timeout=120)
+    at.run()
+    assert not any("Vertical" in w.value for w in at.warning)
+    for k, v in (("xc", 25.0), ("zc", 250.0), ("R", 251.0)):
+        at.number_input(key=f"nb_{k}").set_value(v).run()
+    assert not at.exception, [e.value for e in at.exception]
+    w = [x.value for x in at.warning if "Vertical back face" in x.value]
+    assert len(w) == 1 and "19.34 m high" in w[0] and "(269.34 m)" in w[0]
+    assert dict((m.label, m.value) for m in at.metric)["FoS 3D"] == "2.758886"           # the result itself is unchanged

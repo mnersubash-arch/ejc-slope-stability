@@ -134,6 +134,11 @@ for (const x of ref.extents) {
 const hb = E.hoekBrownParameters(42, 10, 0);
 hb.forEach((v, k) => { if (rel(v, ref.hb[k]) > 1e-15) fail(`hb ${k}`); });
 
+for (const x of ref.faces || []) {                    // vertical faces where the circle ends below the ground
+  const f = E.verticalFaces(inputsOf(x.inputs));
+  for (const k of ["back", "front"]) if (!(Math.abs(f[k] - x.faces[k]) <= 1e-12 * x.inputs.H)) fail(`vertical ${k} face: js ${f[k]} py ${x.faces[k]} (${JSON.stringify(x.inputs)})`);
+}
+
 // critical-surface searches: every field, the clouds of surfaces tried included; FoS and other numbers to 1e-12
 // (relative), lengths and search parameters to 1e-12 of H (V8's tan and the C library's can differ in the last bit, so
 // a coordinate near zero can differ by more than 1e-12 of itself)
@@ -183,7 +188,7 @@ for (const s of ref.searches || []) {
 
 console.log(`${compared} runs, ${fx} fixture arrays, ${ref.original_closure.length} original-closure minima ` +
   `(and ${Object.keys(EDGE_MINIMA).length} against 50-digit values), ` +
-  `${ref.extents.length} extents, ${masses} whole-mass force sets compared (worst ${worstMass.toExponential(1)} of the weight), ` +
+  `${ref.extents.length} extents, ${(ref.faces || []).length} vertical-face cases, ${masses} whole-mass force sets compared (worst ${worstMass.toExponential(1)} of the weight), ` +
   `${searches} critical-surface searches (${surfaces} surfaces, every field; worst length diff ${worstLen.toExponential(1)} of H); ` +
   `worst FoS rel diff ${worstFos.toExponential(2)}, worst sigma_n rel diff ` +
   `${worstArr.toExponential(2)}; ${fails} failures`);

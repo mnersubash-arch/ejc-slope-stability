@@ -200,8 +200,14 @@ for name, inp, dims, opts in (
                          result=search_dict(E.critical_search(inp, dims=dims, **opts))))
 print(f"{len(searches)} searches in {time.time() - t1:.1f} s", file=sys.stderr)
 
+faces = []
+DE = PR.BY_KEY["desterre_DE-1.5-c1-ru0"].inputs
+for inp in (MAIN, MAIN.with_(xc=25.0, zc=250.0, R=251.0), MAIN.with_(xc=500.0, zc=-10.0, R=400.0), TAYLOR75, DE,
+            DE.with_(xc=-2.0, zc=-0.5, R=3.0), MAIN.with_(base_circle=True)):
+    faces.append(dict(inputs=inputs_dict(inp), faces={k: num(v) for k, v in E.vertical_faces(inp).items()}))
+
 ref = dict(hb=[num(v) for v in E.hoek_brown_parameters(42.0, 10.0, 0.0)], cases=cases, fixtures=fixtures,
-           original_closure=ocm, extents=extents, searches=searches)
+           original_closure=ocm, extents=extents, searches=searches, faces=faces)
 OUT.mkdir(parents=True, exist_ok=True)
 (OUT / "reference.json").write_text(json.dumps(ref))
 

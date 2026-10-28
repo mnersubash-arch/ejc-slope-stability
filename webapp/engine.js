@@ -388,6 +388,17 @@
       last === n - 1 ? xs[n - 1] : refine(xs[last + 1], xs[last])];
   }
 
+  /** Heights of the vertical faces that bound the sliding mass where the slip circle on y = 0 ends below the ground:
+   *  at its back extreme x_c - R (z = z_c), and with the base-circle grid also at its front extreme x_c + R (the
+   *  default grid stops at the toe). No force acts on such a face: at the back it works as an open tension crack.
+   *  Heights below 1e-9 H (rounding) count as zero. Same as vertical_faces in ejc_app/engine.py. */
+  function verticalFaces(inp) {
+    const { xc, zc, R, H, beta } = inp, tol = 1e-9 * H;
+    const back = inp.base_circle || xc - R <= 0 ? groundZ(xc - R, H, beta) - zc : 0;
+    const front = inp.base_circle ? groundZ(xc + R, H, beta) - zc : 0;
+    return { back: back > tol ? back : 0, front: front > tol ? front : 0 };
+  }
+
   function buildMesh(inp, dim, n) {
     if (dim !== 2 && dim !== 3) throw new Error("dim must be 2 or 3");
     if (!(Number.isInteger(n) && n >= 1)) throw new Error("mesh size must be a positive integer");
@@ -785,11 +796,12 @@
     const total = dims.reduce((s, d) => s + budget[d], 0);
     let done = 0;
     const say = (label) => { if (progress) progress({ done: Math.min(done, total), total, label }); };
-    const vertical = Math.max(0, groundZ(inp.xc - inp.R, H, inp.beta) - inp.zc);
+    const faces = verticalFaces(inp);
     const out = { settings: { back: o.back, front: o.front, grid: [na, nb, nt], starts: o.starts, tol: o.tol,
       max_eval: o.max_eval, restarts: o.restarts, coverage: o.coverage, dims: dims.slice(), base_circle: base },
     domain: { front: [lo0, 1], back: [0, hi1], curvature: [0, 1] },
-    prescribed: { xc: inp.xc, zc: inp.zc, R: inp.R, vertical_back: vertical }, r2: null, r3: null, ms: 0 };
+    prescribed: { xc: inp.xc, zc: inp.zc, R: inp.R, vertical_back: faces.back, vertical_front: faces.front }, r2: null,
+      r3: null, ms: 0 };
     const solveAt = (dim, kw) => {
       try {
         const r = (dim === 3 ? run3d : run2d)(inputs(Object.assign({}, inp, kw)));
@@ -915,7 +927,8 @@
 
   const api = { GAMMA_W, MODELS, REASONS, ITERATIONS, OK, SHEAR, NO_STATE, DOMAIN, hoekBrownParameters, makeStrength,
     closureConstants, principalState, scanSigma3, admissibleSnMin, solveStrength, originalClosureMinimum,
-    DEFAULT_INPUTS, inputs, hb, strengthOf, groundZ, waterZ, sphereZ, slipExtent, buildMesh, projectionLimit, solve,
+    DEFAULT_INPUTS, inputs, hb, strengthOf, groundZ, waterZ, sphereZ, slipExtent, verticalFaces, buildMesh,
+    projectionLimit, solve,
     run3d, run2d, run, gravityCap, columnForces, massForces, SEARCH, groundAt, circleFromExits, searchSurface,
     singleMass, nelderMead, criticalSearch, sum, fmtG, DEG, RAD };
   if (typeof module !== "undefined" && module.exports) module.exports = api;

@@ -376,6 +376,39 @@ def tensile_note(inp: E.Inputs, r3: E.LemResult, r2: E.LemResult):
                     "counts their resistance; the C0 and T0 options show how much it depends on them (thesis §5.8).")
 
 
+def _len2(v: float) -> str:
+    return f"{v:.2f}" if v == 0 or abs(v) >= 0.01 else f"{v:.2g}"
+
+
+def vertical_face_note(inp: E.Inputs):
+    """Markdown warning when the slip circle ends below the ground (engine.vertical_faces), else None: no force acts on
+    such a face, so the FoS is for a mass with an open crack at the back or a free face at the front, not for a
+    circular slip surface. As faceNote in webapp/index.html."""
+    f = E.vertical_faces(inp)
+    back, front = f["back"] > 0, f["front"] > 0
+    if not back and not front:
+        return None
+    bk, fr = f"a vertical back face {_len2(f['back'])} m high", f"a vertical front face {_len2(f['front'])} m high"
+    title = "Vertical back and front faces" if back and front else "Vertical back face" if back else "Vertical front face"
+    if back and front:
+        text = (f"The slip circle ends below the ground at both extremes (on y = 0), so the analysed mass has {bk} at "
+                f"x_c − R = {inp.xc - inp.R:.2f} m and {fr} at x_c + R = {inp.xc + inp.R:.2f} m. No force acts on them: the "
+                "back face works as an open tension crack and the front face as if the ground ahead of it were removed, so "
+                "the FoS is for that mass, not for a circular slip surface. The arc meets the ground before its extremes "
+                f"only when z_c is at least the ground height there ({_len2(inp.zc + f['back'])} m and "
+                f"{_len2(inp.zc + f['front'])} m).")
+    else:
+        end = "back" if back else "front"
+        x_end = inp.xc - inp.R if back else inp.xc + inp.R
+        text = (f"The slip circle ends below the ground at its {end} extreme (x_c {'−' if back else '+'} R = {x_end:.2f} m "
+                f"on y = 0), so the analysed mass has {bk if back else fr}. No force acts on it: it works "
+                f"{'as an open tension crack' if back else 'as if the ground ahead of it were removed'}, and the FoS is for "
+                f"that mass, not for a circular slip surface. The arc meets the ground before its {end} extreme only when "
+                f"z_c is at least the ground height there ({_len2(inp.zc + (f['back'] if back else f['front']))} m).")
+    return (f"**{title}.** {text} The critical-surface search (Studies) tries only circles that meet the ground at both "
+            "exits.")
+
+
 def checks_frame(r: E.LemResult) -> pd.DataFrame:
     return pd.DataFrame([{"Check": c.name, "Value": f"{c.value:.3e}" if abs(c.value) < 1e-3 or abs(c.value) >= 1e4
                           else f"{c.value:.6g}", "Limit": c.limit, "Status": "PASS" if c.passed else "FAIL"}
@@ -427,11 +460,14 @@ def search_notes(current: E.Inputs, searched: E.Inputs, res: dict) -> list[tuple
         notes.append(("warning", "The inputs have changed since this search (other than the surface). Search again for "
                                  "the current inputs."))
     P, s = res["prescribed"], res["settings"]
-    if P["vertical_back"] > 0:
-        notes.append(("info", f"The prescribed circle ends below the ground at its back extreme (x_c − R = "
-                              f"{P['xc'] - P['R']:.2f} m): the mass analysed for it has a vertical back face "
-                              f"{P['vertical_back']:.2f} m high that carries no force, as a tension crack would. The "
-                              "search does not try such circles."))
+    if P["vertical_back"] > 0 or P["vertical_front"] > 0:
+        faces = " and ".join(t for t in (f"a vertical back face {_len2(P['vertical_back'])} m high" if P["vertical_back"] > 0
+                                         else "", f"a vertical front face {_len2(P['vertical_front'])} m high"
+                                         if P["vertical_front"] > 0 else "") if t)
+        both = P["vertical_back"] > 0 and P["vertical_front"] > 0
+        notes.append(("info", f"The prescribed circle ends below the ground on y = 0, so the mass analysed for it has {faces} "
+                              f"that {'carry' if both else 'carries'} no force (see the results summary). The search does "
+                              "not try such circles."))
     for d in s["dims"]:
         r = res[f"r{d}"]
         if r["message"]:

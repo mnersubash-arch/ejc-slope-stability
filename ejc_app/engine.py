@@ -595,6 +595,17 @@ def slip_extent(inp: Inputs, n: int = 20001) -> tuple[float, float]:
     return x_entry, x_exit
 
 
+def vertical_faces(inp: Inputs) -> dict:
+    """Heights of the vertical faces that bound the sliding mass where the slip circle on y = 0 ends below the ground:
+    at its back extreme x_c - R (z = z_c), and with the base-circle grid also at its front extreme x_c + R (the default
+    grid stops at the toe). No force acts on such a face: at the back it works as an open tension crack. Heights below
+    1e-9 H (rounding) count as zero. Same as verticalFaces in webapp/engine.js."""
+    xc, zc, R, tol = inp.xc, inp.zc, inp.R, 1e-9 * inp.H
+    back = float(ground_z(xc - R, inp.H, inp.beta)) - zc if inp.base_circle or xc - R <= 0 else 0.0
+    front = float(ground_z(xc + R, inp.H, inp.beta)) - zc if inp.base_circle else 0.0
+    return {"back": back if back > tol else 0.0, "front": front if front > tol else 0.0}
+
+
 def build_mesh(inp: Inputs, dim: int, n: int) -> Mesh:
     """Mesh (brief §1.4): x from x0 = x_c - sqrt(R^2 - z_c^2) to x1 = x_c - R, dx = (x0 - x1)/N, x_i = x0 - (i - 1/2) dx;
     3D: y from 0 to R, dy = R/N, y_j = (j - 1/2) dy. 2D (brief §1.5): y = 0, unit thickness, rho = R.
@@ -1206,12 +1217,13 @@ def critical_search(inp: Inputs, dims=(2,), progress=None, **opts) -> dict:
         if progress:
             progress(min(state["done"], total), total, label)
 
-    vertical = max(0.0, float(ground_z(inp.xc - inp.R, H, inp.beta)) - inp.zc)
+    faces = vertical_faces(inp)
     out = {"settings": {"back": o["back"], "front": o["front"], "grid": [na, nb, nt], "starts": o["starts"],
                         "tol": o["tol"], "max_eval": o["max_eval"], "restarts": o["restarts"],
                         "coverage": o["coverage"], "dims": list(dims), "base_circle": base},
            "domain": {"front": [lo0, 1], "back": [0, hi1], "curvature": [0, 1]},
-           "prescribed": {"xc": inp.xc, "zc": inp.zc, "R": inp.R, "vertical_back": vertical},
+           "prescribed": {"xc": inp.xc, "zc": inp.zc, "R": inp.R, "vertical_back": faces["back"],
+                          "vertical_front": faces["front"]},
            "r2": None, "r3": None, "ms": 0}
 
     def solve_at(dim, **kw):

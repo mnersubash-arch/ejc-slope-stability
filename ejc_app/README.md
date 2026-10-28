@@ -32,6 +32,9 @@ Nothing in this folder deploys it to a public host.
    - FoS 3D and 2D, the 3D/2D ratio, iterations, active columns and slices, and the projection count;
    - the bases with tensile effective normal stress (σ_n < 0), with a note when there are any and a warning above
      a quarter of the bases (thesis §5.8);
+   - a warning when the slip circle ends below the ground at its back extreme x_c − R (or, with the base-circle
+     option, its front extreme x_c + R): the mass then has a vertical face on which no force acts, so the FoS is
+     for that mass, not for a circular slip surface (`engine.vertical_faces`; see below);
    - PASS/FAIL for every final check, with the largest residuals;
    - CSV downloads of the column and slice results;
    - studies: a critical-surface search (below), a mesh study (eq. 4.17) and a ν sweep.
@@ -69,7 +72,7 @@ study (`engine.critical_search`, also in the web app) finds the circle (2D, Bish
   has a vertical back face. A circle whose centre lies below the ground at its back extreme x_c − R would have one:
   the engine accepts such a circle as a prescribed surface and gives the mass a back face that carries no force, as
   a tension crack would (for Taylor's 75° slope, a circle with a 2.8 m face gives 1.6245 against 1.6906 for the
-  critical circle). The search reports this for the prescribed surface and does not try such circles.
+  critical circle). The results summary warns about such a face, and the search does not try such circles.
 - **Skipped surfaces.** A surface is skipped when the grid option cannot analyse it: the default grid refuses it, or
   its mass covers less than half of the default grid's span from x_c − R to the toe-level crossing, or (base-circle
   option) the ground is not above it over one interval. With the coverage rule, nearly flat circles resolved by a

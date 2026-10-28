@@ -57,7 +57,7 @@ They need Node 18 or newer (run with 22.22) and Python 3.11 or newer with numpy,
     vertical back face that carries no force, as a tension crack would. On Taylor's 75° slope (H = 10 m, c = 100 kPa,
     φ = 0) the circle (0.40, 7.20, 7.21) has a 2.8 m face and an exact FoS of 1.6245 (by `qa_analytic.py`'s
     quadrature), below the 1.6906 of the critical circle. The search tries only circles that meet the ground at both
-    exits, and its panel reports such a face on the prescribed circle. The single-surface analysis is unchanged.
+    exits, and the results summary of both apps warns about such a face (its FoS is unchanged).
   - A search on a coarse mesh favours surfaces whose FoS the mesh underestimates: on that slope with 40 slices it
     reports 1.6925 on a circle that gives 1.7503 on 160 slices. The search re-solves its critical surfaces on a finer
     mesh and warns above the 0.5 % threshold of eq. 4.17. The thesis's wet cases exceed it at the default meshes

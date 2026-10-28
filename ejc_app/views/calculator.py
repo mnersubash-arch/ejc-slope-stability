@@ -136,6 +136,10 @@ c[6].metric("Tensile bases 3D / 2D", f"{ui.tensile_text(ui.tensile_count(r3))} /
             help="Bases with tensile effective normal stress σ′_n < 0 at the accepted state (thesis Section 5.8).")
 ui.status_badge(r3, "3D")
 ui.status_badge(r2, "2D")
+if r3.mesh.count or r2.mesh.count:
+    vf = ui.vertical_face_note(A.inputs)
+    if vf:
+        st.warning(vf)
 tn = ui.tensile_note(A.inputs, r3, r2)
 if tn:
     (st.warning if tn[0] == "warning" else st.info)(tn[1])

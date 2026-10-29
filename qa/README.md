@@ -23,6 +23,7 @@ They need Node 18 or newer (run with 22.22) and Python 3.11 or newer with numpy,
 | `node qa_desterre_oms.js` | The Ordinary method of slices on the app's slices for the D'Esterre circles (finding B1). | seconds |
 | `node qa_search.js` | Critical-surface searches on the thesis slope, GHB and EJC, dry and wet, 2D and 3D (finding R1; the apps now have their own search, below). | 3 min |
 | `node qa_scenarios.js` | One input at a time on the thesis slope: GSI, σci, mi, D, γ, Hw, r_u and slope height. | 1 min |
+| `python3 qa_baskoyak.py` | Baskoyak, a real slope failure (the "Baskoyak (real failure)" presets): an independent Bishop/GHB code against both engines, the presets on the failure circle and the critical surface in 2D and 3D, SLIDE's published value, the real section with its bench, the authors' own parameter sets, the EJC's admissible ν and a back-analysis of D (below). | 5 min |
 
 `run_engine.js` is the batch runner the Python scripts use (`node run_engine.js jobs.json out.json`).
 
@@ -68,3 +69,35 @@ They need Node 18 or newer (run with 22.22) and Python 3.11 or newer with numpy,
 
 The record's other findings concern the thesis text (T1 to T4), published benchmarks (B1 to B3) and real-life use
 (R2, R3); they need no change to the code.
+
+## A real failure: Baskoyak (29 October 2026)
+
+`qa_baskoyak.py` checks both apps on a real slope failure: a circular failure through one bench in heavily jointed,
+dry schist at the Baskoyak barite pit, Turkey (Sonmez & Ulusay 1999, Case 2), re-analysed in SLIDE by Li, Lo &
+Cassidy (2016). The inputs and their sources are in `ejc_app/data/presets_baskoyak.json` and the app's presets
+"Baskoyak (real failure)": γ, σci, m_i and GSI are site data; the section and the failure circle are traced from the
+1999 paper's Fig. 7 (axes in metres; the circle fits the traced line with 0.05 m rms); D = 0.7 is Hoek et al.'s (2002)
+value for mechanical excavation, as Li et al. note for this mine; ν = 0.45 for the EJC is derived from published
+relations, not measured. The apps model the section as a planar face at the overall angle, 31.92°.
+
+| Check | Result |
+|---|---|
+| An independent Bishop/GHB code against the engines, app's section, 24 analyses | relative difference 4.8e-14 (Python); web against Python 2.2e-16 |
+| SLIDE's inputs (GSI 16, D 0.68): critical surface, 2D | 1.000 (160 slices) against SLIDE's 1.007 (−0.7 %); on the real section, with the independent code, 1.016 (+0.9 %) |
+| Site inputs (GSI 16.5, D 0.7), GHB: critical surface / failure circle | 2D 0.991 / 1.032; 3D 1.057 / 1.091 |
+| Site inputs, EJC with ν = 0.45: critical surface / failure circle | 2D 1.099 / 1.144; 3D 1.171 / 1.208 |
+| D that gives F = 1 on the critical surface (site inputs) | GHB 0.69 (2D), 0.74 (3D); EJC 0.76 (2D), 0.80 (3D); against 0.7 for the excavation method |
+
+- The engines reproduce SLIDE on this failure within 1 % and an independent implementation to 5e-14.
+- With site data and the guideline D, nothing fitted, GHB in 2D predicts the failure: F = 0.99 on the critical surface
+  and 1.03 on the failure circle; a back-analysis gives D = 0.69 to 0.72, the guideline value.
+- The EJC (+11 % over GHB at ν = 0.45) and 3D (+6.5 %) raise F above the observed state: the EJC in 3D gives 1.17 for a
+  slope that failed, and reproducing the failure needs D = 0.76 to 0.82.
+- At the thesis value ν = 0.271 the EJC has no admissible state above σ′n = 95 kPa for this rock mass: the closure
+  keeps σ2 ≥ σ3 only while σ1/σ3 ≥ (1 − ν)/ν, and this weak rock mass fails at lower ratios. The critical surface
+  reaches 147 kPa; ν ≥ 0.30 covers it, ν ≥ 0.40 every surface the search tries.
+- The planar section gives F 1.5–1.8 % lower than the real section (a 2.2 m bench, ground rising 5° behind the crest).
+- The authors' own factors of safety (their program HOBRSLP) are not a usable target. For their approaches 1–3 they
+  lie within 1–2.5 % of the ordinary method of slices and 8–12 % below Bishop's method; their approach-4 values cannot
+  be reproduced from their published equations by either method (Bishop 1.18, ordinary method 1.08, for their 1.00) and
+  contradict their approach 1 (adding s > 0 to the same m_b and a lowers their F).

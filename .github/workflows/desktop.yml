@@ -1,0 +1,44 @@
+# Builds EJC-Slope-Stability.exe, the web app as a desktop program (desktop/README.md), on a Windows runner, checks
+# that it serves every file, and keeps it as a download of the run: Actions tab > "Desktop app for Windows" > the run >
+# Artifacts > EJC-Slope-Stability-Windows (a zip with the .exe, HOW-TO-RUN.txt and its SHA-256).
+name: Desktop app for Windows
+
+on:
+  push:
+    branches: [claude/awesome-ride-ukq1wd]
+    paths: ["desktop/**", "webapp/**", ".github/workflows/desktop.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-exe:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install PyInstaller
+        run: python -m pip install pyinstaller==6.11.1
+      - name: Assemble the app's files (Plotly.js 2.35.2, SHA-256 checked)
+        run: python desktop/build_site.py
+      - name: Build the .exe
+        run: pyinstaller desktop/ejc_desktop.spec --noconfirm --distpath desktop/dist --workpath desktop/build/pyinstaller
+      - name: Check that the .exe serves every file
+        shell: bash
+        run: ./desktop/dist/EJC-Slope-Stability.exe --check
+      - name: Package
+        shell: bash
+        run: |
+          mkdir out
+          cp desktop/dist/EJC-Slope-Stability.exe desktop/HOW-TO-RUN.txt out/
+          (cd out && sha256sum EJC-Slope-Stability.exe | tee SHA256.txt)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: EJC-Slope-Stability-Windows
+          path: out/
+          retention-days: 90
+          if-no-files-found: error

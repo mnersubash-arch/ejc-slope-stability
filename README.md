@@ -11,6 +11,8 @@ history:
   report. Run it with `cd ejc_app && streamlit run app.py`; see `ejc_app/README.md` and `ejc_app/VERIFICATION.md`.
 - `webapp/`: the same app as a web page, with the engine ported to JavaScript and checked against
   `ejc_app/engine.py`; published privately on claude.ai. See `webapp/README.md`.
+- `desktop/`: the web page as a desktop program, `EJC-Slope-Stability.exe` for Windows, built by GitHub Actions
+  (`.github/workflows/desktop.yml`); it runs offline in your browser. See `desktop/README.md`.
 - `qa/`: the QA/QC of both engines against the thesis, exact solutions, randomised tests and published case
   studies (27 October 2026), and a real slope failure (Baskoyak, 29 October 2026): the scripts and the record. See
   `qa/README.md`.

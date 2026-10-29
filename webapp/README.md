@@ -139,7 +139,7 @@ python3 -m http.server 8765 --bind 127.0.0.1     # then open http://127.0.0.1:87
 ```
 
 Opening `index.html` straight from disk does not work: the worker needs `http://`, and the page relies on the
-skeleton's `[hidden]` rule.
+skeleton's `[hidden]` rule. For a program that does all this on a desktop (and offline), see `desktop/README.md`.
 
 ## Changing it
 

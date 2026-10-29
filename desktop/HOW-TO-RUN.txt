@@ -1,0 +1,24 @@
+EJC Slope Stability: desktop app for Windows
+============================================
+
+1. Unzip the download and put EJC-Slope-Stability.exe anywhere you like (Desktop, Documents, a USB stick).
+
+2. Double-click EJC-Slope-Stability.exe.
+   The first time, Windows may say "Windows protected your PC", because the program is not signed with a
+   certificate. Click "More info", then "Run anyway". An antivirus may also ask: the program only serves the
+   app's files to your own browser, on this computer.
+
+3. A small window opens, and the app opens in your web browser (Edge, Chrome, Firefox...).
+   Keep the small window open while you use the app. Close it to quit.
+
+Good to know
+- Everything runs on your computer and nothing is uploaded. The app works without internet (only the fonts look
+  slightly different offline).
+- "Save case" and "Report" save files where your browser saves downloads. "Open case file" opens a saved case, also
+  one saved from the web page or the Streamlit app.
+- Your browser remembers your inputs for the next time.
+- The shared case list exists only on the claude.ai page. Here, send a case file or a case code instead.
+- Starting the program again while it runs just opens the app again.
+- SHA256.txt holds the program's checksum, if you want to check the download.
+
+Research tool for the prescribed-surface comparison in Mahat (2026) thesis; not for design.

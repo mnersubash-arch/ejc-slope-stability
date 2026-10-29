@@ -55,13 +55,14 @@ Plotly.js 2.35.2 loads from cdnjs (jsDelivr as a fallback); fonts from Google Fo
 Run from this folder:
 
 1. `python3 tools/dump_reference.py` writes the Python engine's results to `tools/ref/` (about 4 minutes).
-2. `node tools/verify_engine.js` compares `engine.js` with them: 152 analyses (every main case, GHB, the σ2 = σ3
+2. `node tools/verify_engine.js` compares `engine.js` with them: 158 analyses (every main case, GHB, the σ2 = σ3
    closure, F_M, C0/T0, the native v15 path, the safeguard off, other meshes, ν, GSI, D, r_u, base and face circles,
-   Mohr-Coulomb, the Carranza-Torres, Law and D'Esterre presets and the input errors), the whole-mass forces of the
-   139 of them that reach a final state, 63 strength-fixture arrays, 7 original-closure minima (also checked against
-   50-digit values), 24 slip extents, 7 vertical-face cases and 6 critical-surface searches (Taylor's φ = 0 slopes, two D'Esterre slopes
-   with the base-circle option, the thesis slope with GHB in 2D and 3D, and two searches that stop on a domain
-   limit: 3,366 surfaces, every field compared). Result: largest FoS difference 4.4e-16 (relative), whole-mass totals
+   Mohr-Coulomb, the Carranza-Torres, Law, D'Esterre and Baskoyak presets and the input errors), the whole-mass forces
+   of the 145 of them that reach a final state, 63 strength-fixture arrays, 7 original-closure minima (also checked
+   against 50-digit values), 24 slip extents, 7 vertical-face cases and 7 critical-surface searches (Taylor's φ = 0
+   slopes, two D'Esterre slopes with the base-circle option, the thesis slope with GHB in 2D and 3D, the Baskoyak
+   failure with GHB in 2D and 3D, and two searches that stop on a domain limit: 4,367 surfaces, every field
+   compared). Result: largest FoS difference 4.4e-16 (relative), whole-mass totals
    within 4e-16 of the weight, with the same statuses, iteration counts, projection counts, error texts and check
    results; the searches try the same surfaces in the same order and find the same critical surfaces, with FoS within
    1e-12 and lengths within 7e-15 of H; 0 failures. The results agree to rounding rather than bit for bit because the
@@ -72,12 +73,13 @@ Run from this folder:
 4. `node tools/ui_test.js` drives the page in Chromium (Playwright): the default case gives 2.706024 / 2.447911, the
    summary counts the tensile bases, every tab draws without console errors, the whole-mass free-body diagram
    balances (2D and 3D), the critical-surface search finds 2.118587 in 2D and Use this circle reruns the analysis on
-   it, presets and inputs update the results, and the layout holds in dark mode and at 390 px. See the file's header
-   for the offline option.
+   it, presets (Baskoyak among them) and inputs update the results, and the layout holds in dark mode and at 390 px.
+   See the file's header for the offline option.
 
 The QA/QC of 27 October 2026 (`qa/` at the repository root) checked the engines against the thesis, exact solutions,
 randomised tests and published case studies; its findings S1 to S3 are fixed in this version and R1 is addressed by
-the critical-surface search (see `qa/README.md`).
+the critical-surface search. `qa/qa_baskoyak.py` (29 October 2026) checks both apps on a real slope failure, the
+Baskoyak presets (see `qa/README.md`).
 
 ## Run it locally
 

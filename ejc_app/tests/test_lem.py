@@ -357,3 +357,72 @@ def test_mass_forces_balance():
     assert 0.014 < mf["totals"]["net"]["x"] / mf["weight"] < 0.016
     mf2 = E.mass_forces(MAIN, r2(MAIN))
     assert 0.018 < mf2["totals"]["net"]["x"] / mf2["weight"] < 0.020
+
+
+# ---- 3D columns N x N_y (n3y; off by default, the brief's N x N grid) ---------------------------------------------
+def test_square_grid_unchanged_by_the_column_option():
+    """n3y = None (the brief's N x N grid) and n3y = N give the same mesh and the same result, bit for bit."""
+    for inp in (MAIN, WET, MAIN.with_(n3=13, form="FM")):
+        a, b = r3(inp), r3(inp.with_(n3y=inp.n3))
+        assert (a.fos, a.status, a.iterations, a.projections) == (b.fos, b.status, b.iterations, b.projections)
+        assert a.mesh.ny == b.mesh.ny == inp.n3 and a.mesh.dy == b.mesh.dy == inp.R / inp.n3
+        for k in ("i", "j", "x", "y", "zb", "h", "ah", "w", "u"):
+            assert np.array_equal(getattr(a.mesh, k), getattr(b.mesh, k))
+        assert np.array_equal(a.sn, b.sn)
+    assert r2(MAIN.with_(n3y=7)).fos == r2(MAIN).fos                     # the 2D slices do not use it
+
+
+def test_rectangular_columns_geometry():
+    """N_y columns across y: dx = (x0 - x1)/N as before, dy = R/N_y, y_j = (j - 1/2) dy for j = 1 to N_y."""
+    m, sq = E.build_mesh(MAIN.with_(n3y=7), 3, 20), E.build_mesh(MAIN, 3, 20)
+    assert (m.n, m.ny, m.x0, m.x1, m.dx) == (20, 7, sq.x0, sq.x1, sq.dx) and m.dy == MAIN.R / 7
+    assert set(m.j) <= set(range(1, 8)) and np.allclose(m.y, (m.j - 0.5) * m.dy)
+    assert np.allclose(m.x, m.x0 - (m.i - 0.5) * m.dx) and np.all(m.ah == m.dx * m.dy)
+    assert np.allclose(m.zb, MAIN.zc - np.sqrt(MAIN.R ** 2 - (m.x - MAIN.xc) ** 2 - m.y ** 2))
+    assert np.allclose(m.w, 27.0 * m.h * m.ah) and np.allclose(m.area * m.g, m.ah)
+    ii, jj = np.meshgrid(np.arange(1, 21), np.arange(1, 8), indexing="ij")     # every cell whose centre is in the mass
+    x, y = m.x0 - (ii - 0.5) * m.dx, (jj - 0.5) * m.dy
+    q = MAIN.R ** 2 - (x - MAIN.xc) ** 2 - y ** 2
+    h = np.minimum(MAIN.H, -x * math.tan(math.radians(MAIN.beta))) - (MAIN.zc - np.sqrt(np.maximum(q, 0.0)))
+    assert m.count == int(np.sum((q > 0) & (x <= 0) & (h > 0)))
+
+
+def test_rectangular_columns_converge():
+    """Columns of very different shape converge to one result: on the thesis slope 160 x 40 columns (2.45 m by
+    18.1 m), 40 x 160 (9.81 m by 4.53 m) and 160 x 160 meet the 0.5 % screening threshold of eq. 4.17, dry and wet."""
+    for inp in (MAIN, WET):
+        fos = [r3(inp.with_(n3=n, n3y=ny)).fos for n, ny in ((160, 40), (40, 160), (160, 160))]
+        assert all(r3(inp.with_(n3=n, n3y=ny)).accepted for n, ny in ((160, 40), (40, 160), (160, 160)))
+        assert E.mesh_error(fos, fos[-1]) <= 0.5
+
+
+def test_columns_across():
+    """N_y for another N keeps the column shape: n3y n/n3 rounded half up, at least 1; None keeps the N x N grid."""
+    assert E.columns_across(MAIN, 40) == 40 and E.with_n3(MAIN, 40) == MAIN.with_(n3=40)
+    seven = MAIN.with_(n3y=7)                                            # 20 x 7
+    assert [E.columns_across(seven, n) for n in (20, 40, 10, 3, 2, 1)] == [7, 14, 4, 1, 1, 1]
+    assert E.with_n3(seven, 40) == MAIN.with_(n3=40, n3y=14)
+    assert E.columns_across(MAIN.with_(n3=13, n3y=50), 7) == 27          # 50 x 7/13 = 26.9
+    for bad in (0, -3, 2.5):
+        with pytest.raises(ValueError, match="columns across y must be a positive integer"):
+            E.build_mesh(MAIN.with_(n3y=bad), 3, 20)
+
+
+def test_column_size_and_counts_for_size():
+    """Plan size of the columns and the counts that give a plan size of at most dx by dy on the current circle."""
+    x0, x1 = E.grid_x_range(MAIN)
+    m = E.build_mesh(MAIN, 3, 20)
+    assert (x0, x1) == (m.x0, m.x1)
+    assert E.column_size(MAIN) == ((x0 - x1) / 20, MAIN.R / 20)
+    assert E.column_size(MAIN.with_(n3y=37)) == ((x0 - x1) / 20, MAIN.R / 37)
+    assert E.counts_for_size(MAIN, *E.column_size(MAIN)) == (20, 20)       # the plan size gives the counts back
+    assert E.counts_for_size(MAIN, *E.column_size(MAIN.with_(n3=13, n3y=50))) == (13, 50)
+    assert E.counts_for_size(MAIN, 20.0, 20.0) == (math.ceil((x0 - x1) / 20), math.ceil(MAIN.R / 20)) == (20, 37)
+    assert E.counts_for_size(MAIN, 1e4, 1e4) == (1, 1)
+    b = PR.BY_KEY["baskoyak_site_ejc"].inputs                            # base circle: exit to entry
+    back, front = E.slip_extent(b)
+    assert E.grid_x_range(b) == (front, back)
+    with pytest.raises(ValueError, match="length and width must be positive"):
+        E.counts_for_size(MAIN, 0.0, 10.0)
+    with pytest.raises(ValueError, match="require R > z_c"):
+        E.column_size(MAIN.with_(R=600.0))

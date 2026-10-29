@@ -4,8 +4,8 @@ GENG5512 thesis code, brought over from `mnersubash-arch/slope3D` (branch `claud
 history:
 
 - `ejc_app/`: the interactive Streamlit app for the submitted thesis method (EJC with the Moscarda closure, Route 2,
-  Hungr 3D / Bishop 2D, with the Law, D'Esterre and Baskoyak (a real failure) presets and a critical-surface
-  search). Run it with
+  Hungr 3D / Bishop 2D, with the Law, D'Esterre and Baskoyak (a real failure) presets, a critical-surface
+  search, and 3D columns set as N × N, N × N_y or a plan size in metres). Run it with
   `cd ejc_app && streamlit run app.py`; see `ejc_app/README.md` and `ejc_app/VERIFICATION.md`.
 - `webapp/`: the same app as a web page, with the engine ported to JavaScript and checked against
   `ejc_app/engine.py`; published privately on claude.ai. See `webapp/README.md`.

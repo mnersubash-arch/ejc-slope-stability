@@ -43,7 +43,7 @@ def original_closure_panel(inp: E.Inputs):
     c[3].metric("Gravity cap γh − u, wet (MPa)", f"{cap_w.max() / 1000:.3f}")
     nd, nw = int(np.sum(cap_d < r.sn_min * 1000)), int(np.sum(cap_w < r.sn_min * 1000))
     st.write(f"At ν = {inp.nu:g}, a = {a:g}: **{nd} of {md.count}** dry columns and **{nw} of {mw.count}** wet "
-             f"columns ({inp.n3}x{inp.n3} half-model) have γh − u below the minimum admissible σ_n "
+             f"columns ({md.n}x{md.ny} half-model) have γh − u below the minimum admissible σ_n "
              f"(φ_i there = {r.phi_deg:.3f}°). Those bases have no admissible state, so this closure gives no FoS.")
     verdict = ("The minimum admissible σ_n is above the gravity cap of every column."
                if r.sn_min * 1000 > max(cap_d.max(), cap_w.max()) else
@@ -80,6 +80,10 @@ def search_panel(inp: E.Inputs):
     if not found:
         return
     res, searched = found["res"], found["inputs"]
+    if st.session_state.inp.get("cols") == "size":
+        st.caption("Column sizes in metres: the search keeps the counts N × N_y it started with, and Use this sphere "
+                   "re-derives them from Δx and Δy for the new sphere, so the 3D FoS can differ slightly from the "
+                   "search's.")
     dims = res["settings"]["dims"]
     st.write(f"Finished in {res['ms'] / 1000:.1f} s: "
              + ", ".join(f"{res[f'r{d}']['evaluations']} surfaces in {d}D" for d in dims) + ".")
@@ -105,8 +109,11 @@ def search_panel(inp: E.Inputs):
                "until it stops improving." + (" 3D: Nelder–Mead from the 2D minima." if 3 in dims else "")
                + " The critical surface is the lowest accepted FoS among the surfaces tried: a local search, not a proof "
                "of the global minimum. Withheld results and surfaces the grid option cannot analyse are skipped. Every "
-               f"surface is solved on the current mesh ({searched.n2} slices, {searched.n3} × {searched.n3} columns); "
-               "the mesh check re-solves the critical surface on a finer one. On a coarse 3D mesh the FoS changes in "
+               f"surface is solved on the current mesh ({searched.n2} slices, {searched.n3} × "
+               f"{E.columns_across(searched, searched.n3)} columns; the counts stay fixed, so the column size changes "
+               "with the surface); the mesh check re-solves the critical surface on a finer one"
+               + ("" if searched.n3y is None else ", with N_y in the same ratio as N")
+               + ". On a coarse 3D mesh the FoS changes in "
                "small steps as columns enter or leave the mass, so searches from different starts can stop at FoS that "
                "differ by a few tenths of a percent.")
 
@@ -158,6 +165,9 @@ st.caption(f"Strength: {E.MODELS[A.inputs.model]}. {strength_txt}. Water: {water
               f"{int((r3.mesh.x > 0).sum())} floor columns, {int((r2.mesh.x > 0).sum())} floor slices. "
               if A.inputs.base_circle else "")
            + f"Sliding volume (full mass) {r3.mesh.volume:,.4g} m³; 2D area {r2.mesh.volume:,.4g} m²."
+           + (f" 3D columns {r3.mesh.n} × {r3.mesh.ny}, Δx × Δy = {r3.mesh.dx:.2f} × {r3.mesh.dy:.2f} m, column height h "
+              f"{r3.mesh.h.min():.2f} to {r3.mesh.h.max():.2f} m." if r3.mesh.count else "")
+           + (f" 2D slice width {r2.mesh.dx:.2f} m." if r2.mesh.count else "")
            + (f" Projection limit {r3.projection_limit:.4f} kPa." if r3.projection_limit is not None else ""))
 
 # ---- checks
@@ -197,15 +207,17 @@ with tab_search:
 with tab_mesh:
     base = A.inputs
     c1, c2 = st.columns(2)
-    m3 = c1.multiselect("3D meshes N", [10, 15, 20, 30, 40, 60, 80, 120, 160, 240, 320], default=[10, 20, 40, 80])
+    m3 = c1.multiselect("3D meshes N" + ("" if base.n3y is None else " (N_y in the same ratio)"),
+                        [10, 15, 20, 30, 40, 60, 80, 120, 160, 240, 320], default=[10, 20, 40, 80])
     m2 = c2.multiselect("2D slices N_2D", [20, 40, 80, 160, 320, 640, 1280, 2560, 5120], default=[20, 40, 80, 160, 320])
     if st.button("Run mesh study"):
         rows = []
         bar = st.progress(0.0)
         jobs = [(3, n) for n in sorted(m3)] + [(2, n) for n in sorted(m2)]
         for q, (dim, n) in enumerate(jobs):
-            r = ui.cached_run_3d(base.with_(n3=n)) if dim == 3 else ui.cached_run_2d(base.with_(n2=n))
-            rows.append(dict(dim=f"{dim}D", mesh=f"{n}x{n}" if dim == 3 else f"{n} slices", n=n, elements=r.mesh.count,
+            r = ui.cached_run_3d(E.with_n3(base, n)) if dim == 3 else ui.cached_run_2d(base.with_(n2=n))
+            rows.append(dict(dim=f"{dim}D", mesh=f"{n}x{r.mesh.ny}" if dim == 3 else f"{n} slices", n=n,
+                             elements=r.mesh.count,
                              status=r.status, FoS=r.fos, iterations=r.iterations, projections=r.projections))
             bar.progress((q + 1) / len(jobs))
         st.session_state.mesh_study = rows

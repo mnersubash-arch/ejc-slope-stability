@@ -205,3 +205,38 @@ def test_vertical_back_face_warning():
     w = [x.value for x in at.warning if "Vertical back face" in x.value]
     assert len(w) == 1 and "19.34 m high" in w[0] and "(269.34 m)" in w[0]
     assert dict((m.label, m.value) for m in at.metric)["FoS 3D"] == "2.758886"           # the result itself is unchanged
+
+
+def test_column_option():
+    """3D columns N x N (default), N x N_y, or a plan size in metres turned into counts on the current circle."""
+    at_mod = pytest.importorskip("streamlit.testing.v1")
+    at = at_mod.AppTest.from_file(str(APP), default_timeout=120)
+    at.run()
+    fos = lambda: dict((m.label, m.value) for m in at.metric)["FoS 3D"]      # noqa: E731
+    cap = lambda s: [c.value for c in at.sidebar.caption if s in c.value]   # noqa: E731
+    assert fos() == "2.706024" and cap("Columns 20 × 20: Δx = (x0 − x1)/N = 19.625 m by Δy = R/N = 36.263 m")
+    at.radio(key="w_cols").set_value("counts").run()                     # the same mesh: N_y starts at N
+    assert at.number_input(key="nb_n3y_value").value == 20 and fos() == "2.706024"
+    at.number_input(key="nb_n3y_value").set_value(40).run()
+    assert fos() == "2.720204" and cap("Columns 20 × 40")
+    at.radio(key="w_cols").set_value("size").run()                       # the same mesh: sizes rounded up
+    assert (at.number_input(key="nb_dx_value").value, at.number_input(key="nb_dy_value").value) == (19.63, 18.14)
+    assert fos() == "2.720204"
+    at.number_input(key="nb_dx_value").set_value(20.0).run()
+    at.number_input(key="nb_dy_value").set_value(20.0).run()
+    assert fos() == "2.713457" and cap("On this circle: N = 20 along x and N_y = 37 across y")
+    assert any("3D columns 20 × 37, Δx × Δy = 19.62 × 19.60 m" in c.value for c in at.caption)
+    at.number_input(key="nb_dx_value").set_value(0.5).run()
+    assert not at.exception and any("gives N = 785 columns along x" in e.value and "1.227 to 196.2 m" in e.value
+                                    for e in at.error)
+    at.number_input(key="nb_dx_value").set_value(20.0).run()
+    for page in ("view3d", "fbd"):
+        at.switch_page(f"views/{page}.py")
+        at.run()
+        assert not at.exception, [e.value for e in at.exception]
+        assert any("Δx × Δy × h = 19.62 × 19.60 ×" in m.value and "(20 × 37 grid)" in m.value for m in at.markdown)
+    at.switch_page("views/calculator.py")
+    at.run()
+    assert at.radio(key="w_cols").value == "size" and fos() == "2.713457"
+    at.radio(key="w_cols").set_value("square").run()
+    assert at.number_input(key="nb_n3").value == 20 and fos() == "2.706024"

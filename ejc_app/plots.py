@@ -238,11 +238,11 @@ def plan_view(r3: E.LemResult, field: str = "sigma_n", highlight: Optional[int] 
     """Plan view of the columns (cells as a heatmap) with clickable centres and the highlighted column."""
     m = r3.mesh
     vals = field_values(r3, field)
-    n = m.n
-    grid = np.full((n, n), np.nan)
+    n, ny = m.n, m.ny
+    grid = np.full((ny, n), np.nan)
     grid[m.j - 1, m.i - 1] = vals
     xs = m.x0 - (np.arange(1, n + 1) - 0.5) * m.dx
-    ys = (np.arange(1, n + 1) - 0.5) * m.dy
+    ys = (np.arange(1, ny + 1) - 0.5) * m.dy
     if mirror:
         grid = np.r_[grid[::-1], grid]
         ys = np.r_[-ys[::-1], ys]
@@ -662,8 +662,8 @@ def search_rows(inp: E.Inputs, res: dict) -> list[dict]:
     P, dims = res["prescribed"], res["settings"]["dims"]
     cols = {2: "2D, Bishop", 3: "3D, Hungr"}
 
-    def mesh(d, n):
-        return f"{n} x {n}" if d == 3 else f"{n} slices"
+    def mesh(d, c):
+        return f"{c['n']} x {c['ny']} columns" if d == 3 else f"{c['n']} slices"
 
     def fos_or_status(v, s):
         return f"{v:.6f}" if v is not None else (s or "withheld")
@@ -685,7 +685,7 @@ def search_rows(inp: E.Inputs, res: dict) -> list[dict]:
             c = r["check"]
             if not c:
                 return "–"
-            return (f"{mesh(d, c['n'])}: {fos_or_status(c['fos'], c['status'])}"
+            return (f"{mesh(d, c)}: {fos_or_status(c['fos'], c['status'])}"
                     + (f" ({_pct(c['fos'], r['fos'])})" if c["change"] is not None else ""))
         if what == "tried":
             n = r["counts"]

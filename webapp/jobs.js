@@ -19,6 +19,7 @@
         const md = E.buildMesh(E.inputs(Object.assign({}, inp, { wet: false })), 3, inp.n3);
         const mw = E.buildMesh(E.inputs(Object.assign({}, inp, { wet: true })), 3, inp.n3);
         const cd = E.gravityCap(md, inp.gamma), cw = E.gravityCap(mw, inp.gamma);
+        out.ny = md.ny;
         const max = (v) => v.reduce((m, x) => (x > m ? x : m), -Infinity);
         Object.assign(out, { cap_dry: max(cd), cap_wet: max(cw), count_dry: md.count, count_wet: mw.count,
           below_dry: cd.filter((v) => v < r.sn_min * 1000).length, below_wet: cw.filter((v) => v < r.sn_min * 1000).length });
@@ -58,10 +59,12 @@
         const jobs = job.n3s.map((n) => [3, n]).concat(job.n2s.map((n) => [2, n]));
         const rows = [];
         jobs.forEach(([dim, n], q) => {
-          const b = E.inputs(Object.assign({}, job.inputs, dim === 3 ? { n3: n } : { n2: n }));
-          const a = attempt(() => (dim === 3 ? E.run3d(b) : E.run2d(b)));
-          const r = a.r;
-          rows.push({ dim: `${dim}D`, mesh: dim === 3 ? `${n}x${n}` : `${n} slices`, n, elements: r ? r.mesh.count : null,
+          // 3D: columns across y scaled with n, so the columns keep their shape (withN3)
+          const b = attempt(() => (dim === 3 ? E.withN3(E.inputs(job.inputs), n) : E.inputs(Object.assign({}, job.inputs, { n2: n }))));
+          const a = b.r ? attempt(() => (dim === 3 ? E.run3d(b.r) : E.run2d(b.r))) : b;
+          const r = a.r, ny = dim === 3 && b.r ? E.columnsAcross(b.r, n) : null;
+          rows.push({ dim: `${dim}D`, mesh: dim === 3 ? `${n}x${ny !== null ? ny : n}` : `${n} slices`, n, ny,
+            elements: r ? r.mesh.count : null,
             status: r ? r.status : "INPUT ERROR", fos: r ? r.fos : null, iterations: r ? r.iterations : null,
             projections: r ? r.projections : null, reason: r ? (r.fos !== null ? "" : r.reason.slice(0, 120)) : a.error });
           say({ done: q + 1, total: jobs.length, label: `${dim}D ${n}` });

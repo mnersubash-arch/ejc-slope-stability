@@ -14,7 +14,7 @@ import streamlit as st
 import engine as E
 import presets as PR
 
-LIVE_MAX_N = 40          # live update only for N <= 40 (brief, page 1)
+LIVE_MAX_N = 40          # live update only for N <= 40 (brief, page 1); N x N_y <= 40 x 40 with N_y
 DISCLAIMER = "Research tool for the prescribed-surface comparison in Mahat (2026) thesis; not for design."
 
 # name: (label, unit, min, max, step, format)
@@ -37,6 +37,9 @@ NUM = {
     "Hw": ("H_w, water-table height", "m", 0.0, 1000.0, 1.0, "%.1f"),
     "beta_w": ("β_w, water-table angle", "deg", 1.0, 89.0, 0.5, "%.1f"),
     "n3": ("N, 3D mesh (N x N half-model)", "-", 2, 320, 1, None),
+    "n3y_value": ("N_y, 3D columns across y (0 to R)", "-", 2, 320, 1, None),
+    "dx_value": ("Δx, column length along x, at most", "m", 0.01, 4000.0, 0.01, "%.4f"),
+    "dy_value": ("Δy, column width across y, at most", "m", 0.01, 4000.0, 0.01, "%.4f"),
     "n2": ("N_2D, 2D slices", "-", 2, 10000, 1, None),
 }
 STRENGTH = {"EJC": "EJC (Extended Jiang Criterion)", "GHB": "GHB (conventional generalised Hoek-Brown)",
@@ -48,6 +51,7 @@ CLOSURE = {"moscarda": "Moscarda: σ2 = ν(σ1 + σ3) (adopted)",
 FORM = {"FH": "F_H, force form (governing, eq. 4.14)", "FM": "F_M, moment form (eq. 4.15, own iteration, 3D)"}
 TENSION = {"none": "None", "C0": "C0: remove c_i on bases with σ_n < 0", "T0": "T0: remove all basal shear there"}
 ITER = {"default": "Default (§1.4): F from F_H/F_M, then σ_n", "native_v15": "Native v15 iteration path"}
+COLS = {"square": "N × N", "counts": "N × N_y", "size": "Δx, Δy (m)"}
 CHOICES = {"strength": STRENGTH, "closure": CLOSURE, "form": FORM, "tension": TENSION, "iteration": ITER}
 
 
@@ -62,7 +66,91 @@ def to_state(inp: E.Inputs) -> dict:
     d["closure"] = {"ejc_original": "original", "ejc_sigma2_eq_sigma3": "s2s3"}.get(inp.model, "moscarda")
     d["water"] = "ru" if inp.ru is not None else ("Wet" if inp.wet else "Dry")
     d["ru_value"] = 0.0 if inp.ru is None else float(inp.ru)
+    d["cols"] = "square" if inp.n3y is None else "counts"
+    d["n3y_value"] = inp.n3 if inp.n3y is None else int(inp.n3y)
+    sz = sizes_for(d, inp.n3, d["n3y_value"])
+    d["dx_value"], d["dy_value"] = sz if sz else (inp.R / inp.n3, inp.R / inp.n3)
     return d
+
+
+# 3D columns: N x N (the brief's grid), N x N_y, or plan sizes in metres converted to counts on the current circle
+def _geom(d: dict) -> E.Inputs:
+    return E.Inputs(H=float(d["H"]), beta=float(d["beta"]), xc=float(d["xc"]), zc=float(d["zc"]), R=float(d["R"]),
+                    base_circle=bool(d["base_circle"]))
+
+
+def _ceil4(v: float) -> float:
+    q = 10.0 ** (math.floor(math.log10(v)) - 3)
+    return float(f"{math.ceil(v / q - 1e-9) * q:.4g}")
+
+
+def _floor4(v: float) -> float:
+    q = 10.0 ** (math.floor(math.log10(v)) - 3)
+    return float(f"{math.floor(v / q + 1e-9) * q:.4g}")
+
+
+def span_of(d: dict):
+    """Grid span x0 - x1 (m) of the circle of d, or None when the default grid refuses it (the run then says why)."""
+    try:
+        x0, x1 = E.grid_x_range(_geom(d))
+    except ValueError:
+        return None
+    return x0 - x1
+
+
+def sizes_for(d: dict, n: int, ny: int):
+    """Plan size (dx, dy) in m of n x ny columns on the circle of d, rounded up to 4 significant digits (which gives
+    the same counts back), or None when the circle has no grid."""
+    span = span_of(d)
+    if span is None:
+        return None
+    return _clamp("dx_value", _ceil4(span / n)), _clamp("dy_value", _ceil4(float(d["R"]) / ny))
+
+
+def col_counts(d: dict):
+    """Counts (N, N_y) of the column option of d; N_y is None for the N x N grid. Sizes in metres become counts with
+    engine.counts_for_size on the current circle; if the circle has no grid, the run reports why."""
+    cols = d.get("cols", "square")
+    if cols == "counts":
+        return int(d["n3"]), int(d["n3y_value"])
+    if cols == "size":
+        try:
+            return E.counts_for_size(_geom(d), float(d["dx_value"]), float(d["dy_value"]))
+        except ValueError:
+            return int(d["n3"]), None
+    return int(d["n3"]), None
+
+
+def col_grid(d: dict) -> tuple[int, int]:
+    n, ny = col_counts(d)
+    return n, n if ny is None else ny
+
+
+def mesh_problem(d: dict):
+    """With sizes in metres, the counts they give must lie in 2 to 320, as N: the message, or None."""
+    span = span_of(d) if d.get("cols") == "size" else None
+    if span is None:
+        return None
+    n, ny = col_counts(d)
+    out = []
+    for sym, v, cnt, csym, axis, L in (("Δx", d["dx_value"], n, "N", "along x", span),
+                                        ("Δy", d["dy_value"], ny, "N_y", "across y", float(d["R"]))):
+        if not 2 <= cnt <= 320:
+            out.append(f"{sym} = {float(v):g} m gives {csym} = {cnt} column{'' if cnt == 1 else 's'} {axis} on this "
+                       f"circle; {csym} must be from 2 to 320, so use {sym} from {_ceil4(L / 320):g} to "
+                       f"{_floor4(L / 2):g} m.")
+    return " ".join(out) or None
+
+
+def cols_text(d: dict) -> str:
+    span = span_of(d)
+    if span is None:
+        return ""
+    n, ny = col_grid(d)
+    ysym = "N" if d.get("cols", "square") == "square" else "N_y"
+    return ((f"On this circle: N = {n} along x and N_y = {ny} across y. " if d.get("cols") == "size" else "")
+            + f"Columns {n} × {ny}: Δx = (x0 − x1)/N = {span / n:.3f} m by Δy = R/{ysym} = {float(d['R']) / ny:.3f} m. "
+            "The height h = z_t − z_b of each column is set by the ground and the slip surface.")
 
 
 def to_inputs(d: dict) -> E.Inputs:
@@ -73,17 +161,20 @@ def to_inputs(d: dict) -> E.Inputs:
     else:
         model = {"moscarda": "ejc_moscarda", "original": "ejc_original", "s2s3": "ejc_sigma2_eq_sigma3"}[d["closure"]]
     native = d["iteration"] == "native_v15"
+    n3, ny = col_counts(d)                 # N_y = N is the N x N grid
     return E.Inputs(H=float(d["H"]), beta=float(d["beta"]), xc=float(d["xc"]), zc=float(d["zc"]), R=float(d["R"]),
                     gamma=float(d["gamma"]), sigma_ci=float(d["sigma_ci"]), mi=float(d["mi"]), gsi=float(d["gsi"]),
                     D=float(d["D"]), a_override=float(d["a_value"]) if d["a_on"] else None, nu=float(d["nu"]),
                     model=model, wet=d["water"] == "Wet", Hw=float(d["Hw"]), beta_w=float(d["beta_w"]),
-                    n3=int(d["n3"]), n2=int(d["n2"]), form="FH" if native else d["form"],
+                    n3=n3, n3y=None if ny is None or ny == n3 else ny, n2=int(d["n2"]),
+                    form="FH" if native else d["form"],
                     tension="none" if native else d["tension"], iteration=d["iteration"], c_mc=float(d["c_mc"]),
                     phi_mc=float(d["phi_mc"]), ru=float(d["ru_value"]) if d["water"] == "ru" else None,
                     base_circle=bool(d["base_circle"]))
 
 
-WIDGET_NAMES = list(NUM) + ["a_on", "strength", "closure", "water", "form", "tension", "iteration", "base_circle"]
+WIDGET_NAMES = list(NUM) + ["a_on", "strength", "closure", "water", "form", "tension", "iteration", "base_circle",
+                             "cols"]
 
 
 def _wkeys(name: str) -> list[str]:
@@ -111,6 +202,12 @@ def init_state():
         st.session_state.inp = to_state(PR.BY_KEY[PR.DEFAULT_KEY].inputs)
         st.session_state.preset = PR.DEFAULT_KEY
         st.session_state.preset_note = ""
+    d = st.session_state.inp
+    if "cols" not in d:                    # a session that started before the column option was added
+        n3 = int(d["n3"])
+        sz = sizes_for(d, n3, n3)
+        d.update(cols="square", n3y=None, n3y_value=n3, dx_value=sz[0] if sz else float(d["R"]) / n3,
+                 dy_value=sz[1] if sz else float(d["R"]) / n3)
 
 
 def apply_preset(key: str):
@@ -137,8 +234,8 @@ def _on_reset():
 # ---------------------------------------------------------------------------------------------------------------
 # widgets
 # ---------------------------------------------------------------------------------------------------------------
-def _num(container, name: str, disabled: bool = False):
-    label, unit, lo, hi, step, fmt = NUM[name]
+def _num(container, name: str, disabled: bool = False, label: str = ""):
+    label, unit, lo, hi, step, fmt = (label or NUM[name][0],) + NUM[name][1:]
     d = st.session_state.inp
     nk, sk = f"nb_{name}", f"sl_{name}"
     if nk not in st.session_state:
@@ -192,6 +289,26 @@ def _check(container, name: str, label: str, help: str = "", disabled: bool = Fa
     container.checkbox(label, key=k, on_change=cb, disabled=disabled, help=help or None)
 
 
+def _on_cols():
+    """Switch the 3D column option and keep the current columns: the counts carry over, and sizes in metres start
+    from the current plan size (rounded up to 4 digits, which gives the same counts)."""
+    d = st.session_state.inp
+    new = st.session_state["w_cols"]
+    if new == d["cols"]:
+        return
+    n, ny = col_grid(d)
+    if new == "size":
+        sz = sizes_for(d, n, ny)
+        if sz:
+            d["dx_value"], d["dy_value"] = sz
+    else:                                  # counts outside 2 to 320 (sizes the sidebar flags) are clamped
+        d["n3"] = _clamp("n3", n)
+        if new == "counts":
+            d["n3y_value"] = _clamp("n3y_value", ny)
+    d["cols"] = new
+    _write_widgets()
+
+
 def _on_iteration():
     if st.session_state.inp["iteration"] == "native_v15":
         st.session_state.inp["form"] = "FH"
@@ -240,9 +357,26 @@ def sidebar() -> E.Inputs:
         _num(st, "beta_w", disabled=d["water"] != "Wet")
         _num(st, "ru_value", disabled=d["water"] != "ru")
     with sb.expander("Mesh", expanded=True):
-        _num(st, "n3")
+        if "w_cols" not in st.session_state:
+            st.session_state["w_cols"] = d["cols"]
+        st.radio("3D columns: plan size Δx × Δy", list(COLS), format_func=COLS.get, key="w_cols", on_change=_on_cols,
+                 horizontal=True)
+        if d["cols"] != "size":
+            _num(st, "n3", label="N, 3D columns along x" if d["cols"] == "counts" else "")
+        if d["cols"] == "counts":
+            _num(st, "n3y_value")
+        if d["cols"] == "size":
+            _num(st, "dx_value")
+            _num(st, "dy_value")
+        problem = mesh_problem(d)
+        if problem:
+            st.error(problem)
+        st.caption(cols_text(d))
         _num(st, "n2")
-        st.caption(f"Live update when N ≤ {LIVE_MAX_N}; otherwise press Run.")
+        span = span_of(d)
+        if span is not None:
+            st.caption(f"2D slices: Δx = (x0 − x1)/N_2D = {span / int(d['n2']):.3f} m, unit thickness.")
+        st.caption(f"Live update up to {LIVE_MAX_N} × {LIVE_MAX_N} columns; otherwise press Run.")
     with sb.expander("Options", expanded=False):
         native = d["iteration"] == "native_v15"
         _choice(st, "iteration", "Iteration path", ITER, on_change=_on_iteration)
@@ -282,17 +416,22 @@ def _safe_run(inp: E.Inputs):
 
 
 def analysis(inp: E.Inputs):
-    """Run (live for N <= 40, otherwise on the Run button) and return (analysis or None, stale flag)."""
-    live = inp.n3 <= LIVE_MAX_N
+    """Run (live up to 40 x 40 columns, otherwise on the Run button) and return (analysis or None, stale flag)."""
+    problem = mesh_problem(st.session_state.inp)
+    if problem:
+        st.error(f"Input error: {problem}")
+        return None, False
+    n, ny = inp.n3, E.columns_across(inp, inp.n3)
+    live = n * ny <= LIVE_MAX_N * LIVE_MAX_N
     p = PR.BY_KEY[st.session_state.preset]
     if live:
-        st.sidebar.caption("Live update is on (N ≤ 40).")
+        st.sidebar.caption(f"Live update is on (up to {LIVE_MAX_N} × {LIVE_MAX_N} columns).")
         A, err = _safe_run(inp)
         st.session_state.analysis, st.session_state.analysis_error = A, err
     else:
         msg = "Run (slow preset, may take a minute)" if p.slow else "Run"
         if st.sidebar.button(msg, type="primary", width="stretch"):
-            with st.spinner(f"Solving 3D {inp.n3}x{inp.n3} and 2D {inp.n2} slices..."):
+            with st.spinner(f"Solving 3D {n}x{ny} columns and 2D {inp.n2} slices..."):
                 A, err = _safe_run(inp)
             st.session_state.analysis, st.session_state.analysis_error = A, err
     A = st.session_state.get("analysis")
@@ -302,7 +441,8 @@ def analysis(inp: E.Inputs):
         return None, False
     stale = A is not None and A.inputs != inp
     if A is None:
-        st.info(f"N = {inp.n3} > {LIVE_MAX_N}: press **Run** in the sidebar to solve.")
+        st.info(f"The mesh ({n} × {ny} columns) is above the live limit of {LIVE_MAX_N} × {LIVE_MAX_N}: press **Run** "
+                "in the sidebar to solve.")
     elif stale:
         st.warning("The inputs have changed since the last run; the results below are for the previous inputs. "
                    "Press **Run** to update.")
@@ -487,13 +627,14 @@ def search_notes(current: E.Inputs, searched: E.Inputs, res: dict) -> list[tuple
         if edges:
             notes.append(("warning", f"{d}D: the critical {'circle' if d == 2 else 'sphere'} " + "; it ".join(edges) + "."))
         c = r["check"]
-        mesh = f"{c['n']} x {c['n']}" if d == 3 else f"{c['n']} slices"
+        mesh = f"{c['n']} x {c['ny']} columns" if d == 3 else f"{c['n']} slices"
         if c["change"] is not None and abs(c["change"]) > 0.005:
             change = f"{'+' if c['fos'] >= r['fos'] else '−'}{abs((c['fos'] / r['fos'] - 1) * 100):.1f} %"
             notes.append(("warning", f"{d}D: on {mesh} the critical surface's FoS changes by {change}, more than the "
                                      "0.5 % screening threshold of eq. 4.17. The current mesh under-resolves this surface, "
                                      "and the search may favour surfaces whose FoS the mesh underestimates. Refine the "
-                                     f"mesh ({'N_2D' if d == 2 else 'N'}) and search again."))
+                                     f"mesh ({'N_2D' if d == 2 else 'N' if searched.n3y is None else 'N and N_y'}) "
+                                     "and search again."))
         elif c["fos"] is None:
             notes.append(("warning", f"{d}D: on {mesh} the critical surface gave no accepted FoS ({c['status']})."))
     return notes

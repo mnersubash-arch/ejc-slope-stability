@@ -488,6 +488,8 @@ class Inputs:
     phi_mc: float = 0.0                     # Mohr-Coulomb phi' (deg), model "mc"
     ru: Optional[float] = None              # pore-pressure ratio: u = ru gamma h (None = dry or water table)
     base_circle: bool = False               # grid from exit to entry, floor columns allowed (see build_mesh)
+    # column shape (addition, off by default): 3D columns across y; None = N, the brief's N x N grid
+    n3y: Optional[int] = None
 
     @property
     def hb(self) -> tuple[float, float, float]:
@@ -549,6 +551,7 @@ class Mesh:
     w: np.ndarray              # kN
     u: np.ndarray              # kPa
     zw: np.ndarray
+    ny: int = 1                # cells across y (3D: columns_across; 2D: 1)
 
     @property
     def count(self) -> int:
@@ -606,6 +609,56 @@ def vertical_faces(inp: Inputs) -> dict:
     return {"back": back if back > tol else 0.0, "front": front if front > tol else 0.0}
 
 
+def grid_x_range(inp: Inputs) -> tuple[float, float]:
+    """The grid's x range on the central section, (x0, x1) with x0 > x1: brief §1.4, x0 = x_c - sqrt(R^2 - z_c^2) (the
+    toe-level crossing) and x1 = x_c - R; with the base-circle option, the circle's exit and entry (slip_extent).
+    Raises ValueError for a circle the default grid refuses (see build_mesh)."""
+    xc, zc, R = inp.xc, inp.zc, inp.R
+    if inp.base_circle:
+        x1, x0 = slip_extent(inp)
+        return x0, x1
+    if not (R > zc):
+        raise ValueError("require R > z_c (the sphere must cut the toe level); for a face circle, with its lowest point "
+                         "above the toe level, use the base-circle option")
+    x0 = xc - math.sqrt(R * R - zc * zc)
+    if x0 < -1e-5 * R:
+        raise ValueError(f"the circle crosses the toe level {-x0:.4g} m behind the toe, so the default grid would cut "
+                         f"off the toe region; use the base-circle option")
+    return x0, xc - R
+
+
+def columns_across(inp: Inputs, n: int) -> int:
+    """3D columns across y (y from 0 to R) for a mesh with n columns along x: n for the brief's N x N grid (n3y None);
+    otherwise n3y scaled by n/n3 and rounded half up (at least 1), so a mesh study or the search's finer mesh keeps
+    the column shape. At n = n3 it is n3y. Same as columnsAcross in webapp/engine.js."""
+    if inp.n3y is None:
+        return n
+    if not (isinstance(inp.n3y, (int, np.integer)) and inp.n3y >= 1 and isinstance(inp.n3, (int, np.integer))
+            and inp.n3 >= 1):
+        raise ValueError("the number of columns across y must be a positive integer")
+    return max(1, (2 * int(inp.n3y) * int(n) + int(inp.n3)) // (2 * int(inp.n3)))
+
+
+def with_n3(inp: Inputs, n: int) -> Inputs:
+    """The inputs with n columns along x and the columns across y scaled to keep their shape (mesh studies)."""
+    return inp.with_(n3=n, n3y=None if inp.n3y is None else columns_across(inp, n))
+
+
+def column_size(inp: Inputs) -> tuple[float, float]:
+    """Plan size of the 3D columns, (dx, dy) in m: dx = (x0 - x1)/N along x, dy = R/N_y across y."""
+    x0, x1 = grid_x_range(inp)
+    return (x0 - x1) / inp.n3, inp.R / columns_across(inp, inp.n3)
+
+
+def counts_for_size(inp: Inputs, dx: float, dy: float) -> tuple[int, int]:
+    """Columns along x and across y whose plan size is at most dx by dy (m) on the current geometry:
+    N = ceil((x0 - x1)/dx), N_y = ceil(R/dy), each at least 1 (a relative 1e-9 below a whole number counts as it)."""
+    if not (dx > 0 and dy > 0):
+        raise ValueError("the column length and width must be positive")
+    x0, x1 = grid_x_range(inp)
+    return (max(1, math.ceil((x0 - x1) / dx * (1 - 1e-9))), max(1, math.ceil(inp.R / dy * (1 - 1e-9))))
+
+
 def build_mesh(inp: Inputs, dim: int, n: int) -> Mesh:
     """Mesh (brief §1.4): x from x0 = x_c - sqrt(R^2 - z_c^2) to x1 = x_c - R, dx = (x0 - x1)/N, x_i = x0 - (i - 1/2) dx;
     3D: y from 0 to R, dy = R/N, y_j = (j - 1/2) dy. 2D (brief §1.5): y = 0, unit thickness, rho = R.
@@ -619,6 +672,7 @@ def build_mesh(inp: Inputs, dim: int, n: int) -> Mesh:
     ``base_circle=True`` (off by default): x runs from the circle's exit x0 to its entry x1 on the central section
     (``slip_extent``), with the same cell numbering, and floor columns are allowed: x > 0 with z_t = 0 and h = -z_b > 0.
     Pore pressure: ``ru`` gives u = ru gamma h for every column or slice; otherwise the water table (``wet``) or dry.
+    ``n3y`` (off by default): N_y columns across y instead of N (``columns_across``), dy = R/N_y; dx is unchanged.
     """
     if dim not in (2, 3):
         raise ValueError("dim must be 2 or 3")
@@ -630,21 +684,12 @@ def build_mesh(inp: Inputs, dim: int, n: int) -> Mesh:
         if not 0 <= inp.ru < 1:
             raise ValueError("require 0 <= r_u < 1")
     xc, zc, R = inp.xc, inp.zc, inp.R
-    if inp.base_circle:
-        x1, x0 = slip_extent(inp)
-    else:
-        if not (R > zc):
-            raise ValueError("require R > z_c (the sphere must cut the toe level); for a face circle, with its lowest point "
-                             "above the toe level, use the base-circle option")
-        x0 = xc - math.sqrt(R * R - zc * zc)
-        x1 = xc - R
-        if x0 < -1e-5 * R:
-            raise ValueError(f"the circle crosses the toe level {-x0:.4g} m behind the toe, so the default grid would cut "
-                             f"off the toe region; use the base-circle option")
+    x0, x1 = grid_x_range(inp)
     dx = (x0 - x1) / n
+    ny = columns_across(inp, n) if dim == 3 else 1
     if dim == 3:
-        dy = R / n
-        ii, jj = np.meshgrid(np.arange(1, n + 1), np.arange(1, n + 1), indexing="ij")
+        dy = R / ny
+        ii, jj = np.meshgrid(np.arange(1, n + 1), np.arange(1, ny + 1), indexing="ij")
         ii, jj = ii.ravel(), jj.ravel()
         y = (jj - 0.5) * dy
     else:
@@ -675,7 +720,7 @@ def build_mesh(inp: Inputs, dim: int, n: int) -> Mesh:
         zw = np.full(len(x), np.nan)
         u = np.zeros(len(x))
     return Mesh(dim, n, x0, x1, dx, dy, ii, jj, x, y, zb, zt, h, ah, g, ah / g, rho, kap,
-                inp.gamma * h * ah, u, zw)
+                inp.gamma * h * ah, u, zw, ny)
 
 
 # ---------------------------------------------------------------------------------------------------------------
@@ -1004,7 +1049,8 @@ def columns_table(r: LemResult) -> dict[str, np.ndarray]:
     """Per-column results as named columns (for CSV export)."""
     m = r.mesh
     out = {"i": m.i, "j": m.j, "x_m": m.x, "y_m": m.y, "z_base_m": m.zb, "z_top_m": m.zt, "h_m": m.h,
-           "A_h_m2": m.ah, "A_m2": m.area, "g_z": m.g, "rho_m": m.rho, "kappa": m.kap, "W_kN": m.w, "u_kPa": m.u}
+           "dx_m": np.full(m.count, m.dx), "dy_m": np.full(m.count, m.dy), "A_h_m2": m.ah, "A_m2": m.area,
+           "g_z": m.g, "rho_m": m.rho, "kappa": m.kap, "W_kN": m.w, "u_kPa": m.u}
     if r.strength is not None and r.sn is not None:
         s = r.strength
         out.update({"sigma_n_kPa": r.sn, "phi_i_deg": np.degrees(s.phi), "c_i_kPa": s.c, "tau_s_kPa": s.tau,
@@ -1367,8 +1413,13 @@ def critical_search(inp: Inputs, dims=(2,), progress=None, **opts) -> dict:
                     (s["xc"] - math.sqrt(s["R"] * s["R"] - s["zc"] * s["zc"])) - (s["xc"] - s["R"]))
             n = min(2 * inp.n3, 320) if dim == 3 else min(4 * inp.n2, 10000)
             kw = {"xc": s["xc"], "zc": s["zc"], "R": s["R"], ("n3" if dim == 3 else "n2"): n}
+            ny = None
+            if dim == 3 and inp.n3y is not None:     # columns across y in the same ratio, at most 320 as along x
+                ny = min(columns_across(inp, n), 320)
+                kw["n3y"] = ny
             ck = solve_at(dim, **kw)
-            res["check"] = {"n": n, "fos": ck["fos"], "status": ck["status"], "reason": ck["reason"],
+            res["check"] = {"n": n, "ny": ny if ny is not None else (n if dim == 3 else 1), "fos": ck["fos"],
+                            "status": ck["status"], "reason": ck["reason"],
                             "change": (ck["fos"] - best[1]) / ck["fos"] if ck["fos"] is not None else None}
         res["evaluations"] = counts["solved"] + counts["withheld"] + counts["skipped"]
         res["ms"] = (time.perf_counter() - td) * 1000.0

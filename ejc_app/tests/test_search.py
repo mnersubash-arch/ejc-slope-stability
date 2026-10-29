@@ -100,6 +100,18 @@ def test_search_result_is_the_lowest_fos_tried():
         assert r["counts"]["solved"] == len(fos) and r["counts"]["skipped"] == sum(r["skipped_why"].values())
     assert res["r2"]["fos"] == pytest.approx(2.605316267142031, rel=1e-12)      # as webapp/engine.js (verify_engine.js)
     assert res["r3"]["fos"] == pytest.approx(2.9652854773051613, rel=1e-12)
+    assert (res["r3"]["check"]["n"], res["r3"]["check"]["ny"], res["r2"]["check"]["ny"]) == (40, 40, 1)
+
+
+def test_search_finer_mesh_keeps_the_column_shape():
+    """With N x N_y columns the mesh check doubles N (at most 320) and scales N_y in the same ratio, also at most
+    320: 20 x 9 is checked on 40 x 18, and 8 x 170 on 16 x 320."""
+    de = PR.BY_KEY["desterre_DE-1.5-c1-ru0"].inputs
+    for n3, n3y, check in ((20, 9, (40, 18)), (8, 170, (16, 320))):
+        res = E.critical_search(de.with_(n3=n3, n3y=n3y), dims=(2, 3))
+        r, c = res["r3"], res["r3"]["check"]
+        assert (c["n"], c["ny"], c["status"]) == (*check, "ACCEPTED")
+        assert c["fos"] == E.run_3d(de.with_(xc=r["xc"], zc=r["zc"], R=r["R"], n3=c["n"], n3y=c["ny"])).fos
 
 
 def test_single_mass():

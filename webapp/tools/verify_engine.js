@@ -57,6 +57,8 @@ for (const c of ref.cases) {
     if (js.mesh.count !== py.count) fail(`${tag}: count js ${js.mesh.count} py ${py.count}`);
     if (rel(js.mesh.volume, py.volume) > 1e-13) fail(`${tag}: volume js ${js.mesh.volume} py ${py.volume}`);
     if (rel(js.mesh.x0, py.x0) > 1e-14 || rel(js.mesh.x1, py.x1) > 1e-14) fail(`${tag}: grid ends differ`);
+    if (js.mesh.n !== py.n || js.mesh.ny !== py.ny || rel(js.mesh.dx, py.dx) > 1e-14 || rel(js.mesh.dy, py.dy) > 1e-14)
+      fail(`${tag}: grid js ${js.mesh.n} x ${js.mesh.ny} (${js.mesh.dx} by ${js.mesh.dy} m) py ${py.n} x ${py.ny} (${py.dx} by ${py.dy} m)`);
     if (rel(js.projection_limit, py.projection_limit) > 1e-12) fail(`${tag}: projection limit js ${js.projection_limit} py ${py.projection_limit}`);
     if (js.history.length !== py.history.length) fail(`${tag}: history length js ${js.history.length} py ${py.history.length}`);
     if (js.checks.length !== py.checks.length) fail(`${tag}: ${js.checks.length} checks in js, ${py.checks.length} in py`);
@@ -139,6 +141,20 @@ for (const x of ref.faces || []) {                    // vertical faces where th
   for (const k of ["back", "front"]) if (!(Math.abs(f[k] - x.faces[k]) <= 1e-12 * x.inputs.H)) fail(`vertical ${k} face: js ${f[k]} py ${x.faces[k]} (${JSON.stringify(x.inputs)})`);
 }
 
+for (const x of ref.columns || []) {                  // 3D columns across y, plan size, counts for a size
+  const inp = inputsOf(x.inputs), tag = `columns ${JSON.stringify({ n3: x.inputs.n3, n3y: x.inputs.n3y })}`;
+  if (x.counts) {
+    const c = E.countsForSize(inp, val(x.dx), val(x.dy));
+    if (c.join() !== x.counts.join()) fail(`${tag}: counts for ${x.dx} by ${x.dy} m js ${c} py ${x.counts}`);
+    continue;
+  }
+  const a = E.columnsAcross(inp, x.n), sz = E.columnSize(inp);
+  if (a !== x.across) fail(`${tag}: columns across for n = ${x.n} js ${a} py ${x.across}`);
+  if (rel(sz[0], x.size[0]) > 1e-14 || rel(sz[1], x.size[1]) > 1e-14) fail(`${tag}: column size js ${sz} py ${x.size}`);
+  const w = E.withN3(inp, x.n);
+  if (w.n3 !== x.n || (inp.n3y === null ? w.n3y !== null : w.n3y !== x.across)) fail(`${tag}: withN3 js ${w.n3} x ${w.n3y}`);
+}
+
 // critical-surface searches: every field, the clouds of surfaces tried included; FoS and other numbers to 1e-12
 // (relative), lengths and search parameters to 1e-12 of H (V8's tan and the C library's can differ in the last bit, so
 // a coordinate near zero can differ by more than 1e-12 of itself)
@@ -188,7 +204,7 @@ for (const s of ref.searches || []) {
 
 console.log(`${compared} runs, ${fx} fixture arrays, ${ref.original_closure.length} original-closure minima ` +
   `(and ${Object.keys(EDGE_MINIMA).length} against 50-digit values), ` +
-  `${ref.extents.length} extents, ${(ref.faces || []).length} vertical-face cases, ${masses} whole-mass force sets compared (worst ${worstMass.toExponential(1)} of the weight), ` +
+  `${ref.extents.length} extents, ${(ref.faces || []).length} vertical-face cases, ${(ref.columns || []).length} column-shape cases, ${masses} whole-mass force sets compared (worst ${worstMass.toExponential(1)} of the weight), ` +
   `${searches} critical-surface searches (${surfaces} surfaces, every field; worst length diff ${worstLen.toExponential(1)} of H); ` +
   `worst FoS rel diff ${worstFos.toExponential(2)}, worst sigma_n rel diff ` +
   `${worstArr.toExponential(2)}; ${fails} failures`);

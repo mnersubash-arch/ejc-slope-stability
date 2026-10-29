@@ -12,8 +12,13 @@ Research tool for the prescribed-surface comparison in Mahat (2026) thesis; not 
 - **Inputs:** a number box and a slider for every input, the 56 presets of `ejc_app/presets.py`, and a "Reset inputs
   to preset" button. The number box takes any value in the valid range; the slider spans a window around the preset's
   value (for example ±H for the sphere centre and radius), re-centred when a typed value falls outside it.
-- **Updating:** results update live while N ≤ 40 and N_2D ≤ 640; above that, press Run. The engine runs in a Web Worker
-  (`worker.js`), or on the page itself if the worker cannot start.
+- **3D columns:** N × N (the brief's grid, the default), N × N_y, or a plan size Δx × Δy in metres that becomes
+  counts on the current circle (N = ⌈(x0 − x1)/Δx⌉, N_y = ⌈R/Δy⌉, each 2 to 320). The rail shows each column's plan
+  size and the 2D slice width; the summary gives the grid, Δx × Δy and the range of column heights h, and the 3D view
+  and the free-body diagram give the selected column's Δx × Δy × h. The column height is set by the ground and the
+  slip surface. See "Column shape" in `ejc_app/README.md`.
+- **Updating:** results update live up to 40 × 40 columns and N_2D ≤ 640; above that, press Run. The engine runs in
+  a Web Worker (`worker.js`), or on the page itself if the worker cannot start.
 - **Summary:** both factors of safety and their ratio, iterations, projections and the bases with tensile effective
   normal stress (σ′n < 0), with a note when there are any and a warning above a quarter of the bases (thesis §5.8).
   A warning appears when the slip circle ends below the ground at its back extreme (or, with the base-circle option,
@@ -55,17 +60,18 @@ Plotly.js 2.35.2 loads from cdnjs (jsDelivr as a fallback); fonts from Google Fo
 Run from this folder:
 
 1. `python3 tools/dump_reference.py` writes the Python engine's results to `tools/ref/` (about 4 minutes).
-2. `node tools/verify_engine.js` compares `engine.js` with them: 158 analyses (every main case, GHB, the σ2 = σ3
-   closure, F_M, C0/T0, the native v15 path, the safeguard off, other meshes, ν, GSI, D, r_u, base and face circles,
-   Mohr-Coulomb, the Carranza-Torres, Law, D'Esterre and Baskoyak presets and the input errors), the whole-mass forces
-   of the 145 of them that reach a final state, 63 strength-fixture arrays, 7 original-closure minima (also checked
-   against 50-digit values), 24 slip extents, 7 vertical-face cases and 7 critical-surface searches (Taylor's φ = 0
-   slopes, two D'Esterre slopes with the base-circle option, the thesis slope with GHB in 2D and 3D, the Baskoyak
-   failure with GHB in 2D and 3D, and two searches that stop on a domain limit: 4,367 surfaces, every field
-   compared). Result: largest FoS difference 4.4e-16 (relative), whole-mass totals
-   within 4e-16 of the weight, with the same statuses, iteration counts, projection counts, error texts and check
-   results; the searches try the same surfaces in the same order and find the same critical surfaces, with FoS within
-   1e-12 and lengths within 7e-15 of H; 0 failures. The results agree to rounding rather than bit for bit because the
+2. `node tools/verify_engine.js` compares `engine.js` with them: 173 analyses (every main case, GHB, the σ2 = σ3
+   closure, F_M, C0/T0, the native v15 path, the safeguard off, other meshes, N × N_y columns, ν, GSI, D, r_u, base
+   and face circles, Mohr-Coulomb, the Carranza-Torres, Law, D'Esterre and Baskoyak presets and the input errors),
+   the whole-mass forces of the 157 of them that reach a final state, 63 strength-fixture arrays, 7 original-closure
+   minima (also checked against 50-digit values), 24 slip extents, 7 vertical-face cases, 15 column-shape cases
+   (columns across y for other N, plan sizes, counts for a size) and 9 critical-surface searches (Taylor's φ = 0
+   slopes, D'Esterre slopes with the base-circle option, among them two with N × N_y columns, one checked on 16 × 320,
+   the thesis slope with GHB in 2D and 3D, the Baskoyak failure with GHB in 2D and 3D, and two searches that stop on
+   a domain limit: 6,353 surfaces, every field compared). Result: largest FoS difference 4.4e-16 (relative),
+   whole-mass totals within 4e-16 of the weight, with the same statuses, iteration counts, projection counts, grids,
+   error texts and check results; the searches try the same surfaces in the same order and find the same critical
+   surfaces, with FoS within 1e-12 and lengths within 7e-15 of H; 0 failures. The results agree to rounding rather than bit for bit because the
    JavaScript `pow`, `tan` and `asin` can differ from NumPy's in the last bit.
 3. `node tools/verify_checks.js` compares the page's verification table with `verification.py`: identical text, row
    for row (82 PASS, 0 FAIL, 38 INFO, 9 SKIPPED). `--slow` also computes the slow rows: 89 PASS, 0 FAIL, 40 INFO,
@@ -73,7 +79,9 @@ Run from this folder:
 4. `node tools/ui_test.js` drives the page in Chromium (Playwright): the default case gives 2.706024 / 2.447911, the
    summary counts the tensile bases, every tab draws without console errors, the whole-mass free-body diagram
    balances (2D and 3D), the critical-surface search finds 2.118587 in 2D and Use this circle reruns the analysis on
-   it, presets (Baskoyak among them) and inputs update the results, and the layout holds in dark mode and at 390 px.
+   it, presets (Baskoyak among them) and inputs update the results, the column option gives 2.720204 with 20 × 40
+   columns and 2.713457 with columns of at most 20 m by 20 m (20 × 37) and flags a size that needs more than 320
+   columns, and the layout holds in dark mode and at 390 px (35 checks).
    See the file's header for the offline option.
 
 The QA/QC of 27 October 2026 (`qa/` at the repository root) checked the engines against the thesis, exact solutions,

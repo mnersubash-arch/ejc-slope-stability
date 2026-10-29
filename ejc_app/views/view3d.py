@@ -33,5 +33,5 @@ st.subheader("Plan view")
 st.plotly_chart(P.plan_view(r3, field, highlight=int(col), mirror=mirror), width="stretch",
                 key="v3_plan")
 k = st.session_state.v3_col
-st.write(f"Column {k}: i = {int(m.i[k])}, j = {int(m.j[k])}, x = {m.x[k]:.2f} m, y = {m.y[k]:.2f} m, "
-         f"h = {m.h[k]:.2f} m.")
+st.write(f"Column {k}: i = {int(m.i[k])}, j = {int(m.j[k])}, x = {m.x[k]:.2f} m, y = {m.y[k]:.2f} m; "
+         f"Δx × Δy × h = {m.dx:.2f} × {m.dy:.2f} × {m.h[k]:.2f} m ({m.n} × {m.ny} grid).")

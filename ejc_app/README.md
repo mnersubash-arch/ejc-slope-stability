@@ -39,8 +39,10 @@ Nothing in this folder deploys it to a public host.
    - CSV downloads of the column and slice results;
    - studies: a critical-surface search (below), a mesh study (eq. 4.17) and a ν sweep.
 
-   Updates live for N ≤ 40; for larger N press **Run**. With the original closure selected, the page shows the
-   admissibility check instead of a FoS.
+   The Mesh panel sets the 3D columns as N × N (the default), N × N_y, or a plan size Δx × Δy in metres (see
+   "Column shape" below), and shows each column's plan size; the results give the grid and the range of column
+   heights. Updates live up to 40 × 40 columns; for larger meshes press **Run**. With the original closure selected,
+   the page shows the admissibility check instead of a FoS.
 2. **Cross-section.** Central section y = 0: ground, slip surface, water table, Bishop slices (hover for σ_n,
    φ_i, c_i, τ_s and u) and the circle centre.
 3. **3D view.** Ground, spherical slip surface and column prisms, coloured by σ_n, φ_i, c_i, τ_s, u, contribution
@@ -82,8 +84,10 @@ study (`engine.critical_search`, also in the web app) finds the circle (2D, Bish
   Nelder–Mead from the two best grid circles that are not neighbours, each restarted from its minimum until it stops
   improving. 3D: Nelder–Mead from the 2D minima. The critical surface is the lowest accepted FoS among the surfaces
   tried. The result names any limit the surface lies on (a domain limit to widen, the steepest arc, the coverage rule,
-  the default grid's limit) and re-solves it on a finer mesh (4 × N_2D slices, 2N × 2N columns), with a warning when
-  the FoS changes by more than the 0.5 % screening threshold of eq. 4.17.
+  the default grid's limit) and re-solves it on a finer mesh (4 × N_2D slices, 2N × 2N columns; with N × N_y
+  columns, 2N × 2N_y, each at most 320), with a warning when the FoS changes by more than the 0.5 % screening
+  threshold of eq. 4.17. Every surface is solved with the same counts N and N_y, so the column size changes with the
+  surface.
 - **Mesh dependence.** The search minimises the FoS on the current mesh, so it favours surfaces whose FoS the mesh
   underestimates. On Taylor's 75° slope (φ = 0) with 40 slices it reports 1.6925, on a circle that gives 1.7503 on
   160 slices, and the mesh check warns; with 640 slices it reports 1.6889, against the exact 1.6906. On a 20 × 20
@@ -171,7 +175,7 @@ Water: $u = \gamma_w\max(0, z_w - z_b)$, $z_w = \min(H_w, -x\tan\beta_w)$, $\gam
 
 ### Mesh
 
-The half-model (y ≥ 0) uses N × N nominal cells:
+The half-model (y ≥ 0) uses N × N nominal cells (N × N_y with the column-shape option below):
 
 - x runs from $x_0 = x_c - \sqrt{R^2 - z_c^2}$ down to $x_1 = x_c - R$, with $x_i = x_0 - (i - \tfrac12)\Delta x$;
 - y runs from 0 to R in steps of $\Delta y = R/N$.
@@ -264,6 +268,26 @@ The default grid (x0 = x_c − √(R² − z_c²)) needs the circle to cross the
 crosses more than 1e-5 R behind the toe, the grid would cut off the toe region, so the default grid now refuses
 such a circle and points to the base-circle option. The tolerance is the thesis workbook's; the Law and
 Carranza-Torres circles are 0.3–2.6 mm behind the toe, within that tolerance. No existing preset is affected.
+
+### Column shape (off by default)
+
+The brief's 3D mesh has N × N cells (§1.4), so the column plan size is set by N alone: Δx = (x0 − x1)/N along x and
+Δy = R/N across y. This option sets the two independently. With it off, every thesis result is unchanged.
+
+- **Columns across y** (`n3y`, N_y): the y grid has N_y cells, Δy = R/N_y, y_j = (j − ½)Δy for j = 1 to N_y. The
+  x grid, the active-column rule and every column equation (eq. 4.11, with A_h = Δx Δy) are unchanged. `n3y=None`
+  (the default) is the N × N grid, and `n3y=N` gives it bit for bit (tested).
+- **Plan size in metres** (the apps): a column length Δx and width Δy, both upper limits, become counts on the
+  current circle, N = ⌈(x0 − x1)/Δx⌉ and N_y = ⌈R/Δy⌉ (`counts_for_size`); they must lie in 2 to 320, as N. When the
+  circle changes, the counts follow. The third dimension, the column height h = z_t − z_b, is not an input: the
+  ground and the slip surface set it. The apps show each column's Δx × Δy × h.
+- **Studies.** The mesh study and the search's finer mesh scale N_y in the same ratio as N (`with_n3`,
+  `columns_across`: N_y n/N rounded half up, at least 1), so the columns keep their shape.
+- **Convergence.** Columns of very different shape converge to one result: on the thesis slope 160 × 40 columns
+  (2.45 m by 18.1 m), 40 × 160 (9.81 m by 4.53 m) and 160 × 160 agree within 0.12 % dry and 0.26 % wet, inside the
+  0.5 % threshold of eq. 4.17 (`test_rectangular_columns_converge`). At 20 × 20 columns (19.6 m by 36.3 m) the dry
+  FoS is 2.7060; with 20 × 40 (19.6 m by 18.1 m) it is 2.7202, and with columns of at most 20 m by 20 m (20 × 37)
+  2.7135.
 
 ## Verification
 

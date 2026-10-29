@@ -144,6 +144,35 @@ async function check(cond, label) { console.log(`${cond ? "ok  " : "FAIL"} ${lab
   await page.selectOption("#preset", "baskoyak_site_ghb");
   await waitSolved(page);
   await check(await text(page, "#fos3") === "1.091379" && await text(page, "#fos2") === "1.032373", `Baskoyak site GHB: ${await text(page, "#fos3")} / ${await text(page, "#fos2")}`);
+  // 3D columns: N x N (the default), N x N_y, or sizes in metres turned into counts on the current circle
+  await page.selectOption("#preset", "thesis_dry_05");
+  await waitSolved(page);
+  await check(/Columns 20 × 20: Δx = \(x0 − x1\)\/N = 19\.625 m by Δy = R\/N = 36\.263 m/.test(await text(page, "#cols-derived")), "rail: plan size of the columns, 19.625 m by 36.263 m");
+  await page.check("#cols-counts");
+  await waitSolved(page);
+  await check(await page.inputValue("#nb-n3y_value") === "20" && await text(page, "#fos3") === "2.706024" && /match/.test(await text(page, "#preset-state")), "N × Ny starts from the same mesh");
+  await page.fill("#nb-n3y_value", "40"); await page.dispatchEvent("#nb-n3y_value", "change");
+  await waitSolved(page);
+  await check(await text(page, "#fos3") === "2.720204" && await text(page, "#fos2") === "2.447911", `20 × 40 columns: ${await text(page, "#fos3")} (2D unchanged)`);
+  await page.check("#cols-size");
+  await waitSolved(page);
+  await check(await page.inputValue("#nb-dx_value") === "19.63" && await page.inputValue("#nb-dy_value") === "18.14" && await text(page, "#fos3") === "2.720204", "sizes in metres start from the current columns");
+  for (const k of ["dx_value", "dy_value"]) { await page.fill(`#nb-${k}`, "20"); await page.dispatchEvent(`#nb-${k}`, "change"); }
+  await waitSolved(page);
+  await check(await text(page, "#fos3") === "2.713457" && /N = 20 along x and Ny = 37 across y/.test(await text(page, "#cols-derived")) &&
+    /20 × 37, 19\.62 × 19\.60 m/.test(await text(page, "#facts")), `20 m × 20 m columns: 20 × 37, ${await text(page, "#fos3")}`);
+  await page.click("#tab-view-3d");
+  await page.$eval("#sl-k3a", (el) => { el.value = 5; el.dispatchEvent(new Event("input", { bubbles: true })); });
+  await page.waitForTimeout(800);
+  await check(/Δx × Δy × h = 19\.62 × 19\.60 × \d/.test(await text(page, "#plan-info")) &&
+    (await page.evaluate(() => document.getElementById("chart-plan").data[0].z.length)) === 74, "plan view: 37 rows of cells per half, the column's Δx × Δy × h");
+  await page.fill("#nb-dx_value", "0.5"); await page.dispatchEvent("#nb-dx_value", "change");
+  await page.waitForTimeout(300);
+  await check(/gives N = 785 columns along x.*1\.227 to 196\.2 m/.test(await text(page, "#err-dx_value")) && /Fix the highlighted inputs/.test(await text(page, "#runstate")), "Δx = 0.5 m: N = 785 is above 320, and the error gives the valid range");
+  await page.fill("#nb-dx_value", "20"); await page.dispatchEvent("#nb-dx_value", "change");
+  await page.check("#cols-square");
+  await waitSolved(page);
+  await check(await text(page, "#fos3") === "2.706024" && /match/.test(await text(page, "#preset-state")), "back to N × N: 2.706024, inputs match the preset");
   await page.selectOption("#preset", "thesis_orig_0271");
   await waitSolved(page);
   console.log("     original closure:", (await text(page, "#orig")).slice(0, 200).replace(/\s+/g, " "));

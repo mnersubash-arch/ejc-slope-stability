@@ -60,7 +60,7 @@ def mass(inp, r):
 def lem(r):
     return dict(status=r.status, reason=r.reason, fos=num(r.fos), f_trial=num(r.f_trial), iterations=r.iterations,
                 projections=r.projections, count=r.mesh.count, volume=num(r.mesh.volume),
-                x0=num(r.mesh.x0), x1=num(r.mesh.x1),
+                x0=num(r.mesh.x0), x1=num(r.mesh.x1), n=r.mesh.n, ny=r.mesh.ny, dx=num(r.mesh.dx), dy=num(r.mesh.dy),
                 checks=[dict(name=c.name, value=num(c.value), passed=bool(c.passed)) for c in r.checks],
                 history=[[num(v) for v in row] for row in r.history],
                 sn=arr(r.sn), tau_used=arr(r.tau_used), projection_limit=num(r.projection_limit),
@@ -128,7 +128,34 @@ for p in PR.desterre_presets():
     add(f"preset {p.key}", p.inputs)
 for p in PR.baskoyak_presets():
     add(f"preset {p.key}", p.inputs)
+# 3D columns N x N_y (n3y; None is the N x N grid)
+add("columns 20 x 20 given", MAIN.with_(n3y=20), (3,))
+add("columns 20 x 7", MAIN.with_(n3y=7))
+add("columns 20 x 1", MAIN.with_(n3y=1), (3,))
+add("columns 20 x 40 wet", WET.with_(n3y=40), (3,))
+add("columns 13 x 50 FM", MAIN.with_(n3=13, n3y=50, form="FM"), (3,))
+add("columns 30 x 11 ghb", MAIN.with_(model="ghb", n3=30, n3y=11), (3,))
+add("columns 20 x 37 native", MAIN.with_(n3y=37, iteration="native_v15"), (3,))
+add("columns 20 x 37 C0 wet", WET.with_(n3y=37, tension="C0"), (3,))
+add("columns 7 x 90 ru", MAIN.with_(ru=0.3, n3=7, n3y=90), (3,))
+add("columns baskoyak ejc 20 x 45", PR.BY_KEY["baskoyak_site_ejc"].inputs.with_(n3y=45), (3,))
+add("columns desterre 24 x 9", PR.BY_KEY["desterre_DE-1.5-c3-ru0.5"].inputs.with_(n3=24, n3y=9), (3,))
+add("columns n3y = 0", MAIN.with_(n3y=0))
+add("columns n3y = 2.5", MAIN.with_(n3y=2.5), (3,))
 print(f"{len(cases)} cases in {time.time() - t0:.1f} s", file=sys.stderr)
+
+# column helpers: columns across y for other N (mesh studies, the search's finer mesh), plan size, counts for a size
+columns = []
+for inp, n in ((MAIN, 40), (MAIN.with_(n3y=7), 40), (MAIN.with_(n3y=7), 10), (MAIN.with_(n3y=7), 3),
+               (MAIN.with_(n3y=37), 320), (MAIN.with_(n3=13, n3y=50), 7), (MAIN.with_(n3y=1), 2),
+               (PR.BY_KEY["baskoyak_site_ejc"].inputs.with_(n3y=45), 9)):
+    columns.append(dict(inputs=inputs_dict(inp), n=n, across=E.columns_across(inp, n),
+                        size=[num(v) for v in E.column_size(inp)]))
+for inp, dx, dy in ((MAIN, 20.0, 20.0), (MAIN, 10.0, 10.0), (MAIN, 1000.0, 1000.0), (MAIN, *E.column_size(MAIN)),
+                    (MAIN.with_(n3y=37), *E.column_size(MAIN.with_(n3y=37))),
+                    (PR.BY_KEY["baskoyak_site_ejc"].inputs, 1.0, 0.5),
+                    (PR.BY_KEY["desterre_DE-1.5-c3-ru0.5"].inputs, 0.25, 0.25)):
+    columns.append(dict(inputs=inputs_dict(inp), dx=num(dx), dy=num(dy), counts=list(E.counts_for_size(inp, dx, dy))))
 
 # strength fixtures and principal states
 fixtures = []
@@ -198,7 +225,11 @@ for name, inp, dims, opts in (
         ("desterre DE-1.5-c1-ru0, 2D and 3D", PR.BY_KEY["desterre_DE-1.5-c1-ru0"].inputs, (2, 3), {}),
         ("desterre DE-2.5-c4-ru0.5, front limit 1", PR.BY_KEY["desterre_DE-2.5-c4-ru0.5"].inputs, (2,), {"front": 1.0}),
         ("main ghb dry, 2D and 3D", MAIN.with_(model="ghb"), (2, 3), {}),
-        ("baskoyak site GHB, base circle, 2D and 3D", PR.BY_KEY["baskoyak_site_ghb"].inputs, (2, 3), {})):
+        ("baskoyak site GHB, base circle, 2D and 3D", PR.BY_KEY["baskoyak_site_ghb"].inputs, (2, 3), {}),
+        ("desterre DE-1.5-c1-ru0, 20 x 9 columns, 2D and 3D",
+         PR.BY_KEY["desterre_DE-1.5-c1-ru0"].inputs.with_(n3y=9), (2, 3), {}),
+        ("desterre DE-1.5-c1-ru0, 8 x 170 columns (finer mesh at the 320 cap), 2D and 3D",
+         PR.BY_KEY["desterre_DE-1.5-c1-ru0"].inputs.with_(n3=8, n3y=170), (2, 3), {})):
     searches.append(dict(name=name, inputs=inputs_dict(inp), dims=list(dims), opts=opts,
                          result=search_dict(E.critical_search(inp, dims=dims, **opts))))
 print(f"{len(searches)} searches in {time.time() - t1:.1f} s", file=sys.stderr)
@@ -210,7 +241,7 @@ for inp in (MAIN, MAIN.with_(xc=25.0, zc=250.0, R=251.0), MAIN.with_(xc=500.0, z
     faces.append(dict(inputs=inputs_dict(inp), faces={k: num(v) for k, v in E.vertical_faces(inp).items()}))
 
 ref = dict(hb=[num(v) for v in E.hoek_brown_parameters(42.0, 10.0, 0.0)], cases=cases, fixtures=fixtures,
-           original_closure=ocm, extents=extents, searches=searches, faces=faces)
+           original_closure=ocm, extents=extents, searches=searches, faces=faces, columns=columns)
 OUT.mkdir(parents=True, exist_ok=True)
 (OUT / "reference.json").write_text(json.dumps(ref))
 

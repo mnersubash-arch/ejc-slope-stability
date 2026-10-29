@@ -85,6 +85,8 @@ k = int(st.session_state.fbd_col)
 
 f = P.column_forces(A.inputs, r3, k)
 st.subheader(f"Column {k} (i = {int(m3.i[k])}, j = {int(m3.j[k])}), x = {m3.x[k]:.2f} m, y = {m3.y[k]:.2f} m")
+st.write(f"Δx × Δy × h = {m3.dx:.2f} × {m3.dy:.2f} × {m3.h[k]:.2f} m; {m3.count} active half-columns "
+         f"({m3.n} × {m3.ny} grid).")
 c1, c2 = st.columns([3, 2])
 c1.plotly_chart(P.fbd3d(A.inputs, r3, k), width="stretch", key="fbd3d")
 c2.plotly_chart(P.lever_view(A.inputs, r3, k), width="stretch", key="fbd_lever")

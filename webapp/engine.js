@@ -346,7 +346,7 @@
     H: 360, beta: 50, xc: 355.7423115, zc: 644.4192949, R: 725.2669975, gamma: 27, sigma_ci: 77.7, mi: 10, gsi: 42,
     D: 0, a_override: 0.5, nu: 0.271, model: "ejc_moscarda", wet: false, Hw: 360, beta_w: 50, n3: 20, n2: 40,
     form: "FH", tension: "none", iteration: "default", safeguard: "project", c_mc: 0, phi_mc: 0, ru: null,
-    base_circle: false,
+    base_circle: false, n3y: null,
   });
   const inputs = (kw = {}) => Object.freeze(Object.assign({}, DEFAULT_INPUTS, kw));
   function hb(inp) {
@@ -399,6 +399,48 @@
     return { back: back > tol ? back : 0, front: front > tol ? front : 0 };
   }
 
+  /** The grid's x range on the central section, [x0, x1] with x0 > x1: brief §1.4, x0 = x_c - sqrt(R^2 - z_c^2) and
+   *  x1 = x_c - R; with the base-circle option, the circle's exit and entry (slipExtent). Throws for a circle the
+   *  default grid refuses. Same as grid_x_range in ejc_app/engine.py. */
+  function gridXRange(inp) {
+    const { xc, zc, R } = inp;
+    if (inp.base_circle) {
+      const [x1, x0] = slipExtent(inp);
+      return [x0, x1];
+    }
+    if (!(R > zc)) throw new Error("require R > z_c (the sphere must cut the toe level); for a face circle, with its lowest point " +
+      "above the toe level, use the base-circle option");
+    const x0 = xc - Math.sqrt(R * R - zc * zc);
+    if (x0 < -1e-5 * R)
+      throw new Error(`the circle crosses the toe level ${fmtG(-x0, 4)} m behind the toe, so the default grid would ` +
+        "cut off the toe region; use the base-circle option");
+    return [x0, xc - R];
+  }
+
+  /** 3D columns across y for a mesh with n columns along x: n for the brief's N x N grid (n3y null); otherwise n3y
+   *  scaled by n/n3 and rounded half up (at least 1). At n = n3 it is n3y. Same as columns_across in ejc_app/engine.py. */
+  function columnsAcross(inp, n) {
+    if (inp.n3y === null || inp.n3y === undefined) return n;
+    if (!(Number.isInteger(inp.n3y) && inp.n3y >= 1 && Number.isInteger(inp.n3) && inp.n3 >= 1))
+      throw new Error("the number of columns across y must be a positive integer");
+    return Math.max(1, Math.floor((2 * inp.n3y * n + inp.n3) / (2 * inp.n3)));
+  }
+  /** The inputs with n columns along x and the columns across y scaled to keep their shape (mesh studies). */
+  const withN3 = (inp, n) => inputs(Object.assign({}, inp,
+    { n3: n, n3y: inp.n3y === null || inp.n3y === undefined ? null : columnsAcross(inp, n) }));
+  /** Plan size of the 3D columns, [dx, dy] in m: dx = (x0 - x1)/N along x, dy = R/N_y across y. */
+  function columnSize(inp) {
+    const [x0, x1] = gridXRange(inp);
+    return [(x0 - x1) / inp.n3, inp.R / columnsAcross(inp, inp.n3)];
+  }
+  /** Columns along x and across y whose plan size is at most dx by dy (m): N = ceil((x0 - x1)/dx), N_y = ceil(R/dy),
+   *  each at least 1 (a relative 1e-9 below a whole number counts as it). Same as counts_for_size. */
+  function countsForSize(inp, dx, dy) {
+    if (!(dx > 0 && dy > 0)) throw new Error("the column length and width must be positive");
+    const [x0, x1] = gridXRange(inp);
+    return [Math.max(1, Math.ceil((x0 - x1) / dx * (1 - 1e-9))), Math.max(1, Math.ceil(inp.R / dy * (1 - 1e-9)))];
+  }
+
   function buildMesh(inp, dim, n) {
     if (dim !== 2 && dim !== 3) throw new Error("dim must be 2 or 3");
     if (!(Number.isInteger(n) && n >= 1)) throw new Error("mesh size must be a positive integer");
@@ -407,21 +449,10 @@
       if (!(inp.ru >= 0 && inp.ru < 1)) throw new Error("require 0 <= r_u < 1");
     }
     const { xc, zc, R } = inp;
-    let x0, x1;
-    if (inp.base_circle) {
-      [x1, x0] = slipExtent(inp);
-    } else {
-      if (!(R > zc)) throw new Error("require R > z_c (the sphere must cut the toe level); for a face circle, with its lowest point " +
-        "above the toe level, use the base-circle option");
-      x0 = xc - Math.sqrt(R * R - zc * zc);
-      x1 = xc - R;
-      if (x0 < -1e-5 * R)
-        throw new Error(`the circle crosses the toe level ${fmtG(-x0, 4)} m behind the toe, so the default grid would ` +
-          "cut off the toe region; use the base-circle option");
-    }
-    const dx = (x0 - x1) / n, dy = dim === 3 ? R / n : 1;
+    const [x0, x1] = gridXRange(inp);
+    const dx = (x0 - x1) / n;
+    const ny = dim === 3 ? columnsAcross(inp, n) : 1, dy = dim === 3 ? R / ny : 1;
     const cols = { i: [], j: [], x: [], y: [], zb: [], zt: [], h: [], q: [] };
-    const ny = dim === 3 ? n : 1;
     for (let i = 1; i <= n; i++) {
       for (let j = 1; j <= ny; j++) {
         const x = x0 - (i - 0.5) * dx, y = dim === 3 ? (j - 0.5) * dy : 0;
@@ -447,7 +478,7 @@
     } else {
       zw = new Float64Array(cnt).fill(NaN); u = new Float64Array(cnt);
     }
-    const mesh = { dim, n, x0, x1, dx, dy, i: Int32Array.from(cols.i), j: Int32Array.from(cols.j), x, y, zb,
+    const mesh = { dim, n, ny, x0, x1, dx, dy, i: Int32Array.from(cols.i), j: Int32Array.from(cols.j), x, y, zb,
       zt: f64(cols.zt), h, ah, g, area: map(cnt, (k) => ah[k] / g[k]), rho, kap,
       w: map(cnt, (k) => inp.gamma * h[k] * ah[k]), u, zw, count: cnt };
     mesh.volume = (dim === 3 ? 2 : 1) * sum(map(cnt, (k) => h[k] * ah[k]));
@@ -912,8 +943,15 @@
         Object.assign(res, { fos: best.f, p: best.x, xc: s.xc, zc: s.zc, R: s.R, front: s.front, back: s.back });
         if (!base && s.R > s.zc) res.coverage = (s.front[0] - s.back[0]) / ((s.xc - Math.sqrt(s.R * s.R - s.zc * s.zc)) - (s.xc - s.R));
         const n = dim === 3 ? Math.min(2 * inp.n3, 320) : Math.min(4 * inp.n2, 10000);
-        const ck = solveAt(dim, dim === 3 ? { xc: s.xc, zc: s.zc, R: s.R, n3: n } : { xc: s.xc, zc: s.zc, R: s.R, n2: n });
-        res.check = { n, fos: ck.fos, status: ck.status, reason: ck.reason, change: ck.fos !== null ? (ck.fos - best.f) / ck.fos : null };
+        const kw = dim === 3 ? { xc: s.xc, zc: s.zc, R: s.R, n3: n } : { xc: s.xc, zc: s.zc, R: s.R, n2: n };
+        let ny = null;
+        if (dim === 3 && inp.n3y !== null && inp.n3y !== undefined) {   // columns across y in the same ratio, at most 320
+          ny = Math.min(columnsAcross(inp, n), 320);
+          kw.n3y = ny;
+        }
+        const ck = solveAt(dim, kw);
+        res.check = { n, ny: ny !== null ? ny : (dim === 3 ? n : 1), fos: ck.fos, status: ck.status, reason: ck.reason,
+          change: ck.fos !== null ? (ck.fos - best.f) / ck.fos : null };
       }
       res.evaluations = counts.solved + counts.withheld + counts.skipped;
       res.ms = Date.now() - td;
@@ -927,7 +965,8 @@
 
   const api = { GAMMA_W, MODELS, REASONS, ITERATIONS, OK, SHEAR, NO_STATE, DOMAIN, hoekBrownParameters, makeStrength,
     closureConstants, principalState, scanSigma3, admissibleSnMin, solveStrength, originalClosureMinimum,
-    DEFAULT_INPUTS, inputs, hb, strengthOf, groundZ, waterZ, sphereZ, slipExtent, verticalFaces, buildMesh,
+    DEFAULT_INPUTS, inputs, hb, strengthOf, groundZ, waterZ, sphereZ, slipExtent, verticalFaces, gridXRange,
+    columnsAcross, withN3, columnSize, countsForSize, buildMesh,
     projectionLimit, solve,
     run3d, run2d, run, gravityCap, columnForces, massForces, SEARCH, groundAt, circleFromExits, searchSurface,
     singleMass, nelderMead, criticalSearch, sum, fmtG, DEG, RAD };

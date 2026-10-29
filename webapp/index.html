@@ -352,8 +352,21 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
       <details class="sec" open>
         <summary>Mesh and solver</summary>
         <div class="fields">
+          <div>
+            <p class="group-label">3D columns: plan size Δx × Δy</p>
+            <div class="seg" role="radiogroup" aria-label="3D columns">
+              <label><input type="radio" name="cols" id="cols-square" value="square"><span>N × N</span></label>
+              <label><input type="radio" name="cols" id="cols-counts" value="counts"><span>N × N<sub>y</sub></span></label>
+              <label><input type="radio" name="cols" id="cols-size" value="size"><span>Δx, Δy (m)</span></label>
+            </div>
+          </div>
           <div data-num="n3"></div>
+          <div data-num="n3y_value"></div>
+          <div data-num="dx_value"></div>
+          <div data-num="dy_value"></div>
+          <p class="derived" id="cols-derived"></p>
           <div data-num="n2"></div>
+          <p class="derived" id="slices-derived"></p>
           <div>
             <label for="iteration" class="group-label">Iteration path</label>
             <select id="iteration">
@@ -385,7 +398,7 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
         <div class="runbar">
           <p class="runstate" id="runstate"></p>
           <div class="runctl">
-            <label class="check"><input type="checkbox" id="live" checked><span>Live update (N ≤ 40)</span></label>
+            <label class="check"><input type="checkbox" id="live" checked><span>Live update (up to 40 × 40 columns)</span></label>
             <button type="button" class="btn" id="run">Run</button>
           </div>
         </div>
@@ -527,7 +540,7 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
         <div class="grid-2">
           <div class="stack">
             <h3>Mesh study (eq. 4.17)</h3>
-            <fieldset><legend>3D meshes N</legend><div class="ticks" id="mesh-n3"></div></fieldset>
+            <fieldset><legend>3D meshes N<span id="mesh-n3-hint"></span></legend><div class="ticks" id="mesh-n3"></div></fieldset>
             <fieldset><legend>2D slices N<sub>2D</sub></legend><div class="ticks" id="mesh-n2"></div></fieldset>
             <div class="toolbar"><button type="button" class="btn" id="mesh-run">Run mesh study</button></div>
             <progress id="mesh-prog" max="1" value="0" hidden></progress>
@@ -550,7 +563,7 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
 
       <section class="panel" id="panel-verification" role="tabpanel" aria-labelledby="tab-verification" hidden>
         <div class="stack">
-          <p>This page solves with <span class="mono">engine.js</span>, a line-for-line port of <span class="mono">ejc_app/engine.py</span>. On 158 analyses (every main case, GHB, F<sub>M</sub>, C0/T0, the native v15 path, the Carranza-Torres, Law, D'Esterre and Baskoyak presets, input errors) and 63 strength fixtures the port matches the Python engine: largest FoS difference 4.4 × 10<sup>−16</sup> (relative), with the same iteration counts, projection counts and check results.</p>
+          <p>This page solves with <span class="mono">engine.js</span>, a line-for-line port of <span class="mono">ejc_app/engine.py</span>. On 173 analyses (every main case, GHB, F<sub>M</sub>, C0/T0, the native v15 path, N × N<sub>y</sub> columns, the Carranza-Torres, Law, D'Esterre and Baskoyak presets, input errors) and 63 strength fixtures the port matches the Python engine: largest FoS difference 4.4 × 10<sup>−16</sup> (relative), with the same iteration counts, projection counts and check results.</p>
           <p>The table below recomputes the thesis targets of <span class="mono">verification.py</span> in your browser. Its rows, targets and tolerances are those of the Python table; without the slow rows it gives the same text, row for row.</p>
         </div>
         <div class="toolbar">
@@ -610,9 +623,13 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
     Hw: { sym: "H<sub>w</sub>", label: "water-table height", unit: "m", min: 0, max: 1000, scale: "Hw" },
     beta_w: { sym: "β<sub>w</sub>", label: "water-table angle", unit: "°", min: 1, max: 89, step: 0.1 },
     n3: { sym: "N", label: "3D mesh, N × N half-model", unit: "", min: 2, max: 320, int: true, slider: 80 },
+    n3y_value: { sym: "N<sub>y</sub>", label: "3D columns across y (0 to R)", unit: "", min: 2, max: 320, int: true, slider: 80 },
+    dx_value: { sym: "Δx", label: "column length along x, at most", unit: "m", min: 0.01, max: 4000, scale: "size" },
+    dy_value: { sym: "Δy", label: "column width across y, at most", unit: "m", min: 0.01, max: 4000, scale: "size" },
     n2: { sym: "N<sub>2D</sub>", label: "2D slices", unit: "", min: 2, max: 10000, int: true, slider: 640 },
   };
   const plainSym = (k) => NUM[k].sym.replace(/<sub>(.*?)<\/sub>/g, "_$1");
+  const labelOf = (k, d) => (k === "n3" && d.cols === "counts" ? "3D columns along x" : NUM[k].label);
   const FIELDS = {
     sigma_n: ["σ<sub>n</sub> (kPa)", "σ_n"], phi: ["φ<sub>i</sub> (°)", "φ_i"], c: ["c<sub>i</sub> (kPa)", "c_i"],
     tau: ["τ<sub>s</sub> (kPa)", "τ_s"], u: ["u (kPa)", "u"], resistance: ["Resistance τ<sub>s</sub>A (kN)", "τ_s A"],
@@ -622,7 +639,7 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
     tau: "τs, shear strength", u: "u, pore pressure", resistance: "τs A, contribution to resistance", tension: "Tension flag (σn < 0)" };
 
   function toState(inp) {
-    return Object.assign({}, inp, {
+    const st = Object.assign({}, inp, {
       a_on: inp.a_override !== null && inp.a_override !== undefined,
       a_value: inp.a_override === null || inp.a_override === undefined ? 0.5 : Number(inp.a_override),
       strength: { ghb: "GHB", mc: "MC" }[inp.model] || "EJC",
@@ -630,16 +647,51 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
       water: inp.ru !== null && inp.ru !== undefined ? "ru" : (inp.wet ? "Wet" : "Dry"),
       ru_value: inp.ru === null || inp.ru === undefined ? 0 : Number(inp.ru),
     });
+    st.cols = inp.n3y === null || inp.n3y === undefined ? "square" : "counts";
+    st.n3y_value = st.cols === "counts" ? inp.n3y : inp.n3;
+    const sz = sizesFor(st, inp.n3, st.n3y_value);
+    st.dx_value = sz ? sz[0] : NaN; st.dy_value = sz ? sz[1] : NaN;
+    return st;
   }
+  // 3D columns: N x N (the brief's grid), N x N_y, or plan sizes in metres converted to counts on the current circle
+  const geomOf = (d) => E.inputs({ H: d.H, beta: d.beta, xc: d.xc, zc: d.zc, R: d.R, base_circle: !!d.base_circle });
+  const ceil4 = (v) => { const q = Math.pow(10, Math.floor(Math.log10(v)) - 3); return +(Math.ceil(v / q - 1e-9) * q).toPrecision(4); };
+  const floor4 = (v) => { const q = Math.pow(10, Math.floor(Math.log10(v)) - 3); return +(Math.floor(v / q + 1e-9) * q).toPrecision(4); };
+  /** Grid span x0 - x1 (m) of the circle of d, or null when the default grid refuses it (the run then says why). */
+  function spanOf(d) {
+    try { const [x0, x1] = E.gridXRange(geomOf(d)); return x0 - x1; } catch (e) { return null; }
+  }
+  /** Plan size [dx, dy] (m) of n x ny columns on the circle of d, rounded up to 4 significant digits (which gives the
+   *  same counts back), or null when the circle has no grid. */
+  function sizesFor(d, n, ny) {
+    const span = spanOf(d);
+    const fit = (k, v) => clamp(v, NUM[k].min, NUM[k].max);
+    return span === null || !(n >= 1 && ny >= 1) ? null : [fit("dx_value", ceil4(span / n)), fit("dy_value", ceil4(d.R / ny))];
+  }
+  /** Counts [N, N_y] of the column option of d; N_y is null for the N x N grid. Sizes in metres become counts with
+   *  E.countsForSize on the current circle; if the circle has no grid, the run reports why. */
+  function colCounts(d) {
+    if (d.cols === "counts") return [d.n3, d.n3y_value];
+    if (d.cols === "size") {
+      try { return E.countsForSize(geomOf(d), d.dx_value, d.dy_value); } catch (e) { return [d.n3, null]; }
+    }
+    return [d.n3, null];
+  }
+  const colGrid = (d) => { const [n, ny] = colCounts(d); return [n, ny === null ? n : ny]; };
+  const nyOf = (inp) => (inp.n3y === null || inp.n3y === undefined ? inp.n3 : inp.n3y);
   function toInputs(d) {
     const model = d.strength === "GHB" ? "ghb" : d.strength === "MC" ? "mc"
       : { moscarda: "ejc_moscarda", original: "ejc_original", s2s3: "ejc_sigma2_eq_sigma3" }[d.closure];
     const native = d.iteration === "native_v15";
     return E.inputs({ H: d.H, beta: d.beta, xc: d.xc, zc: d.zc, R: d.R, gamma: d.gamma, sigma_ci: d.sigma_ci, mi: d.mi,
       gsi: d.gsi, D: d.D, a_override: d.a_on ? d.a_value : null, nu: d.nu, model, wet: d.water === "Wet", Hw: d.Hw,
-      beta_w: d.beta_w, n3: d.n3, n2: d.n2, form: native ? "FH" : d.form, tension: native ? "none" : d.tension,
+      beta_w: d.beta_w, n2: d.n2, form: native ? "FH" : d.form, tension: native ? "none" : d.tension,
       iteration: d.iteration, c_mc: d.c_mc, phi_mc: d.phi_mc, ru: d.water === "ru" ? d.ru_value : null,
-      base_circle: !!d.base_circle });
+      base_circle: !!d.base_circle, ...colInputs(d) });
+  }
+  function colInputs(d) {
+    const [n3, ny] = colCounts(d);
+    return { n3, n3y: ny === null || ny === n3 ? null : ny };    // N_y = N is the N x N grid
   }
   const inputsKey = (inp) => JSON.stringify(inp);
   const relevant = (k, d) => {
@@ -649,6 +701,9 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
     if (k === "c_mc" || k === "phi_mc") return d.strength === "MC";
     if (k === "Hw" || k === "beta_w") return d.water === "Wet";
     if (k === "ru_value") return d.water === "ru";
+    if (k === "n3") return d.cols !== "size";
+    if (k === "n3y_value") return d.cols === "counts";
+    if (k === "dx_value" || k === "dy_value") return d.cols === "size";
     return true;
   };
   function validate(d) {
@@ -656,10 +711,18 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
     for (const [k, sp] of Object.entries(NUM)) {
       if (!relevant(k, d)) continue;
       const v = d[k];
-      const name = `${plainSym(k)}, ${sp.label},`;
+      const name = `${plainSym(k)}, ${labelOf(k, d)},`;
       if (!Number.isFinite(v)) errs[k] = `${name} needs a number.`;
       else if (v < sp.min || v > sp.max) errs[k] = `${name} must be from ${sp.min} to ${sp.max}${sp.unit ? " " + sp.unit : ""}.`;
       else if (sp.int && !Number.isInteger(v)) errs[k] = `${name} must be a whole number.`;
+    }
+    const span = d.cols === "size" && !errs.dx_value && !errs.dy_value ? spanOf(d) : null;
+    if (span !== null) {                  // sizes in metres: the counts they give must lie in 2 to 320, as N
+      const [n, ny] = colCounts(d);
+      const say = (sym, v, cnt, csym, axis, L) => `${sym} = ${E.fmtG(v, 6)} m gives ${csym} = ${cnt} column${cnt === 1 ? "" : "s"} ${axis} on this circle; ` +
+        `${csym} must be from 2 to 320, so use ${sym} from ${ceil4(L / 320)} to ${floor4(L / 2)} m.`;
+      if (n < 2 || n > 320) errs.dx_value = say("Δx", d.dx_value, n, "N", "along x", span);
+      if (ny < 2 || ny > 320) errs.dy_value = say("Δy", d.dy_value, ny, "N_y", "across y", d.R);
     }
     return errs;
   }
@@ -714,6 +777,7 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
     if (sp.scale === "H") { lo = 0.25 * v; hi = 2 * v; }
     else if (sp.scale === "L") { lo = v - L; hi = v + L; }
     else if (sp.scale === "Hw") { lo = 0; hi = 1.25 * Math.max(L, v); }
+    else if (sp.scale === "size") { lo = 0.25 * v; hi = 4 * v; }
     else { lo = 0; hi = Math.max(50, 3 * v); }
     lo = Math.max(sp.min, lo); hi = Math.min(sp.max, hi);
     const step = niceStep(hi - lo);
@@ -733,7 +797,7 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
       const k = el.dataset.num, sp = NUM[k];
       el.className = "num";
       el.id = "f-" + k;
-      el.innerHTML = `<div class="num-head"><label for="nb-${k}"><span class="sym">${sp.sym}</span> ${sp.label}</label>` +
+      el.innerHTML = `<div class="num-head"><label for="nb-${k}"><span class="sym">${sp.sym}</span> <span id="lb-${k}">${sp.label}</span></label>` +
         `<span class="unit">${sp.unit || "&nbsp;"}</span></div>` +
         `<div class="num-row"><input type="range" id="sl-${k}" aria-label="${plainSym(k)} ${sp.label}">` +
         `<input type="number" id="nb-${k}" step="any" min="${sp.min}" max="${sp.max}" inputmode="decimal"></div>` +
@@ -776,6 +840,7 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
       writeChoices(); changed({ immediate: true });
     });
     $("#base_circle").addEventListener("change", (ev) => { S.base_circle = ev.target.checked; changed({ immediate: true }); });
+    document.querySelectorAll('input[name="cols"]').forEach((el) => el.addEventListener("change", () => { if (el.checked) setCols(el.value); }));
     $("#a_on").addEventListener("change", (ev) => { S.a_on = ev.target.checked; changed({ immediate: true }); });
     document.querySelectorAll("[data-field]").forEach((el) => {
       el.innerHTML = Object.keys(FIELDS).map((k) => `<option value="${k}">${esc(FIELD_NAMES[k])}</option>`).join("");
@@ -785,9 +850,29 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
     $("#live").addEventListener("change", (ev) => { UI.live = ev.target.checked; save(); if (UI.live) schedule(true); renderSummary(); });
     $("#run").addEventListener("click", () => requestRun(true));
   }
+  /** Switch the 3D column option and keep the current columns: the counts carry over, and sizes in metres start from
+   *  the current plan size (rounded up to 4 digits, which gives the same counts). */
+  function setCols(mode) {
+    if (mode === S.cols) return;
+    const [n, ny] = colGrid(S);
+    if (mode === "size") {
+      const sz = sizesFor(S, n, ny);
+      if (sz) { S.dx_value = sz[0]; S.dy_value = sz[1]; }
+    } else {                              // counts outside 2 to 320 (sizes the rail flags) are clamped
+      S.n3 = isNum(n) ? clamp(n, NUM.n3.min, NUM.n3.max) : n;
+      if (mode === "counts") S.n3y_value = isNum(ny) ? clamp(ny, NUM.n3y_value.min, NUM.n3y_value.max) : ny;
+    }
+    S.cols = mode;
+    for (const k of ["n3", "n3y_value", "dx_value", "dy_value"]) {
+      WIN[k] = windowFor(k, S); setSliderWindow(k);
+      $("#sl-" + k).value = isNum(S[k]) ? S[k] : WIN[k].lo; $("#nb-" + k).value = fmtInput(S[k]);
+    }
+    writeChoices();
+    changed({ immediate: true });
+  }
   function syncFieldSelects() { document.querySelectorAll("[data-field]").forEach((el) => { el.value = UI.field; }); }
   function writeChoices() {
-    for (const n of ["strength", "water", "form", "tension"]) {
+    for (const n of ["strength", "water", "form", "tension", "cols"]) {
       const el = document.getElementById(`${n}-${S[n]}`);
       if (el) el.checked = true;
     }
@@ -823,8 +908,25 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
         `σ<sub>3,t</sub> = −sσ<sub>ci</sub>/m<sub>b</sub> = ${g(-s * S.sigma_ci / mb, 5)} MPa`;
     }
     $("#derived").innerHTML = txt;
+    $("#lb-n3").textContent = labelOf("n3", S);
+    $("#cols-derived").innerHTML = colsText(S);
+    const span = spanOf(S);
+    $("#slices-derived").innerHTML = span !== null && Number.isInteger(S.n2) && S.n2 >= 1
+      ? `2D slices: Δx = (x<sub>0</sub> − x<sub>1</sub>)/N<sub>2D</sub> = ${fx(span / S.n2, 3)} m, unit thickness.` : "";
+    $("#mesh-n3-hint").innerHTML = S.cols === "square" ? "" : " (N<sub>y</sub> in the same ratio)";
     $("#water-hint").innerHTML = S.water === "Wet" ? "u = γ<sub>w</sub> max(0, z<sub>w</sub> − z<sub>b</sub>), γ<sub>w</sub> = 9.81 kN/m³; z<sub>w</sub> = min(H<sub>w</sub>, −x tan β<sub>w</sub>)."
       : S.water === "ru" ? "u = r<sub>u</sub> γ h for every column and slice (h = column height)." : "u = 0.";
+  }
+
+  function colsText(d) {
+    const span = spanOf(d);
+    if (span === null) return "";
+    const [n, ny] = colGrid(d);
+    if (!(Number.isInteger(n) && n >= 1 && Number.isInteger(ny) && ny >= 1)) return "";
+    const ysym = d.cols === "square" ? "N" : "N<sub>y</sub>";
+    return (d.cols === "size" ? `On this circle: N = ${n} along x and N<sub>y</sub> = ${ny} across y. ` : "") +
+      `Columns ${n} × ${ny}: Δx = (x<sub>0</sub> − x<sub>1</sub>)/N = ${fx(span / n, 3)} m by Δy = R/${ysym} = ${fx(d.R / ny, 3)} m. ` +
+      "The height h = z<sub>t</sub> − z<sub>b</sub> of each column is set by the ground and the slip surface.";
   }
 
   // -------------------------------------------------------------------------------------------------------------
@@ -909,7 +1011,8 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
     });
   }
 
-  const liveAllowed = () => S.n3 <= LIVE_MAX_N3 && S.n2 <= LIVE_MAX_N2;
+  const liveAllowed = () => { const [n, ny] = colGrid(S); return n * ny <= LIVE_MAX_N3 * LIVE_MAX_N3 && S.n2 <= LIVE_MAX_N2; };
+  const gridText = () => colGrid(S).join(" × ");
   function changed(opts = {}) {
     const errs = validate(S);
     renderRailDeps(errs);
@@ -1035,10 +1138,10 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
     // run state line
     let state;
     if (invalid) state = `<span aria-hidden="true" style="color:var(--critical);font-weight:700">✕</span> <span><b>Fix the highlighted inputs</b> to run.</span>`;
-    else if (busy) state = `<span class="spin" aria-hidden="true"></span><span><b>Solving</b> 3D ${S.n3}×${S.n3} and 2D ${S.n2} slices…</span>`;
-    else if (!RES) state = `<span><b>Not run yet.</b> ${liveAllowed() ? "" : `N = ${S.n3} is above the live limit: press Run (fine meshes can take up to a minute).`}</span>`;
+    else if (busy) state = `<span class="spin" aria-hidden="true"></span><span><b>Solving</b> 3D ${gridText()} columns and 2D ${S.n2} slices…</span>`;
+    else if (!RES) state = `<span><b>Not run yet.</b> ${liveAllowed() ? "" : `The mesh (${gridText()} columns, ${S.n2} slices) is above the live limit: press Run (fine meshes can take up to a minute).`}</span>`;
     else if (stale) {
-      const why = !UI.live ? "Live update is off" : !liveAllowed() ? `N = ${S.n3} × ${S.n3} and N<sub>2D</sub> = ${S.n2} are above the live limit (N ≤ 40, N<sub>2D</sub> ≤ 640)` : "";
+      const why = !UI.live ? "Live update is off" : !liveAllowed() ? `The mesh (${gridText()} columns, ${S.n2} slices) is above the live limit (N × N<sub>y</sub> ≤ 1,600 columns, N<sub>2D</sub> ≤ 640)` : "";
       state = `<span aria-hidden="true" style="color:var(--warning);font-weight:700">!</span> <span><b>Inputs changed.</b> ${why ? why + ", so the" : "The"} results below are for the previous inputs: press Run to update${liveAllowed() ? "" : " (fine meshes can take up to a minute)"}.</span>`;
     }
     else state = `<span aria-hidden="true" style="color:var(--good);font-weight:700">✓</span> <span><b>Up to date.</b> Solved in ${(RES.ms / 1000).toFixed(2)} s${workerState === "failed" ? " on this page" : ""}.</span>`;
@@ -1075,6 +1178,14 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
       facts.push(["Active columns / slices", pair(r3 ? r3.mesh.count : "–", r2 ? r2.mesh.count : "–")]);
       facts.push(["Projections 3D / 2D", pair(r3 ? r3.projections : "–", r2 ? r2.projections : "–")]);
       if (!orig) facts.push(["Tensile bases (σ′<sub>n</sub> &lt; 0) 3D / 2D", pair(tensileText(tensileCount(r3)), tensileText(tensileCount(r2)))]);
+      if (r3 && r3.mesh.count) {
+        const m = r3.mesh;
+        let hlo = Infinity, hhi = -Infinity;
+        for (const h of m.h) { hlo = Math.min(hlo, h); hhi = Math.max(hhi, h); }
+        facts.push(["3D columns, Δx × Δy", `${m.n} × ${m.ny}, ${fx(m.dx, 2)} × ${fx(m.dy, 2)} m`]);
+        facts.push(["Column height h", `${fx(hlo, 2)} to ${fx(hhi, 2)} m`]);
+      }
+      if (r2 && r2.mesh.count) facts.push(["2D slice width", `${fx(r2.mesh.dx, 2)} m`]);
       if (r3) facts.push(["Sliding volume (full mass)", `${gc(r3.mesh.volume, 4)} m³`]);
       if (r2) facts.push(["2D area", `${gc(r2.mesh.volume, 4)} m²`]);
     }
@@ -1117,14 +1228,14 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
     let html = `<h3>Original closure: admissibility check (no FoS)</h3><div class="cards four">` +
       `<article class="card"><h2 class="k">σ3 at the minimum (MPa)</h2><p class="v">${o.sigma3_min.toFixed(3)}</p></article>` +
       `<article class="card"><h2 class="k">Minimum admissible σ<sub>n</sub> (MPa)</h2><p class="v">${o.sn_min.toFixed(3)}</p><p class="sub">φ<sub>i</sub> there = ${o.phi_deg.toFixed(3)}°</p></article>` +
-      (o.mesh_error ? "" : `<article class="card"><h2 class="k">Gravity cap γh − u, dry (MPa)</h2><p class="v">${(o.cap_dry / 1000).toFixed(3)}</p><p class="sub">${o.n3}×${o.n3} half-model</p></article>` +
-        `<article class="card"><h2 class="k">Gravity cap γh − u, wet (MPa)</h2><p class="v">${(o.cap_wet / 1000).toFixed(3)}</p><p class="sub">${o.n3}×${o.n3} half-model</p></article>`) +
+      (o.mesh_error ? "" : `<article class="card"><h2 class="k">Gravity cap γh − u, dry (MPa)</h2><p class="v">${(o.cap_dry / 1000).toFixed(3)}</p><p class="sub">${o.n3}×${o.ny} half-model</p></article>` +
+        `<article class="card"><h2 class="k">Gravity cap γh − u, wet (MPa)</h2><p class="v">${(o.cap_wet / 1000).toFixed(3)}</p><p class="sub">${o.n3}×${o.ny} half-model</p></article>`) +
       "</div>";
     if (o.mesh_error) html += note("critical", esc(o.mesh_error));
     else {
       const verdict = o.sn_min * 1000 > Math.max(o.cap_dry, o.cap_wet) ? "The minimum admissible σ<sub>n</sub> is above the gravity cap of every column."
         : "Some columns lie above the minimum, but every base must have an admissible state for a FoS.";
-      html += `<p style="margin-top:10px">At ν = ${E.fmtG(o.nu, 6)}, a = ${E.fmtG(o.a, 6)}: <b>${o.below_dry} of ${o.count_dry}</b> dry columns and <b>${o.below_wet} of ${o.count_wet}</b> wet columns (${o.n3}×${o.n3} half-model) have γh − u below the minimum admissible σ<sub>n</sub>. Those bases have no admissible state, so this closure gives no FoS.</p>` +
+      html += `<p style="margin-top:10px">At ν = ${E.fmtG(o.nu, 6)}, a = ${E.fmtG(o.a, 6)}: <b>${o.below_dry} of ${o.count_dry}</b> dry columns and <b>${o.below_wet} of ${o.count_wet}</b> wet columns (${o.n3}×${o.ny} half-model) have γh − u below the minimum admissible σ<sub>n</sub>. Those bases have no admissible state, so this closure gives no FoS.</p>` +
         note("info", `${verdict} Ordering requires σ3/(2ν) ≤ σ1 ≤ σ3(1 − ν)/ν, and the EJC requires σ1 − σ3 ≥ σ<sub>ci</sub>Q<sup>a</sup>.`);
     }
     el.innerHTML = html;
@@ -1317,15 +1428,15 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
       scene: scene(T, { camera: { eye: { x: 1.45, y: -1.05, z: 0.62 } } }) }));
     onClick(el, (ev) => { const p = ev.points && ev.points[0]; if (p && p.data && p.data.type === "scatter3d" && p.customdata !== undefined) selectColumn(p.customdata); });
     renderPlan("chart-plan", vals, mirror, field);
-    $("#plan-info").textContent = k !== null ? `Column ${k}: i = ${m.i[k]}, j = ${m.j[k]}, x = ${fx(m.x[k], 2)} m, y = ${fx(m.y[k], 2)} m, h = ${fx(m.h[k], 2)} m. Click a cell to select a column.` : "";
+    $("#plan-info").textContent = k !== null ? `Column ${k}: i = ${m.i[k]}, j = ${m.j[k]}, x = ${fx(m.x[k], 2)} m, y = ${fx(m.y[k], 2)} m; Δx × Δy × h = ${fx(m.dx, 2)} × ${fx(m.dy, 2)} × ${fx(m.h[k], 2)} m. Click a cell to select a column.` : "";
     syncPick("k3a", m.count - 1, k);
   }
   function renderPlan(id, vals, mirror, field) {
-    const r = RES.r3, m = r.mesh, n = m.n, T = theme();
-    let grid = Array.from({ length: n }, () => new Array(n).fill(null));
+    const r = RES.r3, m = r.mesh, n = m.n, ny = m.ny, T = theme();
+    let grid = Array.from({ length: ny }, () => new Array(n).fill(null));
     for (let q = 0; q < m.count; q++) grid[m.j[q] - 1][n - m.i[q]] = isNum(vals[q]) ? vals[q] : null;
     const xs = Array.from({ length: n }, (_, c) => m.x0 - (n - c - 0.5) * m.dx);
-    let ys = Array.from({ length: n }, (_, q) => (q + 0.5) * m.dy);
+    let ys = Array.from({ length: ny }, (_, q) => (q + 0.5) * m.dy);
     if (mirror) { grid = grid.slice().reverse().concat(grid); ys = ys.map((y) => -y).reverse().concat(ys); }
     let [vmin, vmax] = range(vals);
     if (field === "tension") { vmin = 0; vmax = 1; }
@@ -1335,7 +1446,7 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
       colorbar: Object.assign({ title: { text: FIELDS[field][0], side: "right", font: { color: T.ink2 } }, len: 0.85, thickness: 12, outlinewidth: 0,
         tickfont: { color: T.ink2, family: "IBM Plex Mono, monospace", size: 11 } }, sc.colorbar || {}) }, { colorscale: sc.colorscale })];
     if (m.count <= 1600) {
-      data.push({ type: "scatter", mode: "markers", x: m.x, y: m.y, marker: { size: Math.max(4, Math.min(9, 360 / n)), color: rgba(T.surface, 0.75), line: { width: 0.6, color: T.ink2 } },
+      data.push({ type: "scatter", mode: "markers", x: m.x, y: m.y, marker: { size: Math.max(4, Math.min(9, 360 / Math.max(n, ny))), color: rgba(T.surface, 0.75), line: { width: 0.6, color: T.ink2 } },
         text: Array.from({ length: m.count }, (_, q) => hoverRows(r, q, false)), hoverinfo: "text", customdata: Array.from({ length: m.count }, (_, q) => q), name: "columns" });
     }
     const shapes = [];
@@ -1662,7 +1773,7 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
     const inp = RES.inputs, m = r3.mesh, T = theme(), k = UI.k3;
     const f = E.columnForces(inp, r3, k);
     $("#col-title").textContent = `Column ${k} (i = ${m.i[k]}, j = ${m.j[k]})`;
-    $("#col-where").textContent = `x = ${fx(m.x[k], 2)} m, y = ${fx(m.y[k], 2)} m, h = ${fx(m.h[k], 2)} m. ${m.count} active half-columns.`;
+    $("#col-where").textContent = `x = ${fx(m.x[k], 2)} m, y = ${fx(m.y[k], 2)} m; Δx × Δy × h = ${fx(m.dx, 2)} × ${fx(m.dy, 2)} × ${fx(m.h[k], 2)} m. ${m.count} active half-columns (${m.n} × ${m.ny} grid).`;
     syncPick("k3", m.count - 1, k);
     renderPlan("chart-fbd-plan", fieldValues(r3, "sigma_n"), false, "sigma_n");
     // 3D column
@@ -1815,7 +1926,8 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
     renderResultTable();
   }
   function columnsTable(r) {
-    const m = r.mesh, cols = [["i", m.i], ["j", m.j], ["x_m", m.x], ["y_m", m.y], ["z_base_m", m.zb], ["z_top_m", m.zt], ["h_m", m.h], ["A_h_m2", m.ah],
+    const m = r.mesh, cols = [["i", m.i], ["j", m.j], ["x_m", m.x], ["y_m", m.y], ["z_base_m", m.zb], ["z_top_m", m.zt], ["h_m", m.h],
+      ["dx_m", new Float64Array(m.count).fill(m.dx)], ["dy_m", new Float64Array(m.count).fill(m.dy)], ["A_h_m2", m.ah],
       ["A_m2", m.area], ["g_z", m.g], ["rho_m", m.rho], ["kappa", m.kap], ["W_kN", m.w], ["u_kPa", m.u]];
     if (r.strength && r.sn) {
       const s = r.strength;
@@ -2001,7 +2113,7 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
     const T = theme();
     const pct = (a, b) => (isNum(a) && isNum(b) ? `${a >= b ? "+" : "−"}${Math.abs((a / b - 1) * 100).toFixed(1)} %` : "–");
     const fosOrStatus = (v, s) => (isNum(v) ? v.toFixed(6) : esc(s || "withheld"));
-    const mesh = (d, n) => (d === 3 ? `${n} × ${n}` : `${n} slices`);
+    const mesh = (d, c) => (d === 3 ? `${c.n} × ${c.ny} columns` : `${c.n} slices`);
     const row = (label, f) => `<tr><td>${label}</td>${dims.map((d, q) => `<td class="v">${f(d, rs[q])}</td>`).join("")}</tr>`;
     const inLimits = (r) => SRCH_KEYS.every((k) => r[k] >= NUM[k].min && r[k] <= NUM[k].max);
     let html = `<div class="tbl-wrap"><table class="data srch"><thead><tr><th></th>${dims.map((d) => `<th>${d === 2 ? "2D, Bishop" : "3D, Hungr"}</th>`).join("")}</tr></thead><tbody>` +
@@ -2011,7 +2123,7 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
       row("x<sub>c</sub>, z<sub>c</sub>, R (m)", (d, r) => (isNum(r.fos) ? `${fx(r.xc, 3)}, ${fx(r.zc, 3)}, ${fx(r.R, 3)}` : "–")) +
       row("Front exit (x, z) (m)", (d, r) => (isNum(r.fos) ? exitText(inp, r.front) : "–")) +
       row("Back exit (x, z) (m)", (d, r) => (isNum(r.fos) ? exitText(inp, r.back) : "–")) +
-      row(`Mesh check (finer mesh)`, (d, r) => (r.check ? `${mesh(d, r.check.n)}:<br>${fosOrStatus(r.check.fos, r.check.status)}${isNum(r.check.change) ? ` (${pct(r.check.fos, r.fos)})` : ""}` : "–")) +
+      row(`Mesh check (finer mesh)`, (d, r) => (r.check ? `${mesh(d, r.check)}:<br>${fosOrStatus(r.check.fos, r.check.status)}${isNum(r.check.change) ? ` (${pct(r.check.fos, r.fos)})` : ""}` : "–")) +
       row("Surfaces tried", (d, r) => `${r.evaluations}:<br>${r.counts.solved} solved, ${r.counts.withheld} withheld, ${r.counts.skipped} skipped`) +
       row("Time", (d, r) => `${(r.ms / 1000).toFixed(1)} s`) +
       row("", (d, r) => (isNum(r.fos) ? `<button type="button" class="btn" data-use="${d}"${inLimits(r) ? "" : " disabled"}>Use this ${d === 2 ? "circle" : "sphere"}</button>` : "")) +
@@ -2027,12 +2139,12 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
       for (const e of r.edges) if (e.why !== "toe" && SRCH_EDGE[e.why] && !seen.has(e.why)) { seen.add(e.why); edges.push(SRCH_EDGE[e.why](st)); }
       if (edges.length) notes.push(note("warning", `${d}D: the critical ${d === 2 ? "circle" : "sphere"} ${edges.join("; it ")}.`));
       if (r.check && isNum(r.check.change) && Math.abs(r.check.change) > 0.005)
-        notes.push(note("warning", `${d}D: on ${mesh(d, r.check.n)} the critical surface's FoS changes by ${pct(r.check.fos, r.fos)}, more than the 0.5 % screening threshold of eq. 4.17. The current mesh under-resolves this surface, and the search may favour surfaces whose FoS the mesh underestimates. Refine the mesh (${d === 2 ? "N<sub>2D</sub>" : "N"}) and search again.`));
-      else if (r.check && !isNum(r.check.fos)) notes.push(note("warning", `${d}D: on ${mesh(d, r.check.n)} the critical surface gave no accepted FoS (${esc(r.check.status)}).`));
+        notes.push(note("warning", `${d}D: on ${mesh(d, r.check)} the critical surface's FoS changes by ${pct(r.check.fos, r.fos)}, more than the 0.5 % screening threshold of eq. 4.17. The current mesh under-resolves this surface, and the search may favour surfaces whose FoS the mesh underestimates. Refine the mesh (${d === 2 ? "N<sub>2D</sub>" : inp.n3y === null ? "N" : "N and N<sub>y</sub>"}) and search again.`));
+      else if (r.check && !isNum(r.check.fos)) notes.push(note("warning", `${d}D: on ${mesh(d, r.check)} the critical surface gave no accepted FoS (${esc(r.check.status)}).`));
     });
     html += notes.join("");
     html += '<div class="chart h-m" id="chart-search"></div>';
-    html += `<p class="hint">2D: a grid of ${st.grid.join(" × ")} = ${st.grid[0] * st.grid[1] * st.grid[2]} starting circles (front exit × back exit × curvature), then Nelder–Mead from the ${st.starts} best that are not neighbours, each restarted until it stops improving.${dims.includes(3) ? " 3D: Nelder–Mead from the 2D minima." : ""} The critical surface is the lowest accepted FoS among the surfaces tried: a local search, not a proof of the global minimum. Withheld results and surfaces the grid option cannot analyse are skipped. Every surface is solved on the current mesh (${inp.n2} slices, ${inp.n3} × ${inp.n3} columns); the mesh check re-solves the critical surface on a finer one. On a coarse 3D mesh the FoS changes in small steps as columns enter or leave the mass, so searches from different starts can stop at FoS that differ by a few tenths of a percent.</p>`;
+    html += `<p class="hint">2D: a grid of ${st.grid.join(" × ")} = ${st.grid[0] * st.grid[1] * st.grid[2]} starting circles (front exit × back exit × curvature), then Nelder–Mead from the ${st.starts} best that are not neighbours, each restarted until it stops improving.${dims.includes(3) ? " 3D: Nelder–Mead from the 2D minima." : ""} The critical surface is the lowest accepted FoS among the surfaces tried: a local search, not a proof of the global minimum. Withheld results and surfaces the grid option cannot analyse are skipped. Every surface is solved on the current mesh (${inp.n2} slices, ${inp.n3} × ${nyOf(inp)} columns; the counts stay fixed, so the column size changes with the surface); the mesh check re-solves the critical surface on a finer one${inp.n3y === null ? "" : ", with N<sub>y</sub> in the same ratio as N"}. On a coarse 3D mesh the FoS changes in small steps as columns enter or leave the mass, so searches from different starts can stop at FoS that differ by a few tenths of a percent.</p>`;
     out.innerHTML = html;
     out.querySelectorAll("[data-use]").forEach((b) => b.addEventListener("click", () => useSurface(Number(b.dataset.use))));
     searchChart(res, T);
@@ -2089,7 +2201,9 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
     writeRail();
     changed({ immediate: true });
     if (!(UI.live && liveAllowed())) requestRun(true);
-    $("#srch-status").textContent = `The prescribed surface is now the ${dim}D critical ${dim === 2 ? "circle" : "sphere"}; the analysis reruns.`;
+    const was = [STUDY.search.inputs.n3, nyOf(STUDY.search.inputs)], now = colGrid(S);
+    $("#srch-status").textContent = `The prescribed surface is now the ${dim}D critical ${dim === 2 ? "circle" : "sphere"}; the analysis reruns.` +
+      (S.cols === "size" && (was[0] !== now[0] || was[1] !== now[1]) ? ` With column sizes in metres the counts on this surface are ${now.join(" × ")} (the search used ${was.join(" × ")}), so the 3D FoS can differ slightly from the search's.` : "");
   }
   function runVerify() {
     const bar = $("#ver-prog"), slow = $("#ver-slow").checked;

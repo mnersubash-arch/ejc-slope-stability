@@ -443,6 +443,13 @@
     if (xs <= px[n - 1]) return pz[n - 1];
     return interpDesc(xs, px, pz);
   }
+  /** Slip surface z_b at (x, y): the sphere, or ellipsoidal caps around a cylindrical middle part; NaN where not real.
+   *  For drawing. Same as slip_z. */
+  function slipZ(inp, x, y) {
+    const half = 0.5 * inp.mid_length, ya = Math.abs(y), yc = half > 0 ? Math.max(ya - half, 0) : ya;
+    const dx = x - inp.xc, yl = yc / inp.elong, q = inp.R * inp.R - dx * dx - yl * yl;
+    return q >= 0 ? inp.zc - Math.sqrt(q) : NaN;
+  }
   /** Shortest distance (m) from the section point (x, z) to the excavated face. Same as face_distance. */
   function faceDistance(inp, x, z) {
     const [px, pz] = facePoints(inp);
@@ -1372,7 +1379,7 @@
     closureConstants, principalState, scanSigma3, admissibleSnMin, solveStrength, originalClosureMinimum,
     DEFAULT_INPUTS, inputs, hb, strengthOf, groundZ, waterZ, sphereZ, slipExtent, verticalFaces, gridXRange,
     columnsAcross, withN3, columnSize, countsForSize, buildMesh, checkAdditions, facePoints, faceHeight, interpDesc,
-    planX, ground, water, faceDistance, crackX, crackForces, externalTerms, yExtent, strengthAt, strengthFor,
+    planX, ground, water, slipZ, faceDistance, crackX, crackForces, externalTerms, yExtent, strengthAt, strengthFor,
     projectionLimit, solve, groundPoint, compareModels, parameterSweep, backAnalysis, mulberry32, monteCarlo, COMPARE,
     run3d, run2d, run, gravityCap, columnForces, massForces, SEARCH, groundAt, circleFromExits, searchSurface,
     singleMass, nelderMead, criticalSearch, sum, fmtG, DEG, RAD };

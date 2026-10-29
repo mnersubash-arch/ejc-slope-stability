@@ -75,6 +75,22 @@
         const res = E.criticalSearch(E.inputs(job.inputs), { dims: job.dims, back: job.back, front: job.front }, say);
         return Object.assign(res, { type: "search", id: job.id, ms: Date.now() - t0 });
       }
+      if (job.type === "compare") {
+        const inp = E.inputs(job.inputs);
+        return Object.assign(E.compareModels(inp), { type: "compare", id: job.id, nu: inp.nu, ms: Date.now() - t0 });
+      }
+      if (job.type === "sweep") {
+        const rows = E.parameterSweep(E.inputs(job.inputs), job.name, job.values, job.models, job.dims, say);
+        return { type: "sweep", id: job.id, name: job.name, models: job.models, dims: job.dims, rows, ms: Date.now() - t0 };
+      }
+      if (job.type === "back") {
+        const res = E.backAnalysis(E.inputs(job.inputs), job.name, job.lo, job.hi, job.target, job.dim, 1e-6, 60, say);
+        return Object.assign(res, { type: "back", id: job.id, ms: Date.now() - t0 });
+      }
+      if (job.type === "mc") {
+        const res = E.monteCarlo(E.inputs(job.inputs), job.variables, job.n, job.seed, null, job.dims, say);
+        return Object.assign(res, { type: "mc", id: job.id, ms: Date.now() - t0 });
+      }
       if (job.type === "verify") {
         let step = 0;
         const rows = CHECKS.verificationRows({ slow: !!job.slow, progress: (label) => say({ done: ++step, total: job.slow ? 13 : 11, label }) });

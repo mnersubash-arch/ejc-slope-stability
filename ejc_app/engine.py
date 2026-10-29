@@ -643,6 +643,17 @@ def water(inp: "Inputs", x, y=None):
     return np.where(xs >= px[0], pz[0], np.where(xs <= px[-1], pz[-1], _interp_desc(xs, px, pz)))
 
 
+def slip_z(inp: "Inputs", x, y):
+    """Slip surface z_b at (x, y): the sphere, or ellipsoidal end caps (elong) around a cylindrical middle part
+    (mid_length); NaN where not real. For drawing; build_mesh computes the columns. Same as slipZ."""
+    half = 0.5 * inp.mid_length
+    y = np.abs(np.asarray(y, dtype=float))
+    yc = np.maximum(y - half, 0.0) if half > 0 else y
+    with np.errstate(invalid="ignore"):
+        q = inp.R * inp.R - (np.asarray(x, dtype=float) - inp.xc) ** 2 - (yc / inp.elong) ** 2
+        return np.where(q >= 0, inp.zc - np.sqrt(np.where(q >= 0, q, 0.0)), np.nan)
+
+
 def face_distance(inp: "Inputs", x, z):
     """Shortest distance (m) from the section points (x, z) to the excavated face (toe to crest edge). Same as
     faceDistance in webapp/engine.js."""

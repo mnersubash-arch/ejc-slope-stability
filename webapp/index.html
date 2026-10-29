@@ -126,9 +126,11 @@ h1 { font: 600 clamp(32px, 4.2vw, 46px)/1 var(--font-display); letter-spacing: .
 
 /* controls */
 input[type="number"], select { font: 500 13px var(--font-data); color: var(--ink); background: var(--sunken); border: 1px solid var(--line);
-  border-radius: 4px; padding: 5px 6px; min-width: 0; width: 100%; }
+  border-radius: 4px; padding: 5px 6px; min-width: 0; width: 100%; box-sizing: border-box; }
 select { font-family: var(--font-body); font-size: 14px; padding: 6px 6px; }
 input[type="range"] { width: 100%; margin: 0; accent-color: var(--accent); min-width: 0; }
+textarea.pts, input.text { font: 500 13px/1.45 var(--font-data); color: var(--ink); background: var(--sunken); border: 1px solid var(--line);
+  border-radius: 4px; padding: 5px 6px; width: 100%; min-width: 0; box-sizing: border-box; resize: vertical; }
 input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px; margin: 2px 0 0; flex: none; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 [aria-invalid="true"] { border-color: var(--critical) !important; background: var(--critical-wash) !important; }
@@ -253,6 +255,10 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
 .inline-nums label { display: grid; gap: 3px; font-size: 13.5px; }
 .inline-nums label[hidden] { display: none; }
 #srch-sec .inline-nums { grid-template-columns: repeat(2, minmax(0, 1fr)); max-width: 640px; }
+#sweep-sec .inline-nums { grid-template-columns: minmax(0, 2fr) repeat(3, minmax(0, 1fr)); max-width: 900px; }
+#mc-sec .inline-nums { max-width: 640px; }
+#mc-vars input { max-width: 160px; }
+@media (max-width: 640px) { #sweep-sec .inline-nums { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .footer { margin-top: 22px; padding-top: 12px; border-top: 1px solid var(--line); font-size: 12.5px; color: var(--ink-2); display: grid; gap: 4px; }
 </style>
 
@@ -289,13 +295,51 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
       </div>
 
       <details class="sec" open>
-        <summary>Slope and slip sphere</summary>
+        <summary>Slope</summary>
         <div class="fields">
+          <div>
+            <p class="group-label">Slope face</p>
+            <div class="seg" role="radiogroup" aria-label="Slope face">
+              <label><input type="radio" name="face" id="face-planar" value="planar"><span>Planar</span></label>
+              <label><input type="radio" name="face" id="face-benches" value="benches"><span>Benches</span></label>
+              <label><input type="radio" name="face" id="face-profile" value="profile"><span>Points</span></label>
+            </div>
+          </div>
           <div data-num="H"></div>
           <div data-num="beta"></div>
+          <div data-num="bench_n"></div>
+          <div data-num="bench_h"></div>
+          <div data-num="bench_beta"></div>
+          <div data-num="berm_w"></div>
+          <div class="num" id="f-profile_text">
+            <div class="num-head"><label for="profile_text">Face points x, z (m), one per line, from the toe (0, 0) up to the crest edge</label></div>
+            <textarea id="profile_text" class="pts" rows="5" spellcheck="false" aria-describedby="err-profile_text"></textarea>
+            <p class="err" id="err-profile_text" hidden></p>
+          </div>
+          <p class="derived" id="face-derived"></p>
+          <div data-num="crest_slope"></div>
+          <div>
+            <p class="group-label">Wall in plan</p>
+            <div class="seg" role="radiogroup" aria-label="Wall in plan">
+              <label><input type="radio" name="wall" id="wall-straight" value="straight"><span>Straight</span></label>
+              <label><input type="radio" name="wall" id="wall-concave" value="concave"><span>Concave</span></label>
+              <label><input type="radio" name="wall" id="wall-convex" value="convex"><span>Convex</span></label>
+            </div>
+          </div>
+          <div data-num="plan_r"></div>
+          <p class="hint" id="slope-hint"></p>
+        </div>
+      </details>
+
+      <details class="sec" open>
+        <summary>Slip surface</summary>
+        <div class="fields">
           <div data-num="xc"></div>
           <div data-num="zc"></div>
           <div data-num="R"></div>
+          <div data-num="elong"></div>
+          <div data-num="mid_length"></div>
+          <p class="derived" id="surface-derived"></p>
           <label class="check"><input type="checkbox" id="base_circle"><span>Base circle: grid from exit to entry, floor columns allowed</span></label>
           <p class="hint">Off by default (thesis grid). Needed for circles that cross the toe level behind the toe (x<sub>c</sub> ≤ 0), exit on the floor ahead of the toe, or stay above the toe level (face circles, R ≤ z<sub>c</sub>). Toe at the origin; the slope rises towards −x.</p>
         </div>
@@ -328,6 +372,8 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
           <div data-num="mi"></div>
           <div data-num="gsi"></div>
           <div data-num="D"></div>
+          <label class="check" id="dz_on-wrap"><input type="checkbox" id="dz_on"><span>Apply D only within T of the face (D = 0 beyond)</span></label>
+          <div data-num="d_zone"></div>
           <label class="check" id="a_on-wrap"><input type="checkbox" id="a_on"><span>Override a (otherwise a from GSI, eq. 2.5)</span></label>
           <div data-num="a_value"></div>
           <p class="derived" id="derived"></p>
@@ -335,17 +381,28 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
       </details>
 
       <details class="sec" open>
-        <summary>Pore pressure</summary>
+        <summary>Water, tension crack and seismic load</summary>
         <div class="fields">
           <div class="seg" role="radiogroup" aria-label="Pore pressure">
             <label><input type="radio" name="water" id="water-Dry" value="Dry"><span>Dry</span></label>
             <label><input type="radio" name="water" id="water-Wet" value="Wet"><span>Water table</span></label>
+            <label><input type="radio" name="water" id="water-Piezo" value="Piezo"><span>Line</span></label>
             <label><input type="radio" name="water" id="water-ru" value="ru"><span>r<sub>u</sub></span></label>
           </div>
           <div data-num="Hw"></div>
           <div data-num="beta_w"></div>
           <div data-num="ru_value"></div>
+          <div class="num" id="f-piezo_text">
+            <div class="num-head"><label for="piezo_text">Piezometric line x, z (m), one point per line, x decreasing (into the slope)</label></div>
+            <textarea id="piezo_text" class="pts" rows="4" spellcheck="false" aria-describedby="err-piezo_text"></textarea>
+            <p class="err" id="err-piezo_text" hidden></p>
+          </div>
           <p class="hint" id="water-hint"></p>
+          <label class="check"><input type="checkbox" id="crack_on"><span>Tension crack at the back of the mass</span></label>
+          <div data-num="crack_depth"></div>
+          <div data-num="crack_water"></div>
+          <div data-num="kh"></div>
+          <p class="hint" id="load-hint"></p>
         </div>
       </details>
 
@@ -538,6 +595,60 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
           <div id="srch-out" class="stack"></div>
         </div>
         <div class="grid-2">
+          <div class="stack" id="cmp-sec">
+            <h3>EJC against GHB, 3D against 2D</h3>
+            <p class="hint">The EJC (Moscarda closure, at the current ν) and GHB on the current surface, mesh and inputs, in 3D and 2D, with their ratios.</p>
+            <div class="toolbar"><button type="button" class="btn" id="cmp-run">Compare</button></div>
+            <div id="cmp-out" class="stack"></div>
+          </div>
+          <div class="stack" id="back-sec">
+            <h3>Back-analysis</h3>
+            <p class="hint">The value of one input at which the FoS equals a target (F = 1 for a failure), found by bisection between two values where F is above and below the target, on the prescribed surface.</p>
+            <div class="inline-nums">
+              <label><span>Input</span><select id="back-name"></select></label>
+              <label><span>from</span><input type="number" id="back-lo" step="any"></label>
+              <label><span>to</span><input type="number" id="back-hi" step="any"></label>
+              <label><span>target F</span><input type="number" id="back-target" step="0.01" value="1"></label>
+              <label><span>analysis</span><select id="back-dim"><option value="2">2D</option><option value="3">3D</option></select></label>
+            </div>
+            <div class="toolbar"><button type="button" class="btn" id="back-run">Back-analyse</button></div>
+            <progress id="back-prog" max="1" value="0" hidden></progress>
+            <div id="back-out" class="stack"></div>
+          </div>
+        </div>
+        <div class="stack" id="sweep-sec">
+          <h3>Parameter sweep</h3>
+          <p class="hint">The FoS as one input varies over evenly spaced values, for the strength models and dimensions ticked. The other inputs stay as they are.</p>
+          <div class="inline-nums">
+            <label><span>Input</span><select id="sweep-name"></select></label>
+            <label><span>from</span><input type="number" id="sweep-lo" step="any"></label>
+            <label><span>to</span><input type="number" id="sweep-hi" step="any"></label>
+            <label><span>values</span><input type="number" id="sweep-n" min="2" max="101" step="1" value="9"></label>
+          </div>
+          <div class="toolbar">
+            <label class="check"><input type="checkbox" id="sweep-ejc" checked><span>EJC</span></label>
+            <label class="check"><input type="checkbox" id="sweep-ghb" checked><span>GHB</span></label>
+            <label class="check"><input type="checkbox" id="sweep-3" checked><span>3D</span></label>
+            <label class="check"><input type="checkbox" id="sweep-2" checked><span>2D</span></label>
+            <button type="button" class="btn" id="sweep-run">Run the sweep</button>
+          </div>
+          <progress id="sweep-prog" max="1" value="0" hidden></progress>
+          <div id="sweep-out" class="stack"></div>
+        </div>
+        <div class="stack" id="mc-sec">
+          <h3>Monte Carlo: probability of failure</h3>
+          <p class="hint">Each input below is drawn from a normal distribution with the current value as its mean and the standard deviation you enter (0 keeps it fixed), cut off at its valid range. No standard deviation is assumed: enter them from your site data. The FoS of every sample is solved with the current model; P<sub>f</sub> = P(F &lt; 1) among the accepted results.</p>
+          <div class="tbl-wrap"><table class="data" id="mc-vars"></table></div>
+          <div class="inline-nums">
+            <label><span>samples</span><input type="number" id="mc-n" min="10" max="5000" step="1" value="100"></label>
+            <label><span>seed</span><input type="number" id="mc-seed" min="0" step="1" value="1"></label>
+            <label><span>analysis</span><select id="mc-dim"><option value="2">2D</option><option value="3">3D</option><option value="32">3D and 2D</option></select></label>
+          </div>
+          <div class="toolbar"><button type="button" class="btn" id="mc-run">Run Monte Carlo</button></div>
+          <progress id="mc-prog" max="1" value="0" hidden></progress>
+          <div id="mc-out" class="stack"></div>
+        </div>
+        <div class="grid-2">
           <div class="stack">
             <h3>Mesh study (eq. 4.17)</h3>
             <fieldset><legend>3D meshes N<span id="mesh-n3-hint"></span></legend><div class="ticks" id="mesh-n3"></div></fieldset>
@@ -627,16 +738,30 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
     dx_value: { sym: "Δx", label: "column length along x, at most", unit: "m", min: 0.01, max: 4000, scale: "size" },
     dy_value: { sym: "Δy", label: "column width across y, at most", unit: "m", min: 0.01, max: 4000, scale: "size" },
     n2: { sym: "N<sub>2D</sub>", label: "2D slices", unit: "", min: 2, max: 10000, int: true, slider: 640 },
+    bench_n: { sym: "n", label: "benches", unit: "", min: 1, max: 50, int: true, slider: 10 },
+    bench_h: { sym: "h<sub>b</sub>", label: "bench height", unit: "m", min: 0.5, max: 500, scale: "H" },
+    bench_beta: { sym: "β<sub>b</sub>", label: "bench face angle", unit: "°", min: 10, max: 89, step: 0.1 },
+    berm_w: { sym: "w<sub>b</sub>", label: "berm width", unit: "m", min: 0, max: 500, scale: "c" },
+    crest_slope: { sym: "α", label: "ground behind the crest edge", unit: "°", min: 0, max: 60, step: 0.1 },
+    plan_r: { sym: "R<sub>p</sub>", label: "radius of the toe line in plan", unit: "m", min: 1, max: 100000, scale: "size" },
+    elong: { sym: "λ", label: "end caps: half-width / R (1 = sphere)", unit: "", min: 0.1, max: 20, step: 0.01 },
+    mid_length: { sym: "L", label: "cylindrical middle part, length", unit: "m", min: 0, max: 100000, scale: "size" },
+    d_zone: { sym: "T", label: "disturbed zone, distance from the face", unit: "m", min: 0, max: 10000, scale: "size" },
+    crack_depth: { sym: "z<sub>t</sub>", label: "tension crack depth below the ground", unit: "m", min: 0.01, max: 5000, scale: "size" },
+    crack_water: { sym: "f<sub>w</sub>", label: "share of the crack filled with water", unit: "", min: 0, max: 1, step: 0.01 },
+    kh: { sym: "k<sub>h</sub>", label: "horizontal seismic coefficient", unit: "", min: 0, max: 0.99, step: 0.005 },
   };
   const plainSym = (k) => NUM[k].sym.replace(/<sub>(.*?)<\/sub>/g, "_$1");
   const labelOf = (k, d) => (k === "n3" && d.cols === "counts" ? "3D columns along x" : NUM[k].label);
   const FIELDS = {
     sigma_n: ["σ<sub>n</sub> (kPa)", "σ_n"], phi: ["φ<sub>i</sub> (°)", "φ_i"], c: ["c<sub>i</sub> (kPa)", "c_i"],
     tau: ["τ<sub>s</sub> (kPa)", "τ_s"], u: ["u (kPa)", "u"], resistance: ["Resistance τ<sub>s</sub>A (kN)", "τ_s A"],
-    tension: ["Tension flag (σ<sub>n</sub> &lt; 0)", "tension"],
+    tension: ["Tension flag (σ<sub>n</sub> &lt; 0)", "tension"], zone: ["Disturbed zone (D applies)", "D zone"],
   };
+  const isFlag = (field) => field === "tension" || field === "zone";
   const FIELD_NAMES = { sigma_n: "σn, effective normal stress", phi: "φi, instantaneous friction angle", c: "ci, instantaneous cohesion",
-    tau: "τs, shear strength", u: "u, pore pressure", resistance: "τs A, contribution to resistance", tension: "Tension flag (σn < 0)" };
+    tau: "τs, shear strength", u: "u, pore pressure", resistance: "τs A, contribution to resistance", tension: "Tension flag (σn < 0)",
+    zone: "Disturbed zone (D applies)" };
 
   function toState(inp) {
     const st = Object.assign({}, inp, {
@@ -649,12 +774,55 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
     });
     st.cols = inp.n3y === null || inp.n3y === undefined ? "square" : "counts";
     st.n3y_value = st.cols === "counts" ? inp.n3y : inp.n3;
+    // additions: the slope face, walls in plan, D zone, piezometric line, tension crack (off: empty or the planar values)
+    const none = (v) => v === null || v === undefined, tb = Math.tan(inp.beta * E.DEG), tw = Math.tan(inp.beta_w * E.DEG);
+    st.face = none(inp.profile) ? "planar" : "profile";
+    st.profile_text = pointsText(none(inp.profile) ? [[0, 0], [-inp.H / tb, inp.H]] : inp.profile);
+    st.bench_n = 1; st.bench_h = inp.H; st.bench_beta = inp.beta; st.berm_w = 0;
+    st.wall = none(inp.plan_radius) ? "straight" : inp.plan_radius > 0 ? "concave" : "convex";
+    st.plan_r = none(inp.plan_radius) ? NaN : Math.abs(inp.plan_radius);
+    st.dz_on = !none(inp.d_zone); st.d_zone = none(inp.d_zone) ? NaN : inp.d_zone;
+    if (!none(inp.piezo) && inp.wet) st.water = "Piezo";
+    st.piezo_text = pointsText(none(inp.piezo) ? [[0, 0], [-inp.Hw / tw, inp.Hw]] : inp.piezo);
+    st.crack_on = !none(inp.crack_depth); st.crack_depth = none(inp.crack_depth) ? NaN : inp.crack_depth;
     const sz = sizesFor(st, inp.n3, st.n3y_value);
     st.dx_value = sz ? sz[0] : NaN; st.dy_value = sz ? sz[1] : NaN;
     return st;
   }
+  /** Points [[x, z], ...] read from text: one "x, z" pair per line (or separated by ";"). Throws naming the line. */
+  function parsePoints(text) {
+    const pts = [];
+    String(text || "").split(/[\n;]+/).map((l) => l.trim()).filter(Boolean).forEach((l, q) => {
+      const v = l.split(/[\s,]+/).filter(Boolean).map(Number);
+      if (v.length !== 2 || !v.every(Number.isFinite)) throw new Error(`line ${q + 1} ("${l}") is not two numbers x, z`);
+      pts.push(v);
+    });
+    return pts;
+  }
+  const pointsText = (pts) => pts.map((q) => `${+Number(q[0]).toPrecision(10)}, ${+Number(q[1]).toPrecision(10)}`).join("\n");
+  /** Bench face from the toe: n benches of height h_b at beta_b, separated by berms w_b wide. */
+  function benchPoints(d) {
+    const pts = [[0, 0]], run = d.bench_h / Math.tan(d.bench_beta * E.DEG);
+    let x = 0, z = 0;
+    for (let k = 0; k < d.bench_n; k++) {
+      x -= run; z += d.bench_h; pts.push([x, z]);
+      if (k < d.bench_n - 1 && d.berm_w > 0) { x -= d.berm_w; pts.push([x, z]); }
+    }
+    return pts;
+  }
+  /** H, beta and profile of the face of d: with benches or points, H and beta are the crest edge's height and the
+   *  overall angle from the toe, and the profile carries the face. */
+  function faceFields(d) {
+    let pts = null;
+    try { pts = d.face === "benches" ? benchPoints(d) : d.face === "profile" ? parsePoints(d.profile_text) : null; } catch (e) { pts = null; }
+    if (!pts || pts.length < 2 || !pts.every((q) => isNum(q[0]) && isNum(q[1]))) return { H: d.H, beta: d.beta, profile: null };
+    const [xe, he] = pts[pts.length - 1];
+    return { H: he, beta: xe < 0 && he > 0 ? Math.atan(he / -xe) * E.RAD : d.beta, profile: pts };
+  }
+  const numOr = (v, dflt) => (isNum(v) ? v : dflt);
   // 3D columns: N x N (the brief's grid), N x N_y, or plan sizes in metres converted to counts on the current circle
-  const geomOf = (d) => E.inputs({ H: d.H, beta: d.beta, xc: d.xc, zc: d.zc, R: d.R, base_circle: !!d.base_circle });
+  const geomOf = (d) => E.inputs(Object.assign({ xc: d.xc, zc: d.zc, R: d.R, base_circle: !!d.base_circle, crest_slope: numOr(d.crest_slope, 0),
+    elong: numOr(d.elong, 1), mid_length: numOr(d.mid_length, 0) }, faceFields(d)));
   const ceil4 = (v) => { const q = Math.pow(10, Math.floor(Math.log10(v)) - 3); return +(Math.ceil(v / q - 1e-9) * q).toPrecision(4); };
   const floor4 = (v) => { const q = Math.pow(10, Math.floor(Math.log10(v)) - 3); return +(Math.floor(v / q + 1e-9) * q).toPrecision(4); };
   /** Grid span x0 - x1 (m) of the circle of d, or null when the default grid refuses it (the run then says why). */
@@ -666,7 +834,7 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
   function sizesFor(d, n, ny) {
     const span = spanOf(d);
     const fit = (k, v) => clamp(v, NUM[k].min, NUM[k].max);
-    return span === null || !(n >= 1 && ny >= 1) ? null : [fit("dx_value", ceil4(span / n)), fit("dy_value", ceil4(d.R / ny))];
+    return span === null || !(n >= 1 && ny >= 1) ? null : [fit("dx_value", ceil4(span / n)), fit("dy_value", ceil4(E.yExtent(geomOf(d)) / ny))];
   }
   /** Counts [N, N_y] of the column option of d; N_y is null for the N x N grid. Sizes in metres become counts with
    *  E.countsForSize on the current circle; if the circle has no grid, the run reports why. */
@@ -683,11 +851,17 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
     const model = d.strength === "GHB" ? "ghb" : d.strength === "MC" ? "mc"
       : { moscarda: "ejc_moscarda", original: "ejc_original", s2s3: "ejc_sigma2_eq_sigma3" }[d.closure];
     const native = d.iteration === "native_v15";
-    return E.inputs({ H: d.H, beta: d.beta, xc: d.xc, zc: d.zc, R: d.R, gamma: d.gamma, sigma_ci: d.sigma_ci, mi: d.mi,
-      gsi: d.gsi, D: d.D, a_override: d.a_on ? d.a_value : null, nu: d.nu, model, wet: d.water === "Wet", Hw: d.Hw,
+    const wall = d.wall === "concave" ? 1 : d.wall === "convex" ? -1 : 0;
+    let piezo = null;
+    if (d.water === "Piezo") { try { piezo = parsePoints(d.piezo_text); } catch (e) { piezo = null; } }
+    return E.inputs(Object.assign({ xc: d.xc, zc: d.zc, R: d.R, gamma: d.gamma, sigma_ci: d.sigma_ci, mi: d.mi,
+      gsi: d.gsi, D: d.D, a_override: d.a_on ? d.a_value : null, nu: d.nu, model, wet: d.water === "Wet" || d.water === "Piezo", Hw: d.Hw,
       beta_w: d.beta_w, n2: d.n2, form: native ? "FH" : d.form, tension: native ? "none" : d.tension,
       iteration: d.iteration, c_mc: d.c_mc, phi_mc: d.phi_mc, ru: d.water === "ru" ? d.ru_value : null,
-      base_circle: !!d.base_circle, ...colInputs(d) });
+      base_circle: !!d.base_circle, ...colInputs(d) }, faceFields(d), {
+      crest_slope: numOr(d.crest_slope, 0), plan_radius: wall ? wall * d.plan_r : null, elong: numOr(d.elong, 1),
+      mid_length: numOr(d.mid_length, 0), d_zone: d.dz_on && d.strength !== "MC" ? d.d_zone : null, piezo,
+      crack_depth: d.crack_on ? d.crack_depth : null, crack_water: d.crack_on ? numOr(d.crack_water, 0) : 0, kh: numOr(d.kh, 0) }));
   }
   function colInputs(d) {
     const [n3, ny] = colCounts(d);
@@ -704,6 +878,11 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
     if (k === "n3") return d.cols !== "size";
     if (k === "n3y_value") return d.cols === "counts";
     if (k === "dx_value" || k === "dy_value") return d.cols === "size";
+    if (k === "H" || k === "beta") return !d.face || d.face === "planar";
+    if (["bench_n", "bench_h", "bench_beta", "berm_w"].includes(k)) return d.face === "benches";
+    if (k === "plan_r") return d.wall === "concave" || d.wall === "convex";
+    if (k === "d_zone") return !!d.dz_on && d.strength !== "MC";
+    if (k === "crack_depth" || k === "crack_water") return !!d.crack_on;
     return true;
   };
   function validate(d) {
@@ -722,7 +901,15 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
       const say = (sym, v, cnt, csym, axis, L) => `${sym} = ${E.fmtG(v, 6)} m gives ${csym} = ${cnt} column${cnt === 1 ? "" : "s"} ${axis} on this circle; ` +
         `${csym} must be from 2 to 320, so use ${sym} from ${ceil4(L / 320)} to ${floor4(L / 2)} m.`;
       if (n < 2 || n > 320) errs.dx_value = say("Δx", d.dx_value, n, "N", "along x", span);
-      if (ny < 2 || ny > 320) errs.dy_value = say("Δy", d.dy_value, ny, "N_y", "across y", d.R);
+      if (ny < 2 || ny > 320) errs.dy_value = say("Δy", d.dy_value, ny, "N_y", "across y", E.yExtent(geomOf(d)));
+    }
+    if (d.face === "profile") { try { parsePoints(d.profile_text); } catch (e) { errs.profile_text = `Face points: ${e.message}.`; } }
+    if (d.water === "Piezo") { try { parsePoints(d.piezo_text); } catch (e) { errs.piezo_text = `Piezometric line: ${e.message}.`; } }
+    if (!Object.keys(errs).length) {               // the engine's own checks of the additions
+      try { E.checkAdditions(toInputs(d)); } catch (e) {
+        const key = /slope profile/.test(e.message) ? "profile_text" : /piezometric/.test(e.message) ? "piezo_text" : "_add";
+        errs[key] = e.message.charAt(0).toUpperCase() + e.message.slice(1) + ".";
+      }
     }
     return errs;
   }
@@ -735,7 +922,7 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
   let RES = null;                         // last analysis: {key, inputs, r3, e3, r2, e2, orig, ms}
   let running = false, rerun = null, debounceT = null, lastError = null;
   const DIRTY = new Set(TABS);
-  let STUDY = { mesh: null, nu: null, search: null, ver: null };
+  let STUDY = { mesh: null, nu: null, search: null, ver: null, cmp: null, sweep: null, back: null, mc: null };
 
   const isNum = (v) => typeof v === "number" && Number.isFinite(v);
   const f6 = (v) => (isNum(v) ? v.toFixed(6) : "withheld");
@@ -777,7 +964,7 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
     if (sp.scale === "H") { lo = 0.25 * v; hi = 2 * v; }
     else if (sp.scale === "L") { lo = v - L; hi = v + L; }
     else if (sp.scale === "Hw") { lo = 0; hi = 1.25 * Math.max(L, v); }
-    else if (sp.scale === "size") { lo = 0.25 * v; hi = 4 * v; }
+    else if (sp.scale === "size") { if (v > 0) { lo = 0.25 * v; hi = 4 * v; } else { lo = 0; hi = Math.max(L, 1); } }
     else { lo = 0; hi = Math.max(50, 3 * v); }
     lo = Math.max(sp.min, lo); hi = Math.min(sp.max, hi);
     const step = niceStep(hi - lo);
@@ -841,6 +1028,13 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
     });
     $("#base_circle").addEventListener("change", (ev) => { S.base_circle = ev.target.checked; changed({ immediate: true }); });
     document.querySelectorAll('input[name="cols"]').forEach((el) => el.addEventListener("change", () => { if (el.checked) setCols(el.value); }));
+    document.querySelectorAll('input[name="face"]').forEach((el) => el.addEventListener("change", () => { if (el.checked) setFace(el.value); }));
+    document.querySelectorAll('input[name="wall"]').forEach((el) => el.addEventListener("change", () => { if (el.checked) { S.wall = el.value; changed({ immediate: true }); } }));
+    for (const id of ["dz_on", "crack_on"]) $("#" + id).addEventListener("change", (ev) => { S[id] = ev.target.checked; changed({ immediate: true }); });
+    for (const id of ["profile_text", "piezo_text"]) {
+      $("#" + id).addEventListener("input", (ev) => { S[id] = ev.target.value; changed({ typing: true }); });
+      $("#" + id).addEventListener("change", (ev) => { S[id] = ev.target.value; changed({ immediate: true }); });
+    }
     $("#a_on").addEventListener("change", (ev) => { S.a_on = ev.target.checked; changed({ immediate: true }); });
     document.querySelectorAll("[data-field]").forEach((el) => {
       el.innerHTML = Object.keys(FIELDS).map((k) => `<option value="${k}">${esc(FIELD_NAMES[k])}</option>`).join("");
@@ -870,14 +1064,42 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
     writeChoices();
     changed({ immediate: true });
   }
+  /** Switch the slope face; the points start from the current face, so the geometry carries over. */
+  function setFace(mode) {
+    if (mode === S.face) return;
+    const f = faceFields(S);
+    if (mode === "profile") {
+      const tb = Math.tan(f.beta * E.DEG);
+      S.profile_text = pointsText(f.profile || [[0, 0], [-f.H / tb, f.H]]);
+      $("#profile_text").value = S.profile_text;
+    } else if (mode === "planar") {                 // keep H and beta unless the face was changed to a valid one
+      let H = null, beta = null;
+      if (S.face === "benches" && S.bench_n === 1) { H = S.bench_h; beta = S.bench_beta; }
+      else if (f.profile) {
+        const tb = Math.tan(S.beta * E.DEG);
+        let ok = !(S.face === "profile" && String(S.profile_text || "").trim() === pointsText([[0, 0], [-S.H / tb, S.H]]));
+        if (ok) { try { E.checkAdditions(E.inputs({ profile: f.profile })); } catch (e) { ok = false; } }
+        if (ok) { H = f.H; beta = +f.beta.toPrecision(12); }
+      }
+      if (isNum(H) && isNum(beta)) {
+        S.H = H; S.beta = beta;
+        for (const k of ["H", "beta"]) { WIN[k] = windowFor(k, S); setSliderWindow(k); $("#sl-" + k).value = S[k]; $("#nb-" + k).value = fmtInput(S[k]); }
+      }
+    }
+    S.face = mode;
+    writeChoices();
+    changed({ immediate: true });
+  }
   function syncFieldSelects() { document.querySelectorAll("[data-field]").forEach((el) => { el.value = UI.field; }); }
   function writeChoices() {
-    for (const n of ["strength", "water", "form", "tension", "cols"]) {
+    for (const n of ["strength", "water", "form", "tension", "cols", "face", "wall"]) {
       const el = document.getElementById(`${n}-${S[n]}`);
       if (el) el.checked = true;
     }
     $("#closure").value = S.closure; $("#iteration").value = S.iteration;
     $("#base_circle").checked = !!S.base_circle; $("#a_on").checked = !!S.a_on;
+    $("#dz_on").checked = !!S.dz_on; $("#crack_on").checked = !!S.crack_on;
+    $("#profile_text").value = S.profile_text || ""; $("#piezo_text").value = S.piezo_text || "";
   }
   function writeRail() {
     for (const k of Object.keys(NUM)) {
@@ -909,12 +1131,32 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
     }
     $("#derived").innerHTML = txt;
     $("#lb-n3").textContent = labelOf("n3", S);
+    for (const id of ["profile_text", "piezo_text"]) {
+      $("#f-" + id).hidden = id === "profile_text" ? S.face !== "profile" : S.water !== "Piezo";
+      const er = $("#err-" + id);
+      if (errs[id]) { er.textContent = errs[id]; er.hidden = false; $("#" + id).setAttribute("aria-invalid", "true"); }
+      else { er.hidden = true; $("#" + id).removeAttribute("aria-invalid"); }
+    }
+    $("#dz_on-wrap").hidden = S.strength === "MC";
+    const ff = faceFields(S);
+    $("#face-derived").innerHTML = S.face === "planar" ? "" : ff.profile
+      ? `Crest edge at x = ${fx(ff.profile[ff.profile.length - 1][0], 2)} m, H = ${fx(ff.H, 2)} m; overall angle ${fx(ff.beta, 2)}° from the toe (${ff.profile.length} points).` : "";
+    $("#slope-hint").innerHTML = (S.wall === "concave" ? "Concave wall: the toe line is a circle of radius R<sub>p</sub> around the pit, which lies inside it; the section is swept around its axis. "
+      : S.wall === "convex" ? "Convex wall (a nose): the toe line is a circle of radius R<sub>p</sub> around an axis behind the slope. " : "") +
+      "Ground behind the crest edge: flat (α = 0) or rising at α. The 2D section is the central one, y = 0.";
+    let half = null;
+    try { half = E.yExtent(geomOf(S)); } catch (e) { half = null; }
+    $("#surface-derived").innerHTML = isNum(half) ? `Half-width across y: ${S.mid_length > 0 ? "L/2 + " : ""}λR = ${fx(half, 2)} m` +
+      (S.elong === 1 && !(S.mid_length > 0) ? " (the sphere)." : ". The central section y = 0 stays the circle (x<sub>c</sub>, z<sub>c</sub>, R), as in 2D.") : "";
+    $("#load-hint").innerHTML = (S.crack_on ? "The crack is vertical, where the slip circle on y = 0 first lies z<sub>t</sub> below the ground from the back; the mass ends there, and water in it pushes on its face with γ<sub>w</sub>h<sub>w</sub>²/2 at h<sub>w</sub>/3. " : "") +
+      "Seismic: a pseudo-static horizontal force k<sub>h</sub>W at each column's centroid, towards the pit (0 = none).";
     $("#cols-derived").innerHTML = colsText(S);
     const span = spanOf(S);
     $("#slices-derived").innerHTML = span !== null && Number.isInteger(S.n2) && S.n2 >= 1
       ? `2D slices: Δx = (x<sub>0</sub> − x<sub>1</sub>)/N<sub>2D</sub> = ${fx(span / S.n2, 3)} m, unit thickness.` : "";
     $("#mesh-n3-hint").innerHTML = S.cols === "square" ? "" : " (N<sub>y</sub> in the same ratio)";
     $("#water-hint").innerHTML = S.water === "Wet" ? "u = γ<sub>w</sub> max(0, z<sub>w</sub> − z<sub>b</sub>), γ<sub>w</sub> = 9.81 kN/m³; z<sub>w</sub> = min(H<sub>w</sub>, −x tan β<sub>w</sub>)."
+      : S.water === "Piezo" ? "u = γ<sub>w</sub> max(0, z<sub>w</sub> − z<sub>b</sub>) with z<sub>w</sub> on the line through the points (constant beyond its ends)."
       : S.water === "ru" ? "u = r<sub>u</sub> γ h for every column and slice (h = column height)." : "u = 0.";
   }
 
@@ -1188,16 +1430,35 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
       if (r2 && r2.mesh.count) facts.push(["2D slice width", `${fx(r2.mesh.dx, 2)} m`]);
       if (r3) facts.push(["Sliding volume (full mass)", `${gc(r3.mesh.volume, 4)} m³`]);
       if (r2) facts.push(["2D area", `${gc(r2.mesh.volume, 4)} m²`]);
+      const zoneOf = (r) => (r && r.mesh.zone ? `${r.mesh.zone.reduce((a, b) => a + b, 0)} of ${r.mesh.count}` : "–");
+      if (inp.d_zone !== null && inp.model !== "mc") facts.push([`Bases within T = ${E.fmtG(inp.d_zone, 4)} m of the face (D applies) 3D / 2D`, pair(zoneOf(r3), zoneOf(r2))]);
+      const ck = (r2 && r2.mesh.crack) || (r3 && r3.mesh.crack);
+      if (ck && ck.rows.length) {
+        const rw = ck.rows[0];
+        facts.push(["Tension crack", `x = ${fx(ck.x, 2)} m, ${fx(rw.ztop - rw.zbot, 2)} m deep, ` +
+          (r2 && r2.mesh.crack && r2.mesh.crack.P > 0 ? `water ${fx(rw.hw, 2)} m, P = ${big(r2.mesh.crack.P)} kN/m (2D)` : "dry")]);
+      }
+      if (inp.kh > 0) facts.push(["Seismic k<sub>h</sub>", `${E.fmtG(inp.kh, 6)}: k<sub>h</sub>ΣW = ${big(2 * (r3 && r3.mesh.ext ? r3.mesh.ext.Ex : 0))} kN (3D)`]);
     }
     $("#facts").innerHTML = facts.map(([k, v]) => `<div><dt>${k}</dt><dd>${v}</dd></div>`).join("");
     // caption (as the Calculator page)
     const [mb, s, a] = E.hb(inp);
     const strengthTxt = inp.model === "mc" ? `c′ = ${E.fmtG(inp.c_mc, 6)} kPa, φ′ = ${E.fmtG(inp.phi_mc, 6)}°`
       : `m_b = ${fx(mb, 6)}, s = ${fx(s, 7)}, a = ${fx(a, 6)}${inp.model === "ejc_moscarda" || inp.model === "ejc_original" ? `, ν = ${E.fmtG(inp.nu, 6)}` : ""}`;
-    const waterTxt = inp.ru !== null ? `u = r_u γ h with r_u = ${E.fmtG(inp.ru, 6)}` : inp.wet ? `water table (H_w = ${E.fmtG(inp.Hw, 6)} m, β_w = ${E.fmtG(inp.beta_w, 6)}°)` : "dry";
+    const waterTxt = inp.ru !== null ? `u = r_u γ h with r_u = ${E.fmtG(inp.ru, 6)}` : inp.wet ? (inp.piezo ? "piezometric line" : `water table (H_w = ${E.fmtG(inp.Hw, 6)} m, β_w = ${E.fmtG(inp.beta_w, 6)}°)`) : "dry";
     let cap = `Strength: ${E.MODELS[inp.model]}. ${strengthTxt}. Water: ${waterTxt}. Iteration path: ${E.ITERATIONS[inp.iteration]}.`;
     if (inp.base_circle && r3 && r2) cap += ` Base-circle grid (exit to entry, floor columns allowed): ${Array.from(r3.mesh.x).filter((x) => x > 0).length} floor columns, ${Array.from(r2.mesh.x).filter((x) => x > 0).length} floor slices.`;
-    if (r3 && r3.projection_limit !== null) cap += ` Projection limit ${r3.projection_limit.toFixed(4)} kPa.`;
+    if (r3 && r3.projection_limits) cap += ` Projection limits ${r3.projection_limits[0].toFixed(4)} kPa within T of the face (D = ${E.fmtG(inp.D, 4)}), ${r3.projection_limits[1].toFixed(4)} kPa beyond (D = 0).`;
+    else if (r3 && r3.projection_limit !== null) cap += ` Projection limit ${r3.projection_limit.toFixed(4)} kPa.`;
+    const adds = [];
+    if (inp.profile) adds.push(`slope face through ${inp.profile.length} points, crest edge at (${fx(inp.profile[inp.profile.length - 1][0], 2)}, ${fx(inp.H, 2)}) m`);
+    if (inp.crest_slope) adds.push(`ground behind the crest rising at ${E.fmtG(inp.crest_slope, 4)}°`);
+    if (inp.plan_radius !== null) adds.push(`${inp.plan_radius > 0 ? "concave" : "convex"} wall in plan, R_p = ${E.fmtG(Math.abs(inp.plan_radius), 6)} m`);
+    if (inp.elong !== 1 || inp.mid_length > 0) adds.push(`slip surface: ellipsoidal caps λ = ${E.fmtG(inp.elong, 4)}${inp.mid_length > 0 ? `, cylindrical middle L = ${E.fmtG(inp.mid_length, 6)} m` : ""}`);
+    if (inp.piezo) adds.push(`piezometric line through ${inp.piezo.length} points`);
+    if (inp.crack_depth !== null) adds.push(`tension crack ${E.fmtG(inp.crack_depth, 4)} m deep, ${E.fmtG(100 * inp.crack_water, 3)}% full of water`);
+    if (inp.kh > 0) adds.push(`seismic k_h = ${E.fmtG(inp.kh, 4)}`);
+    if (adds.length) cap += ` Additions: ${adds.join("; ")}.`;
     $("#caption").textContent = cap;
     if (inp.tension !== "none") notes.push(note("info", `${inp.tension}: sensitivity, not a calibrated contact law.`));
     for (const [lab, r, e] of [["3D", r3, RES.e3], ["2D", r2, RES.e2]]) {
@@ -1262,10 +1523,10 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
     return `rgb(${a.map((v, q) => Math.round(v + (b[q] - v) * f)).join(",")})`;
   }
   function scaleFor(field, T) {
-    if (field === "tension") {
+    if (isFlag(field)) {
       const lo = T.ramp[2], hi = T.ramp[10];
       return { colorscale: [[0, lo], [0.5, lo], [0.5, hi], [1, hi]], cmin: 0, cmax: 1,
-        colorbar: { tickvals: [0.25, 0.75], ticktext: ["σn ≥ 0", "tensile"] } };
+        colorbar: { tickvals: [0.25, 0.75], ticktext: field === "zone" ? ["D = 0", "D applies"] : ["σn ≥ 0", "tensile"] } };
     }
     return { colorscale: T.ramp.map((c, i) => [i / (T.ramp.length - 1), c]) };
   }
@@ -1314,6 +1575,7 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
     const m = r.mesh, n = m.count, s = r.strength;
     const nan = () => new Float64Array(n).fill(NaN);
     if (name === "u") return Float64Array.from(m.u);
+    if (name === "zone") return m.zone ? Float64Array.from(m.zone) : nan();
     if (name === "sigma_n") return r.sn ? Float64Array.from(r.sn) : nan();
     if (!s) return nan();
     if (name === "phi") return Float64Array.from(s.phi, (v) => v * E.RAD);
@@ -1390,20 +1652,20 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
     msg("v3-msg", r.status !== "ACCEPTED" ? `3D: ${esc(r.status)}. Values are from the last iterate, not an accepted solution.` : "");
     const vals = fieldValues(r, field);
     let [vmin, vmax] = range(vals);
-    if (field === "tension") { vmin = 0; vmax = 1; }
+    if (isFlag(field)) { vmin = 0; vmax = 1; }
     const mirror = UI.mirror;
     const [xa, xb] = frame(inp, m);
     let ymass = 0;
     for (let q = 0; q < m.count; q++) ymass = Math.max(ymass, m.y[q] + m.dy / 2);
-    const yext = Math.min(inp.R, Math.max(1.3 * ymass, 0.25 * (xb - xa)));
+    const yext = Math.min(E.yExtent(inp), Math.max(1.3 * ymass, 0.25 * (xb - xa)));
     const ylo = mirror ? -yext : 0;
     const data = [];
     const gx = linspace(xa, xb, 90), gy = linspace(ylo, yext, 60);
-    const gz = gy.map(() => gx.map((x) => E.groundZ(x, inp.H, inp.beta)));
+    const gz = gy.map((y) => gx.map((x) => E.ground(inp, x, y)));
     data.push({ type: "surface", x: gx, y: gy, z: gz, colorscale: [[0, T.rockEdge], [1, T.rockEdge]], showscale: false, opacity: 0.28,
       name: "ground surface", hoverinfo: "skip", showlegend: true });
     const sx = slipX(inp, m, 90), sy = linspace(ylo, yext, 90);
-    const sz = sy.map((y) => sx.map((x) => { const z = E.sphereZ(x, y, inp.xc, inp.zc, inp.R); return z < E.groundZ(x, inp.H, inp.beta) ? z : null; }));
+    const sz = sy.map((y) => sx.map((x) => { const z = E.slipZ(inp, x, y); return z < E.ground(inp, x, y) ? z : null; }));
     data.push({ type: "surface", x: sx, y: sy, z: sz, colorscale: [[0, T.slip], [1, T.slip]], showscale: false, opacity: 0.5,
       name: "slip surface", hoverinfo: "skip", showlegend: true });
     let xs = Array.from(m.x), ys = Array.from(m.y), zb = Array.from(m.zb), zt = Array.from(m.zt);
@@ -1439,7 +1701,7 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
     let ys = Array.from({ length: ny }, (_, q) => (q + 0.5) * m.dy);
     if (mirror) { grid = grid.slice().reverse().concat(grid); ys = ys.map((y) => -y).reverse().concat(ys); }
     let [vmin, vmax] = range(vals);
-    if (field === "tension") { vmin = 0; vmax = 1; }
+    if (isFlag(field)) { vmin = 0; vmax = 1; }
     const sc = scaleFor(field, T);
     const data = [Object.assign({ type: "heatmap", x: xs, y: ys, z: grid, zmin: vmin, zmax: vmax === vmin ? vmin + 1 : vmax, hoverongaps: false,
       hovertemplate: `x = %{x:.2f} m<br>y = %{y:.2f} m<br>${FIELDS[field][1]} = %{z:.4g}<extra></extra>`,
@@ -1484,7 +1746,7 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
     const yrange = [bottom, Math.max(inp.H, inp.zc) + pad];
     const crest = -inp.H / Math.tan(inp.beta * E.DEG);
     const xs = [xrange[0] - 3 * span].concat(linspace(Math.min(xa, crest - 1e-9), Math.max(xb, 1e-9), 1200), [xrange[1] + 3 * span]);
-    const zt = xs.map((x) => E.groundZ(x, inp.H, inp.beta));
+    const zt = xs.map((x) => E.ground(inp, x));
     const deep = bottom - 3 * span;
     const data = [];
     data.push({ type: "scatter", x: xs.concat(xs.slice().reverse()), y: zt.concat(xs.map(() => deep)), fill: "toself", fillcolor: rgba(T.rock, T.dark ? 0.9 : 0.85),
@@ -1497,19 +1759,29 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
     if (m && m.count) {
       xb_ = slipX(inp, m, 1200);
       const zb_ = xb_.map((x) => E.sphereZ(x, 0, inp.xc, inp.zc, inp.R));
-      inside = xb_.map((x, q) => zb_[q] < E.groundZ(x, inp.H, inp.beta));
+      inside = xb_.map((x, q) => zb_[q] < E.ground(inp, x));
       slipTrace = { type: "scatter", x: xb_, y: zb_.map((z, q) => (inside[q] ? z : null)), mode: "lines", line: { color: T.slip, width: 3 },
         name: "slip surface", hoverinfo: "skip" };
     }
-    if (inp.wet) data.push({ type: "scatter", x: xs, y: xs.map((x, q) => Math.min(E.waterZ(x, inp.Hw, inp.beta_w), zt[q])), mode: "lines",
+    if (inp.wet) data.push({ type: "scatter", x: xs, y: xs.map((x, q) => Math.min(E.water(inp, x), zt[q])), mode: "lines",
       line: { color: T.water, width: 2, dash: "dash" }, name: "water table", hoverinfo: "skip" });
-    const ann = [];
-    if (inp.ru !== null) ann.push({ xref: "paper", yref: "paper", x: 0.01, y: 0.02, showarrow: false, align: "left", text: `pore pressure u = r<sub>u</sub> γ h, r<sub>u</sub> = ${E.fmtG(inp.ru, 6)}`, font: { color: T.ink } });
+    const ann = [], notes2 = [];
+    if (inp.ru !== null) notes2.push(`pore pressure u = r<sub>u</sub> γ h, r<sub>u</sub> = ${E.fmtG(inp.ru, 6)}`);
+    if (inp.kh > 0) notes2.push(`seismic k<sub>h</sub> = ${E.fmtG(inp.kh, 6)}: k<sub>h</sub>W at each centroid, towards the pit`);
+    if (notes2.length) ann.push({ xref: "paper", yref: "paper", x: 0.01, y: 0.02, showarrow: false, align: "left", text: notes2.join("<br>"), font: { color: T.ink } });
+    const ck = m && m.crack ? m.crack : null;
+    if (ck && ck.rows.length) {
+      const rw = ck.rows[0];
+      data.push({ type: "scatter", x: [ck.x, ck.x], y: [rw.zbot, rw.ztop], mode: "lines", line: { color: T.ink, width: 2.5 },
+        name: `tension crack, ${fx(rw.ztop - rw.zbot, 2)} m deep`, hoverinfo: "name" });
+      if (rw.hw > 0) data.push({ type: "scatter", x: [ck.x, ck.x], y: [rw.zbot, rw.zbot + rw.hw], mode: "lines", line: { color: T.water, width: 7 },
+        name: `water in the crack: ${fx(rw.hw, 2)} m, P = ${big(ck.P)} kN/m`, hoverinfo: "name" });
+    }
     const curveToSlice = {};
     if (m && m.count) {
       const vals = fieldValues(r, UI.field);
       let [vmin, vmax] = range(vals);
-      if (UI.field === "tension") { vmin = 0; vmax = 1; }
+      if (isFlag(UI.field)) { vmin = 0; vmax = 1; }
       const span = vmax > vmin ? vmax - vmin : 1;
       const hover = Array.from({ length: m.count }, (_, q) => hoverRows(r, q, true));
       if (m.count <= MAX_POLYGONS) {
@@ -1518,8 +1790,8 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
           let zl = E.sphereZ(xl, 0, inp.xc, inp.zc, inp.R), zr = E.sphereZ(xr, 0, inp.xc, inp.zc, inp.R);
           if (!isNum(zl)) zl = m.zb[q];
           if (!isNum(zr)) zr = m.zb[q];
-          const gl = E.groundZ(xl, inp.H, inp.beta), gr = E.groundZ(xr, inp.H, inp.beta);
-          const fill = isNum(vals[q]) ? (UI.field === "tension" ? (vals[q] > 0.5 ? T.ramp[10] : T.ramp[2]) : rampColor(T.ramp, (vals[q] - vmin) / span)) : rgba(T.line, 0.6);
+          const gl = E.ground(inp, xl), gr = E.ground(inp, xr);
+          const fill = isNum(vals[q]) ? (isFlag(UI.field) ? (vals[q] > 0.5 ? T.ramp[10] : T.ramp[2]) : rampColor(T.ramp, (vals[q] - vmin) / span)) : rgba(T.line, 0.6);
           const sel = q === UI.k2;
           curveToSlice[data.length] = q;
           data.push({ type: "scatter", x: [xl, xr, xr, xl, xl], y: [zl, zr, gr, gl, zl], fill: "toself", fillcolor: fill, mode: "lines",
@@ -1577,8 +1849,9 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
       `<span class="res ${ok ? "pass" : "fail"}"><i aria-hidden="true">${ok ? "✓" : "✕"}</i>${ok ? "PASS" : "FAIL"}</span>`;
   }
   // whole-mass free-body diagram (E.massForces): every force on the sliding mass, the force polygon and the balance
-  const MASS_NAMES = { W: "W, weight", N: "N′, effective normal force", U: "U, pore-water force", S: "S, mobilised shear" };
-  const massColors = (T) => ({ W: T.ink, N: T.n, U: T.water, S: T.slip });
+  const MASS_NAMES = { W: "W, weight", N: "N′, effective normal force", U: "U, pore-water force", S: "S, mobilised shear",
+    E: "E = k<sub>h</sub>W, seismic force", P: "P, water in the tension crack" };
+  const massColors = (T) => ({ W: T.ink, N: T.n, U: T.water, S: T.slip, E: T.ink2, P: T.water });
   const big = (v) => (Math.abs(v) >= 1e5 ? Math.round(v).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",") : gc(v, 6));   // whole kN, kN·m
   const resChip = (ok) => `<span class="res ${ok ? "pass" : "fail"}"><i aria-hidden="true">${ok ? "✓" : "✕"}</i>${ok ? "PASS" : "FAIL"}</span>`;
   /** Sum the element forces over groups of neighbouring slices (2D) or blocks of b x b columns (3D) so that at most
@@ -1599,10 +1872,11 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
     for (let k = 0; k < n; k++) { const q = keyOf(k); if (!byKey.has(q)) byKey.set(q, []); byKey.get(q).push(k); }
     const groups = [];
     for (const ks of byKey.values()) {
-      let W = 0, cx = 0, cy = 0, cz = 0;
+      let W = 0, cx = 0, cy = 0, cz = 0, Ex = 0;
       const N = [0, 0, 0], U = [0, 0, 0], S = [0, 0, 0];
       for (const k of ks) {
         W += el.W[k]; cx += el.W[k] * el.x[k]; cy += el.W[k] * el.y[k]; cz += el.W[k] * el.zm[k];
+        if (el.E) Ex += el.E[k];
         N[0] += el.N[k] * el.nx[k]; N[1] += el.N[k] * el.ny[k]; N[2] += el.N[k] * el.nz[k];
         U[0] += el.U[k] * el.nx[k]; U[1] += el.U[k] * el.ny[k]; U[2] += el.U[k] * el.nz[k];
         S[0] += el.S[k] * el.sx[k]; S[2] += el.S[k] * el.sz[k];
@@ -1612,7 +1886,7 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
       for (const k of ks) { const d = (el.x[k] - cx) ** 2 + (el.y[k] - cy) ** 2; if (d < best) { best = d; b = k; } }
       const name = m.dim === 2 ? (ks.length === 1 ? `slice ${ks[0]}` : `slices ${ks[0]}–${ks[ks.length - 1]}`)
         : (ks.length === 1 ? `column ${ks[0]} (i = ${m.i[ks[0]]}, j = ${m.j[ks[0]]})` : `${ks.length} columns around i = ${m.i[b]}, j = ${m.j[b]}`);
-      groups.push({ name, W, cen: [cx, cy, cz], base: [el.x[b], el.y[b], el.zb[b]], tan: [el.sx[b], 0, el.sz[b]], nrm: [el.nx[b], el.ny[b], el.nz[b]], N, U, S });
+      groups.push({ name, W, cen: [cx, cy, cz], base: [el.x[b], el.y[b], el.zb[b]], tan: [el.sx[b], 0, el.sz[b]], nrm: [el.nx[b], el.ny[b], el.nz[b]], N, U, S, E: [Ex, 0, 0] });
     }
     return { groups, size };
   }
@@ -1623,7 +1897,7 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
       const v = kind === "W" ? [0, 0, -g.W] : g[kind], vec = v.map((c) => c * sc), mag = Math.hypot(...v);
       if (!(mag > 0)) continue;
       let a, b;
-      if (kind === "W") { a = g.cen; b = add3(g.cen, vec); }
+      if (kind === "W" || kind === "E") { a = g.cen; b = add3(g.cen, vec); }
       else if (kind === "S") { a = g.base; b = add3(g.base, vec); }
       else { const p = kind === "U" ? add3(g.base, mul3(g.tan, off)) : g.base; a = sub3(p, vec); b = p; }   // N', U end at the base
       const tensile = kind === "N" && v[0] * g.nrm[0] + v[1] * g.nrm[1] + v[2] * g.nrm[2] < 0;   // N' pointing out of the mass
@@ -1647,20 +1921,20 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
     }
     const span = Math.max(xhi - xlo + m.dx, zhi - zlo, 2 * yhi);
     let peak = 0;
-    for (const g of groups) peak = Math.max(peak, g.W, Math.hypot(...g.N), Math.hypot(...g.U), Math.hypot(...g.S));
+    for (const g of groups) peak = Math.max(peak, g.W, Math.hypot(...g.N), Math.hypot(...g.U), Math.hypot(...g.S), Math.abs(g.E[0]));
     const sc = (dim === 3 ? 0.25 : 0.14) * span / peak, off = 0.025 * span;
-    const kinds = ["W", "N", "U", "S"].filter((k) => k !== "U" || mf.totals.U.x !== 0 || mf.totals.U.z !== 0);
+    const kinds = ["W", "N", "U", "S", "E"].filter((k) => (k !== "U" || mf.totals.U.x !== 0 || mf.totals.U.z !== 0) && (k !== "E" || (mf.totals.E && mf.totals.E.x !== 0)));
     const total = (k) => (k === "W" ? mf.weight : Math.hypot(mf.totals[k].x, mf.totals[k].z));
     const legend = (k) => `${MASS_NAMES[k]} (Σ = ${big(total(k))} ${uF})`;
     const data = [];
     if (dim === 2) {
       const [xa, xb] = frame(inp, m), xs = linspace(xa, xb, 400);
-      const xe = slipX(inp, m, 600).filter((x) => E.groundZ(x, inp.H, inp.beta) > E.sphereZ(x, 0, inp.xc, inp.zc, inp.R));   // ground above the arc
+      const xe = slipX(inp, m, 600).filter((x) => E.ground(inp, x) > E.sphereZ(x, 0, inp.xc, inp.zc, inp.R));   // ground above the arc
       const arc = xe.map((x) => E.sphereZ(x, 0, inp.xc, inp.zc, inp.R));
-      data.push({ type: "scatter", x: xe.concat(xe.slice().reverse()), y: xe.map((x) => E.groundZ(x, inp.H, inp.beta)).concat(arc.slice().reverse()),
+      data.push({ type: "scatter", x: xe.concat(xe.slice().reverse()), y: xe.map((x) => E.ground(inp, x)).concat(arc.slice().reverse()),
         fill: "toself", fillcolor: rgba(T.rock, 0.9), line: { color: T.rockEdge, width: 1 }, mode: "lines", name: "sliding mass", hoverinfo: "skip" });
-      data.push({ type: "scatter", x: xs, y: xs.map((x) => E.groundZ(x, inp.H, inp.beta)), mode: "lines", line: { color: T.rockEdge, width: 2 }, name: "ground", hoverinfo: "skip", showlegend: false });
-      if (inp.wet) data.push({ type: "scatter", x: xs, y: xs.map((x) => Math.min(E.waterZ(x, inp.Hw, inp.beta_w), E.groundZ(x, inp.H, inp.beta))), mode: "lines",
+      data.push({ type: "scatter", x: xs, y: xs.map((x) => E.ground(inp, x)), mode: "lines", line: { color: T.rockEdge, width: 2 }, name: "ground", hoverinfo: "skip", showlegend: false });
+      if (inp.wet) data.push({ type: "scatter", x: xs, y: xs.map((x) => Math.min(E.water(inp, x), E.ground(inp, x))), mode: "lines",
         line: { color: T.water, width: 1.5, dash: "dash" }, name: "water table", hoverinfo: "skip" });
       data.push({ type: "scatter", x: xe, y: arc, mode: "lines", line: { color: T.slip, width: 2 }, name: "slip surface", hoverinfo: "skip", showlegend: false });
       data.push({ type: "scatter", x: [inp.xc], y: [inp.zc], mode: "markers+text", marker: { symbol: "circle-x", size: 12, color: T.slip }, text: ["O, rotation axis"],
@@ -1668,7 +1942,7 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
       // initial view: the mass and its arrows (the circle centre O lies outside it; zoom out to see it)
       let bx0 = Infinity, bx1 = -Infinity, bz0 = Infinity, bz1 = -Infinity;
       const grow = (x, z) => { if (x === null || !isNum(z)) return; bx0 = Math.min(bx0, x); bx1 = Math.max(bx1, x); bz0 = Math.min(bz0, z); bz1 = Math.max(bz1, z); };
-      xe.forEach((x, q) => { grow(x, E.groundZ(x, inp.H, inp.beta)); grow(x, arc[q]); });
+      xe.forEach((x, q) => { grow(x, E.ground(inp, x)); grow(x, arc[q]); });
       for (const k of kinds) {
         const x = [], y = [], size = [], text = [];
         for (const a of massArrows(groups, k, sc, off, uF)) {
@@ -1677,6 +1951,12 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
         }
         data.push({ type: "scatter", mode: "lines+markers", x, y, text, hoverinfo: "text", name: legend(k), line: { color: C[k], width: 1.6 },
           marker: { symbol: "arrow", size, angleref: "previous", color: C[k] } });
+      }
+      if (mf.crack && mf.crack.P > 0) {                  // water in the tension crack, one force on its face
+        const rw = mf.crack.rows[0], vec = mf.crack.P * sc;
+        data.push({ type: "scatter", mode: "lines+markers", x: [mf.crack.x - vec, mf.crack.x], y: [rw.zP, rw.zP], text: Array(2).fill(`P = ${big(mf.crack.P)} ${uF}`),
+          hoverinfo: "text", name: `${MASS_NAMES.P} (Σ = ${big(mf.crack.P * mf.mult)} ${uF})`, line: { color: C.P, width: 2.4 }, marker: { symbol: "arrow", size: [0, 12], angleref: "previous", color: C.P } });
+        grow(mf.crack.x - vec, rw.zP); grow(mf.crack.x, rw.zP);
       }
       const px = 0.06 * (bx1 - bx0), pz = 0.06 * (bz1 - bz0);
       plot("chart-mass", data, layout(T, { margin: { l: 10, r: 10, t: 40, b: 10 }, uirevision: `${PRESET_KEY}|mass2d`,
@@ -1702,8 +1982,9 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
     // force polygon: the totals head to tail; the dashed arrow is their resultant (zero for full equilibrium)
     const poly = [];
     let p = [0, 0];
-    for (const k of ["W", "U", "N", "S"]) {
+    for (const k of ["W", "U", "N", "S", "E", "P"]) {
       const t = mf.totals[k];
+      if (!t) continue;
       if (!(Math.hypot(t.x, t.z) > 1e-12 * mf.weight)) continue;
       const q = [p[0] + t.x, p[1] + t.z];
       poly.push({ type: "scatter", mode: "lines+markers+text", x: [p[0], (p[0] + q[0]) / 2, q[0]], y: [p[1], (p[1] + q[1]) / 2, q[1]],
@@ -1738,6 +2019,8 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
       row("N′ = σ<sub>n</sub> A, effective normal force", t.N, "0", "normal to the slip surface, through the sphere centre") +
       row("U = u A, pore-water force", t.U, "0", "normal to the slip surface, through the sphere centre") +
       row("S = τ<sub>s</sub> A / F, mobilised shear", t.S, big(M.S), `along the slip surface, against the rotation (F = ${fx(mf.F, 6)})`) +
+      (t.E ? row("E = k<sub>h</sub>W, seismic force", t.E, big(M.E), "horizontal, towards the pit, at each element's centre of gravity") : "") +
+      (t.P ? row("P, water in the tension crack", t.P, big(M.P), "horizontal, towards the pit, on the crack face at h<sub>w</sub>/3") : "") +
       row("<b>Sum of all forces</b>", t.net, e3(M.net), "resultant on the mass") + "</tbody></table>";
   }
   function massBalance(mf) {
@@ -1751,11 +2034,12 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
       `<p><b>Horizontal:</b> net ${big(t.net.x)} ${uF}, ${fx(100 * Math.abs(t.net.x) / W, 2)}% of the weight. ` +
       `${mf.dim === 3 ? "Hungr's method" : "Bishop's simplified method"} does not enforce horizontal force equilibrium (thesis §5.5, §5.9), so this part stays ` +
       `unbalanced. The forces between ${el}s act inside the mass and cancel in these sums; the method takes their vertical (shear) parts as zero.</p>` +
-      `<p><b>Moments about the rotation axis</b> (through x<sub>c</sub>, z<sub>c</sub>, parallel to y): the weight drives ${big(M.W)} ${uM} and the mobilised ` +
-      `shear resists ${big(-M.S)} ${uM}; N′ and U act through the axis. Net ${e3(M.net)} ${uM} (${e2(Math.abs(M.net) / M.W)} of the driving moment). ` +
+      `<p><b>Moments about the rotation axis</b> (through x<sub>c</sub>, z<sub>c</sub>, parallel to y): the weight drives ${big(M.W)} ${uM}` +
+      (M.E !== undefined ? `, the seismic forces ${big(M.E)} ${uM} and the crack water ${big(M.P)} ${uM}` : "") + `; the mobilised ` +
+      `shear resists ${big(-M.S)} ${uM}; N′ and U act through the axis. Net ${e3(M.net)} ${uM} (${e2(Math.abs(M.net) / M.W)} of the weight's moment). ` +
       (momentForm ? `${mf.dim === 2 ? "Bishop's method (eq. 4.16)" : "The moment form F<sub>M</sub> (eq. 4.15)"} balances this moment ${resChip(Math.abs(M.net) <= 1e-8 * M.W)}`
         : `F<sub>H</sub> balances ΣS = ΣWκ instead (eq. 4.14; relative residual ${e2(Math.abs(mf.method.residual))}); the moment form F<sub>M</sub> balances this moment (eq. 4.15, thesis §5.5).`) +
-      "</p><p class=\"hint\">Not in the model: external loads (surcharge, water in a tension crack or against the face) and seismic forces.</p>";
+      "</p><p class=\"hint\">Not in the model: surcharge and water pressure against the face. Seismic load and water in a tension crack are included when set (inputs).</p>";
   }
   function renderFbd() {
     // nothing to draw at all: not run yet, or the original closure (an admissibility check only)
@@ -1792,7 +2076,7 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
     // lever view
     const rho = f.rho, th = linspace(Math.PI, 2 * Math.PI, 400), [xa, xb] = frame(inp, m), xs = linspace(xa, xb, 500);
     const lev = [
-      { type: "scatter", x: xs, y: xs.map((x) => E.groundZ(x, inp.H, inp.beta)), mode: "lines", line: { color: T.rockEdge, width: 2 }, name: "ground (any y)", hoverinfo: "skip" },
+      { type: "scatter", x: xs, y: xs.map((x) => E.ground(inp, x)), mode: "lines", line: { color: T.rockEdge, width: 2 }, name: "ground (any y)", hoverinfo: "skip" },
       { type: "scatter", x: th.map((t) => inp.xc + rho * Math.cos(t)), y: th.map((t) => inp.zc + rho * Math.sin(t)), mode: "lines", line: { color: T.slip, width: 2 },
         name: `sphere section at y = ${fx(m.y[k], 1)} m`, hoverinfo: "skip" },
       { type: "scatter", x: [inp.xc], y: [inp.zc], mode: "markers+text", marker: { symbol: "circle-x", size: 13, color: T.slip, line: { color: T.slip } },
@@ -1834,7 +2118,7 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
     let zl = E.sphereZ(xl, 0, inp.xc, inp.zc, inp.R), zr = E.sphereZ(xr, 0, inp.xc, inp.zc, inp.R);
     if (!isNum(zl)) zl = m.zb[j];
     if (!isNum(zr)) zr = m.zb[j];
-    const gl = E.groundZ(xl, inp.H, inp.beta), gr = E.groundZ(xr, inp.H, inp.beta);
+    const gl = E.ground(inp, xl), gr = E.ground(inp, xr);
     const data = [{ type: "scatter", x: [xl, xr, xr, xl, xl], y: [zl, zr, gr, gl, zl], fill: "toself", fillcolor: rgba(T.rock, 0.95), line: { color: T.ink2 }, name: `slice ${j}`, hoverinfo: "skip" }];
     const L = Math.max(m.h[j], m.dx), sc = L / f.W;
     const base = [m.x[j], m.zb[j]], cen = [m.x[j], (m.zb[j] + m.zt[j]) / 2];
@@ -1978,6 +2262,11 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
     $("#mesh-run").addEventListener("click", runMesh);
     $("#nu-run").addEventListener("click", runNu);
     $("#srch-run").addEventListener("click", runSearch);
+    $("#cmp-run").addEventListener("click", runCompare);
+    $("#sweep-run").addEventListener("click", runSweep);
+    $("#back-run").addEventListener("click", runBack);
+    $("#mc-run").addEventListener("click", runMC);
+    for (const id of ["sweep-name", "back-name"]) $("#" + id).addEventListener("change", () => studyRange(id.split("-")[0]));
     $("#ver-run").addEventListener("click", runVerify);
   }
   function validInputsOrSay(el) {
@@ -2053,6 +2342,184 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
       { type: "scatter", mode: "lines+markers", x, y: rows.map((r) => r.fos2), name: "FoS 2D", line: { color: T.slip, width: 2 }, marker: { size: 6, color: T.slip } },
     ], layout(T, { annotations: ann, margin: { l: 10, r: 30, t: 30, b: 10 }, xaxis: { title: "ν" }, yaxis: { title: "FoS" } }));
   }
+  // ---- EJC against GHB, parameter sweep, back-analysis, Monte Carlo (engine.compareModels and so on)
+  /** Inputs a study can vary: [state key, engine input, label]; only those in use for the current inputs. */
+  function studyKeys() {
+    const keys = [["gsi", "gsi", "GSI"], ["D", "D", "D, disturbance factor"], ["sigma_ci", "sigma_ci", "σci (MPa)"], ["mi", "mi", "mi"],
+      ["nu", "nu", "ν (EJC)"], ["gamma", "gamma", "γ (kN/m³)"], ["c_mc", "c_mc", "c′ (kPa)"], ["phi_mc", "phi_mc", "φ′ (°)"],
+      ["Hw", "Hw", "Hw (m)"], ["beta_w", "beta_w", "βw (°)"], ["ru_value", "ru", "ru"], ["kh", "kh", "kh, seismic"],
+      ["crack_depth", "crack_depth", "tension crack depth (m)"], ["crack_water", "crack_water", "crack water share"],
+      ["d_zone", "d_zone", "T, disturbed zone (m)"], ["H", "H", "H (m)"], ["beta", "beta", "β (°)"], ["crest_slope", "crest_slope", "α, ground behind the crest (°)"],
+      ["elong", "elong", "λ, end caps (3D)"], ["mid_length", "mid_length", "L, cylindrical middle (m, 3D)"]];
+    return keys.filter(([k]) => relevant(k, S) && (!["d_zone"].includes(k) || S.dz_on) && (!["crack_depth", "crack_water"].includes(k) || S.crack_on));
+  }
+  function studyRange(kind) {
+    const k = $(`#${kind}-name`).value, sp = NUM[k], v = S[k];
+    if (!sp || !isNum(v)) return;
+    const lo = Math.max(sp.min, v === 0 ? sp.min : v - 0.5 * Math.abs(v)), hi = Math.min(sp.max, v === 0 ? sp.min + (sp.max - sp.min) / 10 : v + 0.5 * Math.abs(v));
+    $(`#${kind}-lo`).value = fmtInput(+lo.toPrecision(6)); $(`#${kind}-hi`).value = fmtInput(+hi.toPrecision(6));
+  }
+  function studyInputs() {
+    const keys = studyKeys();
+    for (const kind of ["sweep", "back"]) {
+      const sel = $(`#${kind}-name`), cur = sel.value;
+      sel.innerHTML = keys.map(([k, , lab]) => `<option value="${k}">${esc(lab)}</option>`).join("");
+      if (keys.some(([k]) => k === cur)) sel.value = cur; else studyRange(kind);
+      if (!$(`#${kind}-lo`).value) studyRange(kind);
+    }
+    const tb = $("#mc-vars"), old = {};
+    tb.querySelectorAll("input[data-sd]").forEach((el) => { old[el.dataset.sd] = el.value; });
+    const mcKeys = keys.filter(([k]) => !["H", "beta", "crest_slope", "elong", "mid_length"].includes(k));
+    tb.innerHTML = "<thead><tr><th>Input</th><th>Mean (current)</th><th>Standard deviation</th><th>Valid range</th></tr></thead><tbody>" +
+      mcKeys.map(([k, , lab]) => `<tr><td>${esc(lab)}</td><td class="n">${fmtInput(S[k])}</td>` +
+        `<td><input type="number" step="any" min="0" data-sd="${k}" value="${esc(old[k] !== undefined ? old[k] : "0")}" aria-label="Standard deviation of ${esc(lab)}"></td>` +
+        `<td class="n">${NUM[k].min} to ${NUM[k].max}</td></tr>`).join("") + "</tbody>";
+  }
+  const engineKey = (k) => ({ ru_value: "ru", a_value: "a_override" }[k] || k);
+  function runCompare() {
+    const out = $("#cmp-out"), inp = validInputsOrSay(out);
+    if (!inp) return;
+    $("#cmp-run").disabled = true; out.innerHTML = '<p class="hint">Solving…</p>';
+    submit({ type: "compare", inputs: inp }).then((res) => {
+      $("#cmp-run").disabled = false;
+      if (res.type !== "compare") { out.innerHTML = note("critical", esc(res.error || "The comparison failed.")); return; }
+      STUDY.cmp = res; renderCompare();
+    });
+  }
+  function renderCompare() {
+    const res = STUDY.cmp, out = $("#cmp-out");
+    if (!res) return;
+    const e = res.models.ejc, gm = res.models.ghb, r6 = (v) => (isNum(v) ? v.toFixed(6) : "withheld"), r4 = (v) => (isNum(v) ? v.toFixed(4) : "–");
+    out.innerHTML = `<div class="tbl-wrap"><table class="data"><thead><tr><th></th><th>FoS 3D</th><th>FoS 2D</th><th>3D / 2D</th></tr></thead><tbody>` +
+      `<tr><td>EJC, Moscarda (ν = ${E.fmtG(res.nu, 4)})</td><td class="n">${r6(e.fos3)}</td><td class="n">${r6(e.fos2)}</td><td class="n">${r4(e.ratio)}</td></tr>` +
+      `<tr><td>GHB</td><td class="n">${r6(gm.fos3)}</td><td class="n">${r6(gm.fos2)}</td><td class="n">${r4(gm.ratio)}</td></tr>` +
+      `<tr><td><b>EJC / GHB</b></td><td class="n"><b>${r4(res.ratio.ejc_ghb3)}</b></td><td class="n"><b>${r4(res.ratio.ejc_ghb2)}</b></td><td></td></tr></tbody></table></div>` +
+      [["EJC", e], ["GHB", gm]].map(([lab, r]) => [3, 2].map((d) => (r["fos" + d] === null ? note("warning", `${lab} ${d}D: ${esc(r["status" + d])}. ${esc(r["reason" + d])}`) : "")).join("")).join("");
+  }
+  function sweepValues(lo, hi, n) { return Array.from({ length: n }, (_, q) => +(lo + (hi - lo) * q / (n - 1)).toPrecision(12)); }
+  function runSweep() {
+    const out = $("#sweep-out"), inp = validInputsOrSay(out);
+    if (!inp) return;
+    const k = $("#sweep-name").value, lo = Number($("#sweep-lo").value), hi = Number($("#sweep-hi").value), n = Number($("#sweep-n").value);
+    const sp = NUM[k];
+    if (!(isNum(lo) && isNum(hi) && lo < hi && lo >= sp.min && hi <= sp.max && Number.isInteger(n) && n >= 2 && n <= 101)) {
+      out.innerHTML = note("critical", `Use ${sp.min} ≤ from &lt; to ≤ ${sp.max} and 2 to 101 values.`); return;
+    }
+    const models = [["ejc", "ejc_moscarda"], ["ghb", "ghb"]].filter(([id]) => $(`#sweep-${id}`).checked).map(([, m]) => m);
+    if (inp.model === "mc") models.splice(0, models.length, "mc");
+    const dims = [3, 2].filter((d) => $(`#sweep-${d}`).checked);
+    if (!models.length || !dims.length) { out.innerHTML = note("warning", "Tick at least one model and one dimension."); return; }
+    const name = engineKey(k), values = sweepValues(lo, hi, n);
+    const bar = $("#sweep-prog"); bar.hidden = false; bar.value = 0; $("#sweep-run").disabled = true;
+    out.innerHTML = '<p class="hint">Solving…</p>';
+    submit({ type: "sweep", inputs: inp, name, values, models, dims }, progressTo(bar)).then((res) => {
+      bar.hidden = true; $("#sweep-run").disabled = false;
+      if (res.type !== "sweep") { out.innerHTML = note("critical", esc(res.error || "The sweep failed.")); return; }
+      STUDY.sweep = Object.assign(res, { label: $("#sweep-name").selectedOptions[0].textContent }); renderSweep();
+    });
+  }
+  const MODEL_LAB = { ejc_moscarda: "EJC", ghb: "GHB", mc: "MC" };
+  function renderSweep() {
+    const res = STUDY.sweep, out = $("#sweep-out");
+    if (!res) return;
+    const T = theme(), series = [];
+    for (const m of res.models) for (const d of res.dims) series.push([m, d]);
+    out.innerHTML = '<div class="chart h-s" id="chart-sweep"></div><div class="tbl-wrap tall"><table class="data"><thead><tr>' +
+      `<th>${esc(res.label)}</th>` + series.map(([m, d]) => `<th>${MODEL_LAB[m]} ${d}D</th>`).join("") + "</tr></thead><tbody>" +
+      res.rows.map((r) => `<tr><td class="n">${E.fmtG(r.value, 6)}</td>` + series.map(([m, d]) => {
+        const c = r[m]; return `<td class="n" title="${esc(c["reason" + d] || "")}">${c["fos" + d] === null ? esc(c["status" + d] === "INPUT ERROR" ? "input error" : "withheld") : c["fos" + d].toFixed(6)}</td>`;
+      }).join("") + "</tr>").join("") + "</tbody></table></div>";
+    const col = { 3: T.n, 2: T.slip }, dash = { ejc_moscarda: "solid", ghb: "dash", mc: "solid" }, sym = { ejc_moscarda: "circle", ghb: "square", mc: "circle" };
+    const ends = [], all = [];
+    for (const [m, d] of series) {
+      for (const r of res.rows) if (r[m]["fos" + d] !== null) all.push(r[m]["fos" + d]);
+      for (let q = res.rows.length - 1; q >= 0; q--) {
+        const v = res.rows[q][m]["fos" + d];
+        if (v !== null) { ends.push({ x: res.rows[q].value, y: v, text: `${MODEL_LAB[m]} ${d}D` }); break; }
+      }
+    }
+    const [ylo, yhi] = range(all), px = 240 / ((yhi - ylo) || 1);   // the plot area is about 240 px tall
+    ends.sort((a, b) => a.y - b.y);
+    let prev = -Infinity;
+    for (const e of ends) { const at = Math.max(e.y * px, prev + 15); e.shift = at - e.y * px; prev = at; }
+    plot("chart-sweep", series.map(([m, d]) => ({ type: "scatter", mode: "lines+markers", x: res.rows.map((r) => r.value), y: res.rows.map((r) => r[m]["fos" + d]),
+      name: `${MODEL_LAB[m]} ${d}D`, line: { color: col[d], width: 2, dash: dash[m] }, marker: { size: 7, color: col[d], symbol: sym[m] } })),
+    layout(T, { margin: { l: 10, r: 70, t: 30, b: 10 }, xaxis: { title: res.label }, yaxis: { title: "FoS" },
+      shapes: [{ type: "line", xref: "paper", x0: 0, x1: 1, y0: 1, y1: 1, line: { color: T.muted, width: 1, dash: "dot" } }],
+      annotations: ends.map((e) => ({ x: e.x, y: e.y, text: `<b>${esc(e.text)}</b>`, showarrow: false, xanchor: "left", xshift: 9, yshift: e.shift, font: { color: T.ink, size: 12 } }))
+        .concat([{ xref: "paper", x: 0, y: 1, yref: "y", text: "F = 1", showarrow: false, xanchor: "left", yanchor: "bottom", font: { color: T.ink2, size: 11 } }]) }));
+  }
+  function runBack() {
+    const out = $("#back-out"), inp = validInputsOrSay(out);
+    if (!inp) return;
+    const k = $("#back-name").value, lo = Number($("#back-lo").value), hi = Number($("#back-hi").value), target = Number($("#back-target").value), dim = Number($("#back-dim").value);
+    const sp = NUM[k];
+    if (!(isNum(lo) && isNum(hi) && lo < hi && lo >= sp.min && hi <= sp.max && target > 0)) { out.innerHTML = note("critical", `Use ${sp.min} ≤ from &lt; to ≤ ${sp.max} and a target F above 0.`); return; }
+    const bar = $("#back-prog"); bar.hidden = false; bar.value = 0; $("#back-run").disabled = true;
+    out.innerHTML = '<p class="hint">Solving…</p>';
+    submit({ type: "back", inputs: inp, name: engineKey(k), lo, hi, target, dim }, progressTo(bar)).then((res) => {
+      bar.hidden = true; $("#back-run").disabled = false;
+      if (res.type !== "back") { out.innerHTML = note("critical", esc(res.error || "The back-analysis failed.")); return; }
+      STUDY.back = Object.assign(res, { label: $("#back-name").selectedOptions[0].textContent }); renderBack();
+    });
+  }
+  function renderBack() {
+    const res = STUDY.back, out = $("#back-out");
+    if (!res) return;
+    const head = res.value !== null
+      ? `<p><b>${esc(res.label)} = ${E.fmtG(res.value, 6)}</b> gives F = ${isNum(res.fos) ? res.fos.toFixed(6) : "withheld"} (${res.dim}D), for the target ${E.fmtG(res.target, 6)}; bracket ${E.fmtG(res.bracket[0], 8)} to ${E.fmtG(res.bracket[1], 8)}, ${res.steps.length} analyses.</p>`
+      : note("warning", esc(res.message.charAt(0).toUpperCase() + res.message.slice(1)) + ".");
+    out.innerHTML = head + (res.value !== null && res.message ? note("warning", esc(res.message)) : "") +
+      `<details><summary>Every analysis</summary><div class="tbl-wrap"><table class="data"><thead><tr><th>${esc(res.label)}</th><th>FoS ${res.dim}D</th><th>Status</th></tr></thead><tbody>` +
+      res.steps.map((st) => `<tr><td class="n">${E.fmtG(st.value, 10)}</td><td class="n">${isNum(st.fos) ? st.fos.toFixed(6) : "–"}</td><td>${chip(st.status)}</td></tr>`).join("") + "</tbody></table></div></details>";
+  }
+  function runMC() {
+    const out = $("#mc-out"), inp = validInputsOrSay(out);
+    if (!inp) return;
+    const vars = [], labels = [], lab = Object.fromEntries(studyKeys().map(([k, , l]) => [k, l]));
+    let bad = "";
+    $("#mc-vars").querySelectorAll("input[data-sd]").forEach((el) => {
+      const k = el.dataset.sd, sd = Number(el.value), sp = NUM[k];
+      if (!(el.value.trim() !== "" && isNum(sd) && sd >= 0)) bad = "Standard deviations must be zero or positive.";
+      else if (sd > 0) { vars.push([engineKey(k), S[k], sd, sp.min, sp.max]); labels.push(lab[k] || k); }
+    });
+    const n = Number($("#mc-n").value), seed = Number($("#mc-seed").value), dsel = $("#mc-dim").value;
+    if (bad) { out.innerHTML = note("critical", bad); return; }
+    if (!vars.length) { out.innerHTML = note("warning", "Enter a standard deviation above 0 for at least one input."); return; }
+    if (!(Number.isInteger(n) && n >= 10 && n <= 5000 && Number.isInteger(seed) && seed >= 0)) { out.innerHTML = note("critical", "Use 10 to 5000 samples and a whole seed of 0 or more."); return; }
+    const dims = dsel === "32" ? [3, 2] : [Number(dsel)];
+    const bar = $("#mc-prog"); bar.hidden = false; bar.value = 0; $("#mc-run").disabled = true;
+    out.innerHTML = '<p class="hint">Solving…</p>';
+    submit({ type: "mc", inputs: inp, variables: vars, n, seed, dims }, progressTo(bar)).then((res) => {
+      bar.hidden = true; $("#mc-run").disabled = false;
+      if (res.type !== "mc") { out.innerHTML = note("critical", esc(res.error || "The Monte Carlo run failed.")); return; }
+      STUDY.mc = Object.assign(res, { labels }); renderMC();
+    });
+  }
+  function renderMC() {
+    const res = STUDY.mc, out = $("#mc-out");
+    if (!res) return;
+    const T = theme(), keys = [];
+    for (const m of res.models) for (const d of res.dims) keys.push([m, d]);
+    const f4 = (v) => (isNum(v) ? v.toFixed(4) : "–");
+    out.innerHTML = `<div class="tbl-wrap"><table class="data"><thead><tr><th></th><th>Accepted</th><th>Mean F</th><th>SD</th><th>β = (mean − 1)/SD</th><th>P<sub>f</sub> = P(F &lt; 1)</th><th>5 % / 50 % / 95 %</th></tr></thead><tbody>` +
+      keys.map(([m, d]) => {
+        const st = res.stats[m + d];
+        return `<tr><td>${MODEL_LAB[m]} ${d}D</td><td class="n">${st.accepted} of ${st.n}</td><td class="n">${f4(st.mean)}</td><td class="n">${f4(st.sd)}</td><td class="n">${f4(st.beta)}</td>` +
+          `<td class="n">${!isNum(st.pof) ? "–" : st.pof > 0 ? `${(100 * st.pof).toFixed(1)} % ± ${(100 * st.pof_se).toFixed(1)} % (${Math.round(st.pof * st.accepted)} failed)`
+            : `0 of ${st.accepted} failed: below ${(300 / st.accepted).toPrecision(2)} % (95 %)`}</td><td class="n">${f4(st.p05)} / ${f4(st.p50)} / ${f4(st.p95)}</td></tr>`;
+      }).join("") + "</tbody></table></div>" +
+      `<p class="hint">${res.samples.length} samples, seed ${res.seed}; varied: ${res.variables.map((v, q) => `${esc((res.labels || [])[q] || v[0])} (mean ${E.fmtG(v[1], 6)}, SD ${E.fmtG(v[2], 6)})`).join(", ")}. ` +
+      "The ± is one standard error of P<sub>f</sub>, √(P<sub>f</sub>(1 − P<sub>f</sub>)/n). When no sample fails, the 95 % upper bound on P<sub>f</sub> is 3/n (the rule of three). " +
+      "Withheld results (no accepted FoS) are left out and counted above.</p>" + '<div class="chart h-s" id="chart-mc"></div>';
+    const col = { 3: T.n, 2: T.slip };
+    plot("chart-mc", keys.map(([m, d]) => ({ type: "histogram", x: res.samples.map((smp) => smp[m + d]).filter((v) => v !== null), name: `${MODEL_LAB[m]} ${d}D`,
+      opacity: 0.6, marker: { color: col[d], line: { color: T.surface, width: 1 } } })),
+    layout(T, { barmode: "overlay", margin: { l: 10, r: 10, t: 30, b: 10 }, xaxis: { title: "FoS" }, yaxis: { title: "samples" },
+      shapes: [{ type: "line", x0: 1, x1: 1, yref: "paper", y0: 0, y1: 1, line: { color: T.muted, width: 1, dash: "dot" } }],
+      annotations: [{ x: 1, xref: "x", y: 1, yref: "paper", text: "F = 1", showarrow: false, xanchor: "left", yanchor: "top", font: { color: T.ink2, size: 11 } }] }));
+  }
+
   // critical-surface search (engine.criticalSearch; QA/QC finding R1)
   const SRCH_EDGE = {
     "front limit": (st) => `lies on the front limit (${st.front} H ahead of the toe): widen it and search again`,
@@ -2157,14 +2624,14 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
     const xs = [crest, 0], zs = [0, inp.H], data = [];
     const arcs = surfs.map(([name, c, color, dash]) => {
       const x = linspace(c.xc - c.R, c.xc + c.R, 1601), z = x.map((v) => E.sphereZ(v, 0, c.xc, c.zc, c.R));
-      const y = x.map((v, q) => (isNum(z[q]) && z[q] < E.groundZ(v, inp.H, inp.beta) && (inp.base_circle || v <= 0) ? z[q] : null));
+      const y = x.map((v, q) => (isNum(z[q]) && z[q] < E.ground(inp, v) && (inp.base_circle || v <= 0) ? z[q] : null));
       x.forEach((v, q) => { if (y[q] !== null) { xs.push(v); zs.push(y[q]); } });
       xs.push(c.xc); zs.push(c.zc);
       return { type: "scatter", mode: "lines", x, y, name, line: { color, width: c === P ? 2 : 3, dash }, hoverinfo: "skip" };
     });
     const [xa, xb] = range(xs), [za, zb] = range(zs), pad = 0.08 * Math.max(xb - xa, zb - za, inp.H);
     const gx = [xa - 3 * (xb - xa) - pad].concat(linspace(Math.min(xa - pad, crest - 1e-9), Math.max(xb + pad, 1e-9), 600), [xb + 3 * (xb - xa) + pad]);
-    const gz = gx.map((x) => E.groundZ(x, inp.H, inp.beta)), deep = za - 3 * (zb - za) - pad;
+    const gz = gx.map((x) => E.ground(inp, x)), deep = za - 3 * (zb - za) - pad;
     data.push({ type: "scatter", x: gx.concat(gx.slice().reverse()), y: gz.concat(gx.map(() => deep)), fill: "toself", fillcolor: rgba(T.rock, T.dark ? 0.9 : 0.85),
       line: { width: 0 }, hoverinfo: "skip", name: "rock mass", showlegend: false });
     data.push({ type: "scatter", x: gx, y: gz, mode: "lines", line: { color: T.rockEdge, width: 2 }, name: "ground surface", hoverinfo: "skip", showlegend: false });
@@ -2259,7 +2726,7 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
       else if (t === "cross-section") renderSection();
       else if (t === "free-body") { if (!RES) { msg("fbd-msg", notRun(), "info"); $("#fbd-body").hidden = true; } else renderFbd(); }
       else if (t === "checks") renderChecks();
-      else if (t === "studies") { renderSearch(); renderMesh(); renderNu(); }
+      else if (t === "studies") { renderSearch(); renderMesh(); renderNu(); studyInputs(); renderCompare(); renderSweep(); renderBack(); renderMC(); }
       else if (t === "verification") { if (STUDY.ver) renderVerify(); else if (!$("#ver-run").disabled) runVerify(); }
     } catch (e) {
       console.error(e);

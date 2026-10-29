@@ -259,6 +259,20 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
 #mc-sec .inline-nums { max-width: 640px; }
 #mc-vars input { max-width: 160px; }
 @media (max-width: 640px) { #sweep-sec .inline-nums { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.vh { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+label.file { position: relative; cursor: pointer; }
+label.file:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+.case-body { display: grid; gap: 8px; margin-top: 8px; }
+.case-body label[for] { font-size: 12.5px; }
+#case-share-row input { flex: 1 1 140px; width: auto; }
+.case-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.case-list li { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 4px 0; border-bottom: 1px solid var(--rule); }
+.case-list li > div { flex: 1 1 140px; min-width: 0; display: grid; }
+.case-list li b { overflow-wrap: anywhere; color: var(--ink); }
+#report-dlg { width: min(960px, calc(100vw - 32px)); max-height: calc(100vh - 32px); padding: 0; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: #111; }
+#report-dlg::backdrop { background: rgba(0, 0, 0, 0.45); }
+.report-bar { position: sticky; top: 0; z-index: 1; display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; padding: 8px 12px; background: var(--surface); color: var(--ink); border-bottom: 1px solid var(--line); }
+.report-bar .hint { flex: 1 1 240px; }
 .footer { margin-top: 22px; padding-top: 12px; border-top: 1px solid var(--line); font-size: 12.5px; color: var(--ink-2); display: grid; gap: 4px; }
 </style>
 
@@ -291,6 +305,31 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
         <details class="preset-about" id="preset-about">
           <summary>About this preset</summary>
           <div id="preset-info"></div>
+        </details>
+        <details class="preset-about" id="case-box">
+          <summary>Save, open or share a case; report</summary>
+          <div class="case-body">
+            <div class="toolbar">
+              <button type="button" class="btn ghost small" id="case-save">Save case</button>
+              <label class="btn ghost small file">Open case file<input type="file" id="case-file" class="vh" accept=".json,application/json"></label>
+              <button type="button" class="btn ghost small" id="case-report">Report</button>
+            </div>
+            <p class="hint" id="case-msg" role="status"></p>
+            <label for="case-code">Case code: copy it to keep or send this case; paste one and press Open code.</label>
+            <textarea class="pts" id="case-code" rows="3" spellcheck="false"></textarea>
+            <div class="toolbar">
+              <button type="button" class="btn ghost small" id="case-code-make">Show this case's code</button>
+              <button type="button" class="btn ghost small" id="case-code-open">Open code</button>
+            </div>
+            <div id="case-shared" hidden>
+              <p class="group-label"><b>Shared cases</b> <span class="hint" id="case-shared-hint"></span></p>
+              <div class="toolbar" id="case-share-row" hidden>
+                <input type="text" class="text" id="case-name" maxlength="80" placeholder="Name for this case" aria-label="Name for this case">
+                <button type="button" class="btn ghost small" id="case-share">Share</button>
+              </div>
+              <ul class="case-list" id="case-list"></ul>
+            </div>
+          </div>
         </details>
       </div>
 
@@ -689,9 +728,18 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
     </main>
   </div>
 
+  <dialog id="report-dlg" aria-labelledby="report-dlg-title">
+    <div class="report-bar">
+      <b id="report-dlg-title">Report</b>
+      <span class="hint">Saving files is not available in this view: select the report and copy it, or print it from your browser.</span>
+      <button type="button" class="btn ghost small" id="report-close">Close</button>
+    </div>
+    <div id="report-body"></div>
+  </dialog>
+
   <footer class="footer">
     <p>Conventions: compression positive, effective stresses; strength in MPa, column forces in kN (kN/m for 2D slices), stresses in kPa. Equation numbers are those of the submitted thesis; "brief §" refers to the app brief.</p>
-    <p>Charts: Plotly.js 2.35.2. Your inputs are remembered in this browser only.</p>
+    <p>Charts: Plotly.js 2.35.2. Your inputs are remembered in this browser only; a saved or shared case keeps them elsewhere.</p>
   </footer>
 </div>
 
@@ -1176,7 +1224,7 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
   // -------------------------------------------------------------------------------------------------------------
   function applyPreset(key, opts = {}) {
     const p = BY_KEY[key] || BY_KEY[DEFAULT_KEY];
-    PRESET_KEY = p.key;
+    PRESET_KEY = p.key; CASE_NAME = "";
     S = toState(E.inputs(p.inputs));
     for (const k of Object.keys(NUM)) WIN[k] = windowFor(k, S);
     writeRail();
@@ -1509,7 +1557,20 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
   function theme() {
     const cs = getComputedStyle(document.documentElement);
     const v = (n) => cs.getPropertyValue(n).trim();
-    const dark = v("--is-dark") === "1";
+    return themeFrom(v, v("--is-dark") === "1");
+  }
+  /** The light theme whatever the viewer's setting: the tokens of the :root rule (the report is printed on white). */
+  function lightTheme() {
+    for (const sh of Array.from(document.styleSheets)) {
+      let rules = null;
+      try { rules = sh.cssRules; } catch (e) { rules = null; }
+      for (const r of Array.from(rules || [])) {
+        if (r.selectorText === ":root" && r.style && r.style.getPropertyValue("--surface")) return themeFrom((n) => r.style.getPropertyValue(n).trim(), false);
+      }
+    }
+    return theme();
+  }
+  function themeFrom(v, dark) {
     return { dark, surface: v("--surface"), sunken: v("--sunken"), ink: v("--ink"), ink2: v("--ink-2"), muted: v("--muted"), rule: v("--rule"),
       line: v("--line"), accent: v("--accent"), n: v("--series-n"), slip: v("--slip"), water: v("--water"), rock: v("--rock"),
       rockEdge: v("--rock-edge"), ramp: dark ? RAMP.slice().reverse() : RAMP };
@@ -1732,12 +1793,12 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
   // -------------------------------------------------------------------------------------------------------------
   // cross-section (plots.cross_section)
   // -------------------------------------------------------------------------------------------------------------
-  function renderSection() {
-    const T = theme();
-    if (!RES) { msg("xs-msg", notRun(), "info"); clearChart("chart-section"); return; }
+  function renderSection(opt = {}) {
+    const T = opt.T || theme(), id = opt.id || "chart-section", page = id === "chart-section";
+    if (!RES) { if (page) msg("xs-msg", notRun(), "info"); clearChart(id); return; }
     const inp = RES.inputs, r = RES.r2;
     const m = r ? r.mesh : null;
-    msg("xs-msg", RES.e2 ? `2D: input error. ${esc(RES.e2)} The drawing shows the ground and the full circle only.`
+    if (page) msg("xs-msg", RES.e2 ? `2D: input error. ${esc(RES.e2)} The drawing shows the ground and the full circle only.`
       : r && r.status !== "ACCEPTED" && inp.model !== "ejc_original" ? `2D: ${esc(r.status)}. Values are from the last iterate, not an accepted solution.` : "");
     const [xa, xb, pad] = m && m.count ? frame(inp, m) : frameNoMesh(inp);
     const span = xb - xa;
@@ -1814,9 +1875,9 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
       if (xi.length) for (const xe of [xi[0], xi[xi.length - 1]]) data.push({ type: "scatter", x: [inp.xc, xe], y: [inp.zc, E.sphereZ(xe, 0, inp.xc, inp.zc, inp.R)],
         mode: "lines", showlegend: false, hoverinfo: "skip", line: { color: T.slip, width: 0.8, dash: "dash" } });
     }
-    const el = plot("chart-section", data, layout(T, { annotations: ann, uirevision: `${PRESET_KEY}`, margin: { l: 10, r: 10, t: 40, b: 10 },
+    const el = plot(id, data, layout(T, { annotations: ann, uirevision: `${PRESET_KEY}`, margin: { l: 10, r: 10, t: 40, b: 10 },
       xaxis: { title: "x (m), toe at 0, slope rises to −x", range: xrange }, yaxis: { title: "z (m)", scaleanchor: "x", scaleratio: 1, range: yrange } }));
-    onClick(el, (ev) => {
+    if (page) onClick(el, (ev) => {
       const p = ev.points && ev.points[0];
       if (!p) return;
       let q = curveToSlice[p.curveNumber];
@@ -2383,7 +2444,7 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
     submit({ type: "compare", inputs: inp }).then((res) => {
       $("#cmp-run").disabled = false;
       if (res.type !== "compare") { out.innerHTML = note("critical", esc(res.error || "The comparison failed.")); return; }
-      STUDY.cmp = res; renderCompare();
+      STUDY.cmp = Object.assign(res, { key: inputsKey(inp) }); renderCompare();
     });
   }
   function renderCompare() {
@@ -2415,7 +2476,7 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
     submit({ type: "sweep", inputs: inp, name, values, models, dims }, progressTo(bar)).then((res) => {
       bar.hidden = true; $("#sweep-run").disabled = false;
       if (res.type !== "sweep") { out.innerHTML = note("critical", esc(res.error || "The sweep failed.")); return; }
-      STUDY.sweep = Object.assign(res, { label: $("#sweep-name").selectedOptions[0].textContent }); renderSweep();
+      STUDY.sweep = Object.assign(res, { label: $("#sweep-name").selectedOptions[0].textContent, key: inputsKey(inp) }); renderSweep();
     });
   }
   const MODEL_LAB = { ejc_moscarda: "EJC", ghb: "GHB", mc: "MC" };
@@ -2460,7 +2521,7 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
     submit({ type: "back", inputs: inp, name: engineKey(k), lo, hi, target, dim }, progressTo(bar)).then((res) => {
       bar.hidden = true; $("#back-run").disabled = false;
       if (res.type !== "back") { out.innerHTML = note("critical", esc(res.error || "The back-analysis failed.")); return; }
-      STUDY.back = Object.assign(res, { label: $("#back-name").selectedOptions[0].textContent }); renderBack();
+      STUDY.back = Object.assign(res, { label: $("#back-name").selectedOptions[0].textContent, key: inputsKey(inp) }); renderBack();
     });
   }
   function renderBack() {
@@ -2493,7 +2554,7 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
     submit({ type: "mc", inputs: inp, variables: vars, n, seed, dims }, progressTo(bar)).then((res) => {
       bar.hidden = true; $("#mc-run").disabled = false;
       if (res.type !== "mc") { out.innerHTML = note("critical", esc(res.error || "The Monte Carlo run failed.")); return; }
-      STUDY.mc = Object.assign(res, { labels }); renderMC();
+      STUDY.mc = Object.assign(res, { labels, key: inputsKey(inp) }); renderMC();
     });
   }
   function renderMC() {
@@ -2518,6 +2579,318 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
     layout(T, { barmode: "overlay", margin: { l: 10, r: 10, t: 30, b: 10 }, xaxis: { title: "FoS" }, yaxis: { title: "samples" },
       shapes: [{ type: "line", x0: 1, x1: 1, yref: "paper", y0: 0, y1: 1, line: { color: T.muted, width: 1, dash: "dot" } }],
       annotations: [{ x: 1, xref: "x", y: 1, yref: "paper", text: "F = 1", showarrow: false, xanchor: "left", yanchor: "top", font: { color: T.ink2, size: 11 } }] }));
+  }
+
+  // -------------------------------------------------------------------------------------------------------------
+  // cases: save to a file, open a file or a case code, share with the people who can open this page; the report
+  // -------------------------------------------------------------------------------------------------------------
+  const CASE_FORMAT = "ejc-slope-case/1";
+  const FRAMED = (() => { try { return window.self !== window.top; } catch (e) { return true; } })();
+  const capability = (name) => (window.claude && typeof window.claude.use === "function"
+    ? Promise.resolve(window.claude.use(name)).catch(() => null) : Promise.resolve(null));
+  let SHARED = [], OWNER = false, DB = null, CASE_NAME = "";
+  const sayCase = (text) => { $("#case-msg").textContent = text; };
+  const slug = (t) => String(t).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60) || "case";
+  /** The current case: the page state (to reopen it here), the engine inputs (read by the Python app too) and the
+   *  FoS when the results are for these inputs. Fields not in use (NaN) are stored as null. */
+  function caseOf(name) {
+    let inputs = null;
+    try { inputs = toInputs(S); } catch (e) { inputs = null; }
+    const cur = inputs && RES && RES.key === inputsKey(inputs) ? RES : null;
+    const one = (r) => (r ? { fos: r.fos, status: r.status } : null);
+    return JSON.parse(JSON.stringify({ format: CASE_FORMAT, name: name || CASE_NAME || "", saved: new Date().toISOString(), preset: PRESET_KEY,
+      state: S, inputs, results: cur ? { r3: one(cur.r3), r2: one(cur.r2) } : null }));
+  }
+  const CHOICE = /^[A-Za-z0-9_.-]{1,40}$/;
+  const NULLABLE = new Set(["a_override", "ru", "n3y", "plan_radius", "d_zone", "crack_depth"]);
+  /** Engine inputs from a case written elsewhere (the Python app): known fields of the right type only. */
+  function cleanInputs(raw) {
+    const out = {};
+    for (const [k, d] of Object.entries(E.DEFAULT_INPUTS)) {
+      if (!Object.prototype.hasOwnProperty.call(raw, k)) continue;
+      const v = raw[k];
+      if (k === "profile" || k === "piezo") {
+        if (v === null) out[k] = null;
+        else if (Array.isArray(v) && v.length <= 500 && v.every((q) => Array.isArray(q) && q.length === 2 && q.every((u) => typeof u === "number" && Number.isFinite(u)))) out[k] = v.map((q) => [q[0], q[1]]);
+        else throw new Error(`${k} must be a list of [x, z] points`);
+      } else if (typeof d === "string") {
+        if (typeof v !== "string" || !CHOICE.test(v)) throw new Error(`${k} is not one of the app's choices`);
+        out[k] = v;
+      } else if (typeof d === "boolean") {
+        if (typeof v !== "boolean") throw new Error(`${k} must be true or false`);
+        out[k] = v;
+      } else if (v === null && (d === null || NULLABLE.has(k))) out[k] = null;
+      else if (typeof v === "number" && Number.isFinite(v)) out[k] = v;
+      else throw new Error(`${k} must be a number`);
+    }
+    return out;
+  }
+  /** Open a case: its page state on top of its preset (only known fields of the same type), or else its engine
+   *  inputs. Nothing changes if it cannot be shown. */
+  function openCase(c) {
+    if (!c || typeof c !== "object" || c.format !== CASE_FORMAT) throw new Error(`it is not a case saved by this app (format ${CASE_FORMAT})`);
+    let next;
+    const key = BY_KEY[c.preset] ? c.preset : DEFAULT_KEY;
+    if (c.state && typeof c.state === "object" && BY_KEY[c.preset]) {
+      next = toState(E.inputs(BY_KEY[key].inputs));
+      for (const [k, v] of Object.entries(c.state)) {
+        if (!Object.prototype.hasOwnProperty.call(next, k)) continue;
+        const t = typeof next[k];
+        if (t === "number" && typeof v === "number" && Number.isFinite(v)) next[k] = v;
+        else if (t === "boolean" && typeof v === "boolean") next[k] = v;
+        else if (t === "string" && typeof v === "string" && (k === "profile_text" || k === "piezo_text" ? v.length <= 20000 : CHOICE.test(v))) next[k] = v;
+      }
+    } else if (c.inputs && typeof c.inputs === "object") next = toState(E.inputs(cleanInputs(c.inputs)));
+    else throw new Error("the case holds no inputs");
+    const old = [S, PRESET_KEY, Object.assign({}, WIN)];
+    try {
+      S = next; PRESET_KEY = key;
+      for (const k of Object.keys(NUM)) WIN[k] = windowFor(k, S);
+      writeRail(); renderPresetInfo(); validate(S);
+    } catch (e) {
+      S = old[0]; PRESET_KEY = old[1]; WIN = old[2];
+      writeRail(); renderPresetInfo();
+      throw new Error(`it could not be shown (${e.message || e})`);
+    }
+    CASE_NAME = typeof c.name === "string" ? c.name.slice(0, 80) : "";
+    UI.k3ij = null; UI.k2i = null;
+    changed({ immediate: true });
+  }
+  /** Offer a file: the viewer's save prompt where this page may offer files, a plain download on a page of its own,
+   *  otherwise fallback() shows the content. Says what happened: saved, downloaded, declined, busy or shown. */
+  async function offerFile(filename, text, fallback) {
+    const dl = await capability("downloads");
+    if (dl) {
+      try { await dl.save({ filename, data: text }); return "saved"; } catch (e) {
+        const code = e && e.code;
+        if (code === "declined") return "declined";
+        if (code === "rate_limited") return "busy";
+      }
+    }
+    if (!FRAMED) {
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(new Blob([text], { type: filename.endsWith(".html") ? "text/html" : "application/json" }));
+      a.download = filename; document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+      return "downloaded";
+    }
+    fallback();
+    return "shown";
+  }
+  function showCode(c) { const box = $("#case-code"); box.value = JSON.stringify(c || caseOf()); box.focus(); box.select(); }
+  async function saveCase() {
+    const c = caseOf(), name = `ejc-case-${slug(c.name || BY_KEY[PRESET_KEY].label)}-${c.saved.slice(0, 10)}.json`;
+    $("#case-save").disabled = true;
+    try {
+      const how = await offerFile(name, JSON.stringify(c, null, 1), () => showCode(c));
+      sayCase({ saved: `Saved ${name}.`, downloaded: `Downloaded ${name}.`, declined: "The case was not saved.", busy: "A save prompt is already open.",
+        shown: "Saving files is not available in this view: the case code is selected below; copy it and keep it." }[how]);
+    } finally { $("#case-save").disabled = false; }
+  }
+  function openCode() {
+    const text = $("#case-code").value.trim();
+    if (!text) { sayCase("Paste a case code into the box first."); return; }
+    let c;
+    try { c = JSON.parse(text); } catch (e) { sayCase("That is not a case code: it is not valid JSON."); return; }
+    try { openCase(c); sayCase(`Opened ${c.name ? `“${c.name}”` : "the case"}.`); } catch (e) { sayCase(`Not opened: ${e.message}.`); }
+  }
+  async function openFile(ev) {
+    const el = ev.target, f = el.files && el.files[0];
+    if (!f) return;
+    try {
+      if (f.size > 2e6) throw new Error("the file is over 2 MB, too large for a case");
+      openCase(JSON.parse(await f.text()));
+      sayCase(`Opened ${f.name}.`);
+    } catch (e) { sayCase(`Not opened: ${e instanceof SyntaxError ? "the file is not valid JSON" : e.message}.`); }
+    el.value = "";
+  }
+  // shared cases: the `cases` collection, written by the page's owner, read by everyone who can open the page
+  async function initShared() {
+    const [db, user] = await Promise.all([capability("db"), capability("user")]);
+    if (!db) return;
+    DB = db;
+    try { OWNER = user ? !!(await user.isOwner()) : false; } catch (e) { OWNER = false; }
+    $("#case-shared").hidden = false; $("#case-share-row").hidden = !OWNER;
+    $("#case-shared-hint").textContent = OWNER ? "Everyone who can open this page can open the cases you share here." : "Cases shared by the owner of this page.";
+    db.collection("cases").orderBy("saved", "desc").limit(200).onSnapshot((snap) => {
+      SHARED = snap.docs.filter((d) => d.exists).map((d) => ({ id: d.id, data: d.data() || {} }));
+      renderShared();
+    }, () => { $("#case-list").innerHTML = '<li class="hint">The shared cases could not be loaded here.</li>'; });
+  }
+  function renderShared() {
+    const ul = $("#case-list");
+    if (!SHARED.length) { ul.innerHTML = '<li class="hint">No shared cases yet.</li>'; return; }
+    const f = (x) => (x && typeof x.fos === "number" ? x.fos.toFixed(4) : "–");
+    ul.innerHTML = SHARED.map(({ id, data: c }) => {
+      const r = c.results && typeof c.results === "object" ? c.results : null;
+      const day = typeof c.saved === "string" && !Number.isNaN(Date.parse(c.saved)) ? new Date(c.saved).toISOString().slice(0, 10) : "";
+      return `<li><div><b>${esc(typeof c.name === "string" && c.name ? c.name : "Untitled")}</b><span class="hint">${esc(day)}${r ? ` · FoS 3D ${f(r.r3)}, 2D ${f(r.r2)}` : ""}</span></div>` +
+        `<button type="button" class="btn ghost small" data-open="${esc(id)}">Open</button>` +
+        (OWNER ? `<button type="button" class="btn ghost small" data-del="${esc(id)}">Remove</button>` : "") + "</li>";
+    }).join("");
+  }
+  async function onSharedClick(ev) {
+    const b = ev.target.closest("button");
+    if (!b) return;
+    const item = SHARED.find((c) => c.id === (b.dataset.open || b.dataset.del));
+    if (!item) return;
+    const label = item.data.name || "Untitled";
+    if (b.dataset.open) {
+      try { openCase(item.data); sayCase(`Opened “${label}”.`); } catch (e) { sayCase(`Not opened: ${e.message}.`); }
+      return;
+    }
+    if (b.dataset.armed !== "1") {
+      b.dataset.armed = "1"; b.textContent = "Remove for everyone?";
+      setTimeout(() => { if (b.isConnected) { b.dataset.armed = ""; b.textContent = "Remove"; } }, 4000);
+      return;
+    }
+    b.disabled = true;
+    try { await DB.collection("cases").doc(item.id).delete(); sayCase(`Removed “${label}”.`); } catch (e) { b.disabled = false; sayCase(`Not removed: ${(e && e.message) || e}`); }
+  }
+  async function shareCase() {
+    const name = $("#case-name").value.trim().slice(0, 80), btn = $("#case-share");
+    if (!name) { sayCase("Enter a name for the case first."); $("#case-name").focus(); return; }
+    btn.disabled = true;
+    try { await DB.collection("cases").add(caseOf(name)); CASE_NAME = name; $("#case-name").value = ""; sayCase(`Shared “${name}”.`); } catch (e) {
+      sayCase(e && e.code === "quota_exceeded" ? "Not shared: the shared list is full; remove some cases first." : `Not shared: ${(e && e.message) || e}`);
+    } finally { btn.disabled = false; }
+  }
+
+  // the one-page report: results, the cross-section, the analysis notes, the inputs and the studies run on them
+  const REPORT_CSS = `
+.rpt { font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: #111; background: #fff; max-width: 920px; margin: 0 auto; padding: 24px 16px 40px; }
+.rpt .eyebrow { margin: 0; font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; color: #555; }
+.rpt h1 { font-size: 22px; margin: 2px 0; }
+.rpt h2 { font-size: 15px; margin: 20px 0 6px; padding-bottom: 3px; border-bottom: 1px solid #c8c8c8; }
+.rpt h3 { font-size: 13.5px; margin: 12px 0 4px; }
+.rpt p { margin: 6px 0; }
+.rpt .sub { margin: 0 0 12px; color: #555; }
+.rpt .fos { display: flex; flex-wrap: wrap; gap: 10px; margin: 12px 0; }
+.rpt .fos > div { border: 1px solid #c8c8c8; border-radius: 6px; padding: 8px 12px; min-width: 160px; }
+.rpt .fos span.lab { display: block; font-size: 12.5px; color: #555; }
+.rpt .fos b { display: block; font-size: 24px; font-variant-numeric: tabular-nums; }
+.rpt figure { margin: 12px 0; }
+.rpt img.fig { width: 100%; height: auto; border: 1px solid #e3e3e3; }
+.rpt figcaption { font-size: 12px; color: #555; }
+.rpt table { border-collapse: collapse; width: 100%; font-size: 12.5px; margin: 4px 0; }
+.rpt th, .rpt td { text-align: left; padding: 3px 6px; border-bottom: 1px solid #e3e3e3; vertical-align: top; }
+.rpt thead th { border-bottom: 1px solid #999; }
+.rpt td.n { text-align: right; font-variant-numeric: tabular-nums; }
+.rpt dl.facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 18px; font-size: 12.5px; margin: 8px 0; }
+.rpt dl.facts > div { display: flex; justify-content: space-between; gap: 10px; border-bottom: 1px solid #eee; padding: 2px 0; }
+.rpt dt { color: #555; }
+.rpt dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+.rpt .note { display: flex; gap: 8px; border-left: 3px solid #999; padding: 4px 8px; margin: 6px 0; font-size: 12.5px; background: #f6f6f6; }
+.rpt .note.critical { border-color: #d03b3b; }
+.rpt .note.warning { border-color: #c98a00; }
+.rpt .note.info { border-color: #1c5cab; }
+.rpt .note.good { border-color: #0ca30c; }
+.rpt .note > i, .rpt .chip i { font-style: normal; font-weight: 700; }
+.rpt .chip { display: inline-flex; gap: 4px; font-size: 12px; }
+.rpt .chip.good i { color: #0a7d0a; }
+.rpt .chip.critical i { color: #d03b3b; }
+.rpt .chip.warning i { color: #a87300; }
+.rpt .hint { color: #555; font-size: 12px; }
+.rpt footer { margin-top: 22px; padding-top: 8px; border-top: 1px solid #c8c8c8; font-size: 11.5px; color: #555; }
+@media (max-width: 640px) { .rpt dl.facts { grid-template-columns: minmax(0, 1fr); } }
+@media print { .rpt { padding: 0; max-width: none; } .rpt h2, .rpt h3 { break-after: avoid; } .rpt figure, .rpt tr, .rpt .fos { break-inside: avoid; } }
+`;
+  /** The inputs of a run as [label, value, unit] rows: those in use only. */
+  function inputRows(inp) {
+    const g = (v) => E.fmtG(v, 6), pts = (q) => q.map((u) => `(${g(u[0])}, ${g(u[1])})`).join(" "), rows = [];
+    const add = (lab, val, unit = "") => rows.push([lab, String(val), unit]);
+    add("Slope height H", g(inp.H), "m");
+    if (inp.profile === null) add("Face angle β", g(inp.beta), "°"); else add("Slope face points (x, z), from the toe", pts(inp.profile), "m");
+    if (inp.crest_slope) add("Ground behind the crest rises at α", g(inp.crest_slope), "°");
+    if (inp.plan_radius !== null) add(`Wall in plan, ${inp.plan_radius > 0 ? "concave" : "convex"}: radius R_p`, g(Math.abs(inp.plan_radius)), "m");
+    add("Slip circle centre (x_c, z_c)", `(${g(inp.xc)}, ${g(inp.zc)})`, "m");
+    add("Radius R", g(inp.R), "m");
+    if (inp.elong !== 1 || inp.mid_length) add("3D end caps λ; cylindrical middle L", `${g(inp.elong)}; ${g(inp.mid_length)} m`);
+    add("Unit weight γ", g(inp.gamma), "kN/m³");
+    add("Strength", E.MODELS[inp.model] || inp.model);
+    if (inp.model !== "mc") {
+      add("σci", g(inp.sigma_ci), "MPa"); add("m_i", g(inp.mi)); add("GSI", g(inp.gsi)); add("D", g(inp.D));
+      if (inp.d_zone !== null) add("D applies within T of the face only: T", g(inp.d_zone), "m");
+      if (inp.a_override !== null) add("a (set)", g(inp.a_override));
+      if (inp.model.startsWith("ejc")) add("ν", g(inp.nu));
+    } else { add("c′", g(inp.c_mc), "kPa"); add("φ′", g(inp.phi_mc), "°"); }
+    add("Water", inp.ru !== null ? `r_u = ${g(inp.ru)}` : !inp.wet ? "dry" : inp.piezo !== null ? `piezometric line ${pts(inp.piezo)} m`
+      : `water table H_w = ${g(inp.Hw)} m, β_w = ${g(inp.beta_w)}°`);
+    if (inp.crack_depth !== null) add("Tension crack depth; water fill", `${g(inp.crack_depth)} m; ${g(100 * inp.crack_water)} %`);
+    if (inp.kh) add("Seismic coefficient k_h", g(inp.kh));
+    add("3D columns N; N_y; 2D slices", `${inp.n3}; ${inp.n3y === null ? "= N" : inp.n3y}; ${inp.n2}`);
+    add("3D equation; tension option", `${inp.form === "FM" ? "F_M (moments)" : "F_H (horizontal forces)"}; ${inp.tension}`);
+    add("Iteration", E.ITERATIONS[inp.iteration] || inp.iteration);
+    if (inp.base_circle) add("Grid", "base circle: exit to entry, floor columns allowed");
+    return rows;
+  }
+  async function reportParts() {
+    const inp = RES.inputs, r3 = RES.r3, r2 = RES.r2, orig = inp.model === "ejc_original", p = BY_KEY[PRESET_KEY];
+    let fig = "";
+    if (PLOTLY) {
+      const div = document.createElement("div");
+      div.id = "report-fig"; div.setAttribute("aria-hidden", "true");
+      div.style.cssText = "position:fixed;left:-12000px;top:0;width:1000px;height:520px;";
+      document.body.appendChild(div);
+      try {
+        renderSection({ id: "report-fig", T: lightTheme() });
+        if (div.data) fig = await PLOTLY.toImage(div, { format: "svg", width: 1000, height: 520 });
+      } catch (e) { fig = ""; } finally { PLOTLY.purge(div); div.remove(); }
+    }
+    let same = false;
+    try { same = inputsKey(toInputs(S)) === inputsKey(E.inputs(p.inputs)); } catch (e) { same = false; }
+    const day = new Date().toISOString().slice(0, 10), title = CASE_NAME || `${p.group}: ${p.label}`;
+    const box = (lab, r) => `<div><span class="lab">${lab}</span><b>${r && r.fos !== null ? r.fos.toFixed(6) : "withheld"}</b>${chip(r ? r.status : "INPUT ERROR")}</div>`;
+    const ratio = r3 && r2 && r3.fos !== null && r2.fos !== null ? (r3.fos / r2.fos).toFixed(4) : "withheld";
+    const studies = [], at = (sel) => { const el = document.querySelector(sel); return el ? el.outerHTML : ""; };
+    if (STUDY.cmp && STUDY.cmp.key === RES.key) studies.push(`<h3>EJC against GHB</h3>${at("#cmp-out table")}`);
+    if (STUDY.back && STUDY.back.key === RES.key) studies.push(`<h3>Back-analysis</h3>${at("#back-out > p") || at("#back-out > .note")}`);
+    if (STUDY.sweep && STUDY.sweep.key === RES.key) studies.push(`<h3>Parameter sweep: ${esc(STUDY.sweep.label)}</h3>${at("#sweep-out table")}`);
+    if (STUDY.mc && STUDY.mc.key === RES.key) studies.push(`<h3>Monte Carlo</h3>${at("#mc-out table")}${at("#mc-out p.hint")}`);
+    const body = `<header><p class="eyebrow">EJC Slope Stability · case report · ${esc(day)}</p><h1>${esc(title)}</h1>` +
+      `<p class="sub">${CASE_NAME ? `Preset ${esc(p.group)}: ${esc(p.label)}, ${same ? "unchanged" : "with changed inputs"}.` : same ? "The preset's inputs." : "Inputs changed from this preset."}</p></header>` +
+      (orig ? `<h2>Result</h2><p>Original closure: an admissibility check only; it gives no FoS.</p>`
+        : `<div class="fos">${box(`FoS 3D, Hungr ${inp.form === "FM" ? "F<sub>M</sub>" : "F<sub>H</sub>"}`, r3)}${box("FoS 2D, Bishop", r2)}<div><span class="lab">3D / 2D</span><b>${ratio}</b></div></div>`) +
+      (fig ? `<figure><img class="fig" src="${fig}" alt="Cross-section on the central plane y = 0: the slope, the slip surface and the 2D slices."><figcaption>Cross-section on the central plane (y = 0) with the 2D slices.</figcaption></figure>` : "") +
+      `<h2>Analysis</h2><p>${esc($("#caption").textContent)}</p><dl class="facts">${$("#facts").innerHTML}</dl>${$("#notes").innerHTML}` +
+      `<h2>Inputs</h2><table><tbody>${inputRows(inp).map(([l, v, u]) => `<tr><th scope="row">${esc(l)}</th><td>${esc(v)}</td><td>${esc(u)}</td></tr>`).join("")}</tbody></table>` +
+      (studies.length ? `<h2>Studies on these inputs</h2>${studies.join("")}` : "") +
+      `<footer><p>EJC Slope Stability: fully 3D limit equilibrium with Hungr's columns and Bishop's 2D slices on the central section, for a prescribed slip surface; strength from the Extended Jiang Criterion solved by Route 2, with GHB and Mohr-Coulomb for comparison. ` +
+      `Research tool for the prescribed-surface comparison in Mahat (2026), UWA GENG5512 thesis; not for design.</p>` +
+      `<p>Solved by engine.js, a line-for-line port of ejc_app/engine.py. Compression positive, effective stresses.</p></footer>`;
+    const doc = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">` +
+      `<title>${esc(title)}: EJC Slope Stability report</title><style>body{margin:0;background:#fff}${REPORT_CSS}</style></head><body><main class="rpt">${body}</main></body></html>`;
+    return { doc, body, filename: `ejc-report-${slug(title)}-${day}.html` };
+  }
+  async function makeReport() {
+    let cur = null;
+    try { cur = inputsKey(toInputs(S)); } catch (e) { cur = null; }
+    if (Object.keys(validate(S)).length || !RES || RES.key !== cur || running || debounceT !== null) {
+      sayCase("Run the analysis for the inputs on screen first: the report shows their results."); return;
+    }
+    const btn = $("#case-report");
+    btn.disabled = true; sayCase("Preparing the report…");
+    try {
+      const rep = await reportParts();
+      const how = await offerFile(rep.filename, rep.doc, () => { $("#report-body").innerHTML = `<div class="rpt">${rep.body}</div>`; $("#report-dlg").showModal(); });
+      sayCase({ saved: `Saved ${rep.filename}.`, downloaded: `Downloaded ${rep.filename}.`, declined: "The report was not saved.", busy: "A save prompt is already open.",
+        shown: "Saving files is not available in this view, so the report is shown in a window." }[how]);
+    } catch (e) { sayCase(`The report could not be made: ${e.message || e}`); } finally { btn.disabled = false; }
+  }
+  function bindCases() {
+    const st = document.createElement("style");
+    st.textContent = REPORT_CSS;
+    document.head.appendChild(st);
+    $("#case-save").addEventListener("click", saveCase);
+    $("#case-file").addEventListener("change", openFile);
+    $("#case-report").addEventListener("click", makeReport);
+    $("#case-code-make").addEventListener("click", () => { showCode(); sayCase("The case code is selected: copy it."); });
+    $("#case-code-open").addEventListener("click", openCode);
+    $("#case-share").addEventListener("click", shareCase);
+    $("#case-list").addEventListener("click", onSharedClick);
+    $("#report-close").addEventListener("click", () => $("#report-dlg").close());
+    capability("downloads");                 // start resolving now, so a save does not wait for it
+    initShared();
   }
 
   // critical-surface search (engine.criticalSearch; QA/QC finding R1)
@@ -2746,7 +3119,7 @@ legend { padding: 0; font-size: 13.5px; margin-bottom: 4px; }
   }
 
   function start(hot) {
-    buildRail(); buildStudies();
+    buildRail(); buildStudies(); bindCases();
     if (window.matchMedia("(max-width: 1080px)").matches) document.querySelectorAll(".rail .sec").forEach((d, q) => { if (q > 0) d.open = false; });
     if ("IntersectionObserver" in window) {
       const io = new IntersectionObserver((ents) => {

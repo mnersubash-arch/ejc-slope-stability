@@ -210,6 +210,68 @@ async function check(cond, label) { console.log(`${cond ? "ok  " : "FAIL"} ${lab
   await page.waitForTimeout(300);
   console.log("     gamma = 55:", await text(page, "#runstate"), "|", await text(page, "#err-gamma"));
   await page.fill("#nb-gamma", "27"); await page.dispatchEvent("#nb-gamma", "change");
+
+  // the additions: slope face, wall in plan, water, crack and k_h, the studies, cases and the report (values as
+  // computed by engine.js, which tools/verify_engine.js checks against engine.py)
+  const setNum = async (k, v) => { await page.fill(`#nb-${k}`, String(v)); await page.dispatchEvent(`#nb-${k}`, "change"); };
+  const fos = async () => `${await text(page, "#fos3")} / ${await text(page, "#fos2")}`;
+  await page.selectOption("#preset", "thesis_dry_05");
+  await waitSolved(page);
+  await page.click("#tab-view-3d");
+  await page.check("#face-benches");
+  await waitSolved(page);
+  await check(await fos() === "2.706024 / 2.447911", `one bench is the planar face: ${await fos()}`);
+  for (const [k, v] of [["bench_n", 4], ["bench_h", 90], ["bench_beta", 60], ["berm_w", 15]]) await setNum(k, v);
+  await waitSolved(page);
+  await check(await fos() === "2.192610 / 2.022105", `four 90 m benches at 60° with 15 m berms: ${await fos()}`);
+  await page.check("#face-profile");
+  await page.fill("#profile_text", "0, 0\n-10, 5\n-5, 8"); await page.dispatchEvent("#profile_text", "change");
+  await page.waitForTimeout(300);
+  await check(/x must decrease/.test(await text(page, "#err-profile_text")), "face points that run back into the slope are refused");
+  await page.selectOption("#preset", "thesis_dry_05");
+  await waitSolved(page);
+  await page.check("#wall-concave"); await setNum("plan_r", 800);
+  await waitSolved(page);
+  await check(await text(page, "#fos3") === "2.755516" && await text(page, "#fos2") === "2.447911", `concave wall, R_p = 800 m: ${await fos()} (2D unchanged)`);
+  await page.check("#wall-straight");
+  await page.check("#water-Wet");
+  await waitSolved(page);
+  const wet = await fos();
+  await page.check("#water-Piezo");
+  await waitSolved(page);
+  await check(await fos() === wet, `the default piezometric line is the water table: ${await fos()}`);
+  await page.check("#water-Dry"); await page.check("#crack_on"); await setNum("crack_depth", 20); await setNum("crack_water", 0.5); await setNum("kh", 0.1);
+  await waitSolved(page);
+  await check(await fos() === "2.339066 / 2.101695" && /Tension crack/.test(await text(page, "#facts")), `20 m crack half full of water, k_h = 0.1: ${await fos()}`);
+  await page.click("#tab-free-body");
+  await page.waitForTimeout(600);
+  await page.screenshot({ path: path.join(SHOTS, "w1-crack-kh-fbd-light.png"), fullPage: false });
+  await page.selectOption("#preset", "thesis_dry_05");
+  await waitSolved(page);
+  await page.click("#tab-studies");
+  await page.click("#cmp-run");
+  await page.waitForSelector("#cmp-out table", { timeout: 120000 });
+  const cmp = await text(page, "#cmp-out");
+  await check(/2\.706024\s*2\.447911\s*1\.1054/.test(cmp) && /2\.553668\s*2\.310255/.test(cmp) && /1\.0597\s*1\.0596/.test(cmp), "compare: EJC 2.706024 / 2.447911, GHB 2.553668 / 2.310255, EJC/GHB 1.0597 / 1.0596");
+  await page.selectOption("#back-name", "D");
+  await page.fill("#back-lo", "0"); await page.fill("#back-hi", "1"); await page.fill("#back-target", "2"); await page.selectOption("#back-dim", "2");
+  await page.click("#back-run");
+  await page.waitForFunction(() => /gives F/.test(document.querySelector("#back-out").textContent), null, { timeout: 300000 });
+  await check(/D, disturbance factor = 0\.417641 gives F = 2\.000000 \(2D\)/.test(await text(page, "#back-out")), `back-analysis: ${(await text(page, "#back-out")).slice(0, 70)}`);
+  await page.click("#case-box > summary");
+  const [dlCase] = await Promise.all([page.waitForEvent("download"), page.click("#case-save")]);
+  const saved = JSON.parse(fs.readFileSync(await dlCase.path(), "utf8"));
+  await check(saved.format === "ejc-slope-case/1" && saved.results.r3.fos.toFixed(6) === "2.706024" && saved.inputs.gsi === 42, `case saved: ${dlCase.suggestedFilename()}`);
+  await setNum("gsi", 50);
+  await waitSolved(page);
+  await page.fill("#case-code", JSON.stringify(saved)); await page.click("#case-code-open");
+  await waitSolved(page);
+  await check(await fos() === "2.706024 / 2.447911" && /match/.test(await text(page, "#preset-state")), "case code reopens the saved case");
+  const [dlRep] = await Promise.all([page.waitForEvent("download"), page.click("#case-report")]);
+  const rep = fs.readFileSync(await dlRep.path(), "utf8");
+  await check(rep.includes("2.706024") && rep.includes('<img class="fig" src="data:image/svg+xml') && rep.includes("EJC against GHB") && rep.includes("Back-analysis"),
+    `report: ${dlRep.suggestedFilename()}, ${(rep.length / 1024).toFixed(0)} KiB, with the cross-section and the studies`);
+  await page.screenshot({ path: path.join(SHOTS, "w1-studies-additions-light.png"), fullPage: true });
   console.log("     problems (desktop light):", problems.length ? problems : "none");
   await ctx.close();
 

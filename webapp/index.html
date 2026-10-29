@@ -1214,8 +1214,11 @@ label.file:focus-within { outline: 2px solid var(--accent); outline-offset: 2px;
     const [n, ny] = colGrid(d);
     if (!(Number.isInteger(n) && n >= 1 && Number.isInteger(ny) && ny >= 1)) return "";
     const ysym = d.cols === "square" ? "N" : "N<sub>y</sub>";
+    let Y = d.R;                                   // the half-width across y: R, or λR + L/2 for the elongated surface
+    try { Y = E.yExtent(geomOf(d)); } catch (e) { Y = d.R; }
+    const dy = Y === d.R ? `Δy = R/${ysym} = ${fx(d.R / ny, 3)} m` : `Δy = Y/${ysym} = ${fx(Y / ny, 3)} m (Y = ${fx(Y, 2)} m, the half-width across y)`;
     return (d.cols === "size" ? `On this circle: N = ${n} along x and N<sub>y</sub> = ${ny} across y. ` : "") +
-      `Columns ${n} × ${ny}: Δx = (x<sub>0</sub> − x<sub>1</sub>)/N = ${fx(span / n, 3)} m by Δy = R/${ysym} = ${fx(d.R / ny, 3)} m. ` +
+      `Columns ${n} × ${ny}: Δx = (x<sub>0</sub> − x<sub>1</sub>)/N = ${fx(span / n, 3)} m by ${dy}. ` +
       "The height h = z<sub>t</sub> − z<sub>b</sub> of each column is set by the ground and the slip surface.";
   }
 

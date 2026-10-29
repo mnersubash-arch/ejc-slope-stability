@@ -1,12 +1,17 @@
 """Page 1: Calculator."""
+from datetime import date
 
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
+import casefile as CF
 import engine as E
 import plots as P
+import presets as PR
+import report as RP
+import study_panels as SP
 import ui
 
 st.markdown(f"**{ui.DISCLAIMER}**")
@@ -152,23 +157,13 @@ if tn:
     (st.warning if tn[0] == "warning" else st.info)(tn[1])
 if A.inputs.tension != "none":
     st.caption(f"{A.inputs.tension}: sensitivity, not a calibrated contact law.")
-mb, s, a = A.inputs.hb
-if A.inputs.model == "mc":
-    strength_txt = f"c′ = {A.inputs.c_mc:g} kPa, φ′ = {A.inputs.phi_mc:g}°"
-else:
-    strength_txt = f"m_b = {mb:.6f}, s = {s:.7f}, a = {a:.6f}, ν = {A.inputs.nu:g}"
-water_txt = (f"u = r_u γ h with r_u = {A.inputs.ru:g}" if A.inputs.ru is not None else
-             "water table" if A.inputs.wet else "dry")
-st.caption(f"Strength: {E.MODELS[A.inputs.model]}. {strength_txt}. Water: {water_txt}. "
-           f"Iteration path: {E.ITERATIONS[A.inputs.iteration]}. "
-           + ("Base-circle grid (exit to entry, floor columns allowed): "
-              f"{int((r3.mesh.x > 0).sum())} floor columns, {int((r2.mesh.x > 0).sum())} floor slices. "
-              if A.inputs.base_circle else "")
-           + f"Sliding volume (full mass) {r3.mesh.volume:,.4g} m³; 2D area {r2.mesh.volume:,.4g} m²."
+st.caption(RP.caption_text(A)
+           + f" Sliding volume (full mass) {r3.mesh.volume:,.4g} m³; 2D area {r2.mesh.volume:,.4g} m²."
            + (f" 3D columns {r3.mesh.n} × {r3.mesh.ny}, Δx × Δy = {r3.mesh.dx:.2f} × {r3.mesh.dy:.2f} m, column height h "
               f"{r3.mesh.h.min():.2f} to {r3.mesh.h.max():.2f} m." if r3.mesh.count else "")
-           + (f" 2D slice width {r2.mesh.dx:.2f} m." if r2.mesh.count else "")
-           + (f" Projection limit {r3.projection_limit:.4f} kPa." if r3.projection_limit is not None else ""))
+           + (f" 2D slice width {r2.mesh.dx:.2f} m." if r2.mesh.count else ""))
+for lab, val in RP.addition_facts(A):
+    st.caption(f"**{lab}:** {val}")
 
 # ---- checks
 st.subheader("Checks")
@@ -198,10 +193,35 @@ c2.download_button("Download 2D slice results (CSV)", t2.to_csv(index=False).enc
 with st.expander("Show the 3D column table"):
     st.dataframe(t3, width="stretch", height=320)
 
+# ---- report
+st.subheader("Report")
+_p = PR.BY_KEY[st.session_state.preset]
+_same = A.inputs == _p.inputs
+_title = st.session_state.get("case_name") or f"{_p.group}: {_p.label}"
+_sub = (f"Preset {_p.group}: {_p.label}, {'unchanged' if _same else 'with changed inputs'}."
+        if st.session_state.get("case_name") else "The preset's inputs." if _same else "Inputs changed from this preset.")
+_notes = []
+if r3.mesh.count or r2.mesh.count:
+    _vf = ui.vertical_face_note(A.inputs)
+    if _vf:
+        _notes.append(("warning", _vf.replace("**", "")))
+_tn = ui.tensile_note(A.inputs, r3, r2)
+if _tn:
+    _notes.append((_tn[0], _tn[1].replace("**", "")))
+if stale:
+    st.info("The report shows the results above, which are for the previous inputs.")
+st.download_button("Download the report (HTML)", RP.report_html(A, title=_title, subtitle=_sub, notes=_notes,
+                                                                 studies=SP.report_studies(A)),
+                   CF.file_name({"name": _title, "saved": date.today().isoformat()}, "report", "html"), "text/html",
+                   key="report_dl")
+st.caption("One page: the FoS, the cross-section, the notes above, the inputs and the studies below that ran on these "
+           "inputs. Open it in a browser to read or print it.")
+
 # ---- studies
 st.subheader("Studies")
-tab_search, tab_mesh, tab_nu = st.tabs(["Critical surface (search)", "Mesh study (eq. 4.17)",
-                                        "ν sweep (Moscarda closure)"])
+(tab_search, tab_mesh, tab_nu, tab_cmp, tab_sweep, tab_back,
+ tab_mc) = st.tabs(["Critical surface (search)", "Mesh study (eq. 4.17)", "ν sweep (Moscarda closure)",
+                    "EJC against GHB", "Parameter sweep", "Back-analysis", "Monte Carlo"])
 with tab_search:
     search_panel(inp)
 with tab_mesh:
@@ -258,3 +278,11 @@ with tab_nu:
         st.plotly_chart(fig, width="stretch", key="nu_fig")
         st.caption("Gaps are runs with no accepted FoS (reason in the table).")
         st.dataframe(df, hide_index=True, width="stretch")
+with tab_cmp:
+    SP.compare_panel(inp)
+with tab_sweep:
+    SP.sweep_panel(inp, st.session_state.inp)
+with tab_back:
+    SP.back_panel(inp, st.session_state.inp)
+with tab_mc:
+    SP.mc_panel(inp, st.session_state.inp)

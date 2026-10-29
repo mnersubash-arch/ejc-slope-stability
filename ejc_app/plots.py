@@ -18,7 +18,7 @@ GROUND = "#8c7b6b"
 ROCK = "rgba(166, 146, 120, 0.25)"
 WATER = "#2b7bba"
 SLIP = "#c0392b"
-FORCE = {"W": "#444444", "N": "#1f77b4", "U": WATER, "S": "#d62728", "n": "#7f7f7f"}
+FORCE = {"W": "#444444", "N": "#1f77b4", "U": WATER, "S": "#d62728", "n": "#7f7f7f", "E": "#7f7f7f", "P": WATER}
 
 FIELDS = {
     "sigma_n": ("sigma_n (kPa)", "kPa"),
@@ -104,7 +104,7 @@ def cross_section(inp: E.Inputs, r2: E.LemResult, field: str = "sigma_n", max_po
     m = r2.mesh
     xa, xb, pad = _frame(inp, m)
     xs = np.linspace(xa, xb, 1200)
-    zt = E.ground_z(xs, inp.H, inp.beta)
+    zt = E.ground(inp, xs)
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=np.r_[xs, xs[::-1]], y=np.r_[zt, np.full(len(xs), min(-pad / 2, inp.zc - inp.R - pad / 2))],
                              fill="toself", fillcolor=ROCK, line=dict(width=0), hoverinfo="skip", name="rock mass"))
@@ -117,16 +117,32 @@ def cross_section(inp: E.Inputs, r2: E.LemResult, field: str = "sigma_n", max_po
                              name="slip circle (full)", hoverinfo="skip", visible="legendonly"))
     xb_ = _slip_x(inp, m, 1200)
     zb_ = E.sphere_z(xb_, 0.0, inp.xc, inp.zc, inp.R)
-    inside = zb_ < E.ground_z(xb_, inp.H, inp.beta)
+    with np.errstate(invalid="ignore"):
+        inside = zb_ < E.ground(inp, xb_)
     fig.add_trace(go.Scatter(x=xb_, y=np.where(inside, zb_, np.nan), mode="lines", line=dict(color=SLIP, width=3),
                              name="slip surface", hoverinfo="skip"))
     if inp.wet:
-        zw = np.minimum(E.water_z(xs, inp.Hw, inp.beta_w), zt)
+        zw = np.minimum(E.water(inp, xs), zt)
         fig.add_trace(go.Scatter(x=xs, y=zw, mode="lines", line=dict(color=WATER, width=2, dash="dash"),
-                                 name="water table", hoverinfo="skip"))
+                                 name="piezometric line" if inp.piezo is not None else "water table", hoverinfo="skip"))
+    notes = []
     if inp.ru is not None:
-        fig.add_annotation(xref="paper", yref="paper", x=0.01, y=0.98, showarrow=False, align="left",
-                           text=f"pore pressure u = r_u γ h, r_u = {inp.ru:g}", font=dict(color=WATER))
+        notes.append(f"pore pressure u = r_u γ h, r_u = {inp.ru:g}")
+    if inp.kh > 0:
+        notes.append(f"seismic k_h = {inp.kh:g}: k_h W at each centroid, towards the pit")
+    if notes:
+        fig.add_annotation(xref="paper", yref="paper", x=0.01, y=0.02, showarrow=False, align="left",
+                           text="<br>".join(notes), font=dict(color="#333333"))
+    ck = m.crack
+    if ck and ck["rows"]:
+        rw = ck["rows"][0]
+        fig.add_trace(go.Scatter(x=[ck["x"], ck["x"]], y=[rw["zbot"], rw["ztop"]], mode="lines",
+                                 line=dict(color="#222222", width=2.5), hoverinfo="name",
+                                 name=f"tension crack, {rw['ztop'] - rw['zbot']:.2f} m deep"))
+        if rw["hw"] > 0:
+            fig.add_trace(go.Scatter(x=[ck["x"], ck["x"]], y=[rw["zbot"], rw["zbot"] + rw["hw"]], mode="lines",
+                                     line=dict(color=WATER, width=7), hoverinfo="name",
+                                     name=f"water in the crack: {rw['hw']:.2f} m, P = {_big(ck['P'])} kN/m"))
     # slices
     vals = field_values(r2, field)
     finite = np.isfinite(vals)
@@ -139,7 +155,8 @@ def cross_section(inp: E.Inputs, r2: E.LemResult, field: str = "sigma_n", max_po
             xl, xr = m.x[k] - m.dx / 2, m.x[k] + m.dx / 2
             zl = E.sphere_z(xl, 0.0, inp.xc, inp.zc, inp.R)
             zr = E.sphere_z(xr, 0.0, inp.xc, inp.zc, inp.R)
-            gl, gr = E.ground_z(xl, inp.H, inp.beta), E.ground_z(xr, inp.H, inp.beta)
+            zl, zr = (m.zb[k] if not np.isfinite(v) else v for v in (zl, zr))
+            gl, gr = E.ground(inp, xl), E.ground(inp, xr)
             fig.add_trace(go.Scatter(x=[xl, xr, xr, xl, xl], y=[zl, zr, gr, gl, zl], fill="toself",
                                      fillcolor=cols[k] if finite[k] else "rgba(200,200,200,0.5)",
                                      line=dict(color="rgba(60,60,60,0.6)", width=0.6), mode="lines",
@@ -191,19 +208,22 @@ def view3d(inp: E.Inputs, r3: E.LemResult, field: str = "sigma_n", mirror: bool 
     vmin = float(np.nanmin(vals)) if finite.any() else 0.0
     vmax = float(np.nanmax(vals)) if finite.any() else 1.0
     fig = go.Figure()
-    ylo = -inp.R if mirror else 0.0
     xa, xb, _ = _frame(inp, m)
+    ymass = float(np.max(m.y + m.dy / 2)) if m.count else 0.0
+    yext = min(E.y_extent(inp), max(1.3 * ymass, 0.25 * (xb - xa)))
+    ylo = -yext if mirror else 0.0
     gx = np.linspace(xa, xb, 90)
-    gy = np.linspace(ylo, inp.R, 60)
+    gy = np.linspace(ylo, yext, 60)
     GX, GY = np.meshgrid(gx, gy)
-    GZ = E.ground_z(GX, inp.H, inp.beta)
+    GZ = E.ground(inp, GX, GY)
     fig.add_trace(go.Surface(x=GX, y=GY, z=GZ, colorscale=[[0, "#bdb2a5"], [1, "#bdb2a5"]], showscale=False,
                              opacity=0.35, name="ground surface", hoverinfo="skip", showlegend=True))
     sx = _slip_x(inp, m, 90)
-    sy = np.linspace(ylo, inp.R, 90)
+    sy = np.linspace(ylo, yext, 90)
     SX, SY = np.meshgrid(sx, sy)
-    SZ = E.sphere_z(SX, SY, inp.xc, inp.zc, inp.R)
-    SZ = np.where(SZ < E.ground_z(SX, inp.H, inp.beta), SZ, np.nan)
+    SZ = E.slip_z(inp, SX, SY)
+    with np.errstate(invalid="ignore"):
+        SZ = np.where(SZ < E.ground(inp, SX, SY), SZ, np.nan)
     fig.add_trace(go.Surface(x=SX, y=SY, z=SZ, colorscale=[[0, "#e8a598"], [1, "#e8a598"]], showscale=False,
                              opacity=0.55, name="slip surface", hoverinfo="skip", showlegend=True))
     xs, ys, zb, zt, vv = m.x, m.y, m.zb, m.zt, np.nan_to_num(vals, nan=vmin)
@@ -341,8 +361,8 @@ def lever_view(inp: E.Inputs, r3: E.LemResult, k: int) -> go.Figure:
     fig = go.Figure()
     xa, xb, _ = _frame(inp, m)
     xs = np.linspace(xa, xb, 500)
-    fig.add_trace(go.Scatter(x=xs, y=E.ground_z(xs, inp.H, inp.beta), mode="lines", line=dict(color=GROUND, width=2),
-                             name="ground (any y)", hoverinfo="skip"))
+    fig.add_trace(go.Scatter(x=xs, y=E.ground(inp, xs, np.full_like(xs, m.y[k])), mode="lines",
+                             line=dict(color=GROUND, width=2), name=f"ground at y = {m.y[k]:.1f} m", hoverinfo="skip"))
     fig.add_trace(go.Scatter(x=inp.xc + rho * np.cos(th), y=inp.zc + rho * np.sin(th), mode="lines",
                              line=dict(color=SLIP, width=2), name=f"sphere section at y = {m.y[k]:.1f} m",
                              hoverinfo="skip"))
@@ -367,7 +387,7 @@ def fbd2d(inp: E.Inputs, r2: E.LemResult, k: int) -> go.Figure:
     f = column_forces(inp, r2, k)
     xl, xr = m.x[k] - m.dx / 2, m.x[k] + m.dx / 2
     zl, zr = (float(E.sphere_z(v, 0.0, inp.xc, inp.zc, inp.R)) for v in (xl, xr))
-    gl, gr = (float(E.ground_z(v, inp.H, inp.beta)) for v in (xl, xr))
+    gl, gr = (float(E.ground(inp, v)) for v in (xl, xr))
     fig = go.Figure(go.Scatter(x=[xl, xr, xr, xl, xl], y=[zl, zr, gr, gl, zl], fill="toself",
                                fillcolor="rgba(217,203,184,0.6)", line=dict(color="black"), name=f"slice {k}",
                                hoverinfo="skip"))
@@ -398,7 +418,8 @@ def fbd2d(inp: E.Inputs, r2: E.LemResult, k: int) -> go.Figure:
 # ---------------------------------------------------------------------------------------------------------------
 # page 4: free-body diagram of the whole mass (E.mass_forces); as renderMass in webapp/index.html
 # ---------------------------------------------------------------------------------------------------------------
-MASS_NAMES = {"W": "W, weight", "N": "N′, effective normal force", "U": "U, pore-water force", "S": "S, mobilised shear"}
+MASS_NAMES = {"W": "W, weight", "N": "N′, effective normal force", "U": "U, pore-water force", "S": "S, mobilised shear",
+              "E": "E = k_h W, seismic force", "P": "P, water in the tension crack"}
 
 
 def _big(v: float) -> str:
@@ -433,6 +454,7 @@ def mass_groups(mf: dict, m: E.Mesh, limit: int) -> tuple[list[dict], int]:
         N = np.array([np.sum(el["N"][ks] * el[c][ks]) for c in ("nx", "ny", "nz")])
         U = np.array([np.sum(el["U"][ks] * el[c][ks]) for c in ("nx", "ny", "nz")])
         S = np.array([np.sum(el["S"][ks] * el["sx"][ks]), 0.0, np.sum(el["S"][ks] * el["sz"][ks])])
+        Ev = np.array([float(np.sum(el["E"][ks])) if "E" in el else 0.0, 0.0, 0.0])
         b = int(ks[np.argmin((el["x"][ks] - cen[0]) ** 2 + (el["y"][ks] - cen[1]) ** 2)])
         if m.dim == 2:
             name = f"slice {ks[0]}" if len(ks) == 1 else f"slices {ks[0]}–{ks[-1]}"
@@ -441,12 +463,12 @@ def mass_groups(mf: dict, m: E.Mesh, limit: int) -> tuple[list[dict], int]:
                     else f"{len(ks)} columns around i = {m.i[b]}, j = {m.j[b]}")
         groups.append(dict(name=name, W=W, cen=cen, base=np.array([el["x"][b], el["y"][b], el["zb"][b]]),
                            tan=np.array([el["sx"][b], 0.0, el["sz"][b]]),
-                           nrm=np.array([el["nx"][b], el["ny"][b], el["nz"][b]]), N=N, U=U, S=S))
+                           nrm=np.array([el["nx"][b], el["ny"][b], el["nz"][b]]), N=N, U=U, S=S, E=Ev))
     return groups, size
 
 
 def _mass_arrows(groups: list[dict], kind: str, sc: float, off: float, unit: str) -> list[tuple]:
-    """(start, end, hover text) of every arrow of one kind: W from the centre of gravity, S from the base point,
+    """(start, end, hover text) of every arrow of one kind: W and E from the centre of gravity, S from the base point,
     N' and U ending at the base point (pointing into the mass when compressive)."""
     out = []
     for g in groups:
@@ -455,7 +477,7 @@ def _mass_arrows(groups: list[dict], kind: str, sc: float, off: float, unit: str
         if not mag > 0:
             continue
         vec = v * sc
-        if kind == "W":
+        if kind in ("W", "E"):
             a, b = g["cen"], g["cen"] + vec
         elif kind == "S":
             a, b = g["base"], g["base"] + vec
@@ -471,8 +493,10 @@ def _mass_arrows(groups: list[dict], kind: str, sc: float, off: float, unit: str
 def _mass_setup(mf: dict, m: E.Mesh, factor: float, limit: int):
     groups, size = mass_groups(mf, m, limit)
     span = max(float(m.x.max() - m.x.min() + m.dx), float(m.zt.max() - m.zb.min()), 2 * float(m.y.max()))
-    peak = max(max(g["W"], *(float(np.linalg.norm(g[k])) for k in ("N", "U", "S"))) for g in groups)
-    kinds = [k for k in ("W", "N", "U", "S") if k != "U" or mf["totals"]["U"]["x"] != 0 or mf["totals"]["U"]["z"] != 0]
+    peak = max(max(g["W"], *(float(np.linalg.norm(g[k])) for k in ("N", "U", "S", "E"))) for g in groups)
+    t = mf["totals"]
+    kinds = [k for k in ("W", "N", "U", "S", "E") if (k != "U" or t["U"]["x"] != 0 or t["U"]["z"] != 0)
+             and (k != "E" or ("E" in t and t["E"]["x"] != 0))]
     return groups, size, span, factor * span / peak, 0.025 * span, kinds
 
 
@@ -491,17 +515,17 @@ def mass_fbd2d(inp: E.Inputs, r2: E.LemResult, mf: dict) -> tuple[go.Figure, int
     xe = _slip_x(inp, m, 600)
     arc = E.sphere_z(xe, 0.0, inp.xc, inp.zc, inp.R)
     with np.errstate(invalid="ignore"):
-        keep = E.ground_z(xe, inp.H, inp.beta) > arc                          # ground above the arc
+        keep = E.ground(inp, xe) > arc                                        # ground above the arc
     xe, arc = xe[keep], arc[keep]
-    gz = E.ground_z(xe, inp.H, inp.beta)
+    gz = E.ground(inp, xe)
     fig = go.Figure(go.Scatter(x=np.r_[xe, xe[::-1]], y=np.r_[gz, arc[::-1]], fill="toself", fillcolor=ROCK,
                                line=dict(color=GROUND, width=1), mode="lines", name="sliding mass", hoverinfo="skip"))
-    fig.add_trace(go.Scatter(x=xs, y=E.ground_z(xs, inp.H, inp.beta), mode="lines", line=dict(color=GROUND, width=2),
+    fig.add_trace(go.Scatter(x=xs, y=E.ground(inp, xs), mode="lines", line=dict(color=GROUND, width=2),
                              name="ground", hoverinfo="skip", showlegend=False))
     if inp.wet:
-        fig.add_trace(go.Scatter(x=xs, y=np.minimum(E.water_z(xs, inp.Hw, inp.beta_w), E.ground_z(xs, inp.H, inp.beta)),
-                                 mode="lines", line=dict(color=WATER, width=1.5, dash="dash"), name="water table",
-                                 hoverinfo="skip"))
+        fig.add_trace(go.Scatter(x=xs, y=np.minimum(E.water(inp, xs), E.ground(inp, xs)),
+                                 mode="lines", line=dict(color=WATER, width=1.5, dash="dash"),
+                                 name="piezometric line" if inp.piezo is not None else "water table", hoverinfo="skip"))
     fig.add_trace(go.Scatter(x=xe, y=arc, mode="lines", line=dict(color=SLIP, width=2), name="slip surface",
                              hoverinfo="skip", showlegend=False))
     fig.add_trace(go.Scatter(x=[inp.xc], y=[inp.zc], mode="markers+text", marker=dict(symbol="circle-x", size=12, color=SLIP),
@@ -519,6 +543,15 @@ def mass_fbd2d(inp: E.Inputs, r2: E.LemResult, mf: dict) -> tuple[go.Figure, int
         fig.add_trace(go.Scatter(x=x, y=y, mode="lines+markers", text=text, hoverinfo="text", name=_mass_legend(mf, k, "kN/m"),
                                  line=dict(color=FORCE[k], width=1.6),
                                  marker=dict(symbol="arrow", size=size_, angleref="previous", color=FORCE[k])))
+    ck = mf.get("crack")
+    if ck and ck["P"] > 0:                     # water in the tension crack: one force on its face
+        rw, vec = ck["rows"][0], ck["P"] * sc
+        fig.add_trace(go.Scatter(x=[ck["x"] - vec, ck["x"]], y=[rw["zP"], rw["zP"]], mode="lines+markers",
+                                 text=[f"P = {_big(ck['P'])} kN/m"] * 2, hoverinfo="text",
+                                 name=f"{MASS_NAMES['P']} (Σ = {_big(ck['P'] * mf['mult'])} kN/m)",
+                                 line=dict(color=FORCE["P"], width=2.4),
+                                 marker=dict(symbol="arrow", size=[0, 12], angleref="previous", color=FORCE["P"])))
+        pts.append(np.array([[ck["x"] - vec, rw["zP"]], [ck["x"], rw["zP"]]]))
     p = np.vstack(pts)
     lo, hi = p.min(axis=0), p.max(axis=0)
     pad = 0.06 * (hi - lo)
@@ -565,9 +598,9 @@ def force_polygon(mf: dict) -> go.Figure:
     unit = "kN" if mf["dim"] == 3 else "kN/m"
     fig = go.Figure()
     p = np.zeros(2)
-    for k in ("W", "U", "N", "S"):
-        t = mf["totals"][k]
-        if not math.hypot(t["x"], t["z"]) > 1e-12 * mf["weight"]:
+    for k in ("W", "U", "N", "S", "E", "P"):
+        t = mf["totals"].get(k)
+        if t is None or not math.hypot(t["x"], t["z"]) > 1e-12 * mf["weight"]:
             continue
         q = p + np.array([t["x"], t["z"]])
         lab = f"Σ{'N′' if k == 'N' else k}"
@@ -598,8 +631,11 @@ def mass_rows(mf: dict) -> list[dict]:
     rows = [("W, weight", t["W"], _big(M["W"]), "vertical, down, at each element's centre of gravity; drives the rotation"),
             ("N′ = σ_n A, effective normal force", t["N"], "0", "normal to the slip surface, through the sphere centre"),
             ("U = u A, pore-water force", t["U"], "0", "normal to the slip surface, through the sphere centre"),
-            ("S = τ_s A / F, mobilised shear", t["S"], _big(M["S"]), f"along the slip surface, against the rotation (F = {mf['F']:.6f})"),
-            ("Sum of all forces", t["net"], f"{M['net']:.3e}", "resultant on the mass")]
+            ("S = τ_s A / F, mobilised shear", t["S"], _big(M["S"]), f"along the slip surface, against the rotation (F = {mf['F']:.6f})")]
+    if "E" in t:
+        rows += [("E = k_h W, seismic force", t["E"], _big(M["E"]), "horizontal, towards the pit, at each element's centre of gravity"),
+                 ("P, water in the tension crack", t["P"], _big(M["P"]), "horizontal, towards the pit, on the crack face at h_w/3")]
+    rows.append(("Sum of all forces", t["net"], f"{M['net']:.3e}", "resultant on the mass"))
     return [{"Force": n, f"Horizontal x ({uF})": f(v["x"]), f"Vertical z ({uF})": f(v["z"]),
              f"Magnitude ({uF})": f(math.hypot(v["x"], v["z"])), f"Moment about the axis ({uM})": mom, "Direction": d}
             for n, v, mom, d in rows]
@@ -620,9 +656,10 @@ def mass_balance(mf: dict) -> list[str]:
              f"{'Hungr' if mf['dim'] == 3 else 'Bishop'}'s {'method' if mf['dim'] == 3 else 'simplified method'} does not "
              "enforce horizontal force equilibrium (thesis §5.5, §5.9), so this part stays unbalanced. The forces between "
              f"{el}s act inside the mass and cancel in these sums; the method takes their vertical (shear) parts as zero."]
-    moment = (f"**Moments about the rotation axis** (through x_c, z_c, parallel to y): the weight drives {_big(M['W'])} {uM} "
-              f"and the mobilised shear resists {_big(-M['S'])} {uM}; N′ and U act through the axis. Net {M['net']:.3e} {uM} "
-              f"({abs(M['net']) / M['W']:.2e} of the driving moment). ")
+    moment = (f"**Moments about the rotation axis** (through x_c, z_c, parallel to y): the weight drives {_big(M['W'])} {uM}"
+              + (f", the seismic forces {_big(M['E'])} {uM} and the crack water {_big(M['P'])} {uM}" if "E" in M else "")
+              + f"; the mobilised shear resists {_big(-M['S'])} {uM}; N′ and U act through the axis. Net {M['net']:.3e} {uM} "
+              f"({abs(M['net']) / M['W']:.2e} of the weight's moment). ")
     if mf["dim"] == 2 or mf["form"] == "FM":
         ok = abs(M["net"]) <= 1e-8 * M["W"]
         moment += (f"{'Bishop' + chr(39) + 's method (eq. 4.16)' if mf['dim'] == 2 else 'The moment form F_M (eq. 4.15)'} "
@@ -630,8 +667,8 @@ def mass_balance(mf: dict) -> list[str]:
     else:
         moment += (f"F_H balances ΣS = ΣWκ instead (eq. 4.14; relative residual {abs(mf['method']['residual']):.2e}); the "
                    "moment form F_M balances this moment (eq. 4.15, thesis §5.5).")
-    return lines + [moment, "Not in the model: external loads (surcharge, water in a tension crack or against the face) "
-                            "and seismic forces."]
+    return lines + [moment, "Not in the model: surcharge and water pressure against the face. Seismic load and water in a "
+                            "tension crack are included when set (inputs)."]
 
 
 # ---------------------------------------------------------------------------------------------------------------
@@ -717,7 +754,7 @@ def search_figure(inp: E.Inputs, res: dict) -> go.Figure:
         x = np.linspace(c["xc"] - c["R"], c["xc"] + c["R"], 1601)
         z = E.sphere_z(x, 0.0, c["xc"], c["zc"], c["R"])
         with np.errstate(invalid="ignore"):
-            ok = np.isfinite(z) & (z < E.ground_z(x, inp.H, inp.beta)) & ((x <= 0) | inp.base_circle)
+            ok = np.isfinite(z) & (z < E.ground(inp, x)) & ((x <= 0) | inp.base_circle)
         xs += list(x[ok]) + [c["xc"]]
         zs += list(z[ok]) + [c["zc"]]
         arcs.append(go.Scatter(x=x, y=np.where(ok, z, np.nan), mode="lines", name=name, hoverinfo="skip",
@@ -726,7 +763,7 @@ def search_figure(inp: E.Inputs, res: dict) -> go.Figure:
     pad = 0.08 * max(xb - xa, zb - za, inp.H)
     gx = np.r_[xa - 3 * (xb - xa) - pad, np.linspace(min(xa - pad, crest - 1e-9), max(xb + pad, 1e-9), 600),
                xb + 3 * (xb - xa) + pad]
-    gz = E.ground_z(gx, inp.H, inp.beta)
+    gz = E.ground(inp, gx)
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=np.r_[gx, gx[::-1]], y=np.r_[gz, np.full(len(gx), za - 3 * (zb - za) - pad)],
                              fill="toself", fillcolor=ROCK, line=dict(width=0), hoverinfo="skip", name="rock mass",

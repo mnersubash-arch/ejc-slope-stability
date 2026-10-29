@@ -6,11 +6,14 @@ initialised from that dict when it is first drawn on a page and copied back to i
 from __future__ import annotations
 
 import math
+import re
 from dataclasses import asdict
+from typing import Optional
 
 import pandas as pd
 import streamlit as st
 
+import casefile as CF
 import engine as E
 import presets as PR
 
@@ -41,10 +44,27 @@ NUM = {
     "dx_value": ("Δx, column length along x, at most", "m", 0.01, 4000.0, 0.01, "%.4f"),
     "dy_value": ("Δy, column width across y, at most", "m", 0.01, 4000.0, 0.01, "%.4f"),
     "n2": ("N_2D, 2D slices", "-", 2, 10000, 1, None),
+    # additions (all off by default)
+    "bench_n": ("n, benches", "-", 1, 50, 1, None),
+    "bench_h": ("h_b, bench height", "m", 0.5, 500.0, 0.1, "%.2f"),
+    "bench_beta": ("β_b, bench face angle", "deg", 10.0, 89.0, 0.1, "%.2f"),
+    "berm_w": ("w_b, berm width", "m", 0.0, 500.0, 0.1, "%.2f"),
+    "crest_slope": ("α, ground behind the crest edge", "deg", 0.0, 60.0, 0.1, "%.2f"),
+    "plan_r": ("R_p, radius of the toe line in plan", "m", 1.0, 100000.0, 1.0, "%.2f"),
+    "elong": ("λ, end caps: half-width / R (1 = sphere)", "-", 0.1, 20.0, 0.01, "%.3f"),
+    "mid_length": ("L, cylindrical middle part, length", "m", 0.0, 100000.0, 1.0, "%.2f"),
+    "d_zone": ("T, disturbed zone, distance from the face", "m", 0.0, 10000.0, 0.5, "%.2f"),
+    "crack_depth": ("z_t, tension crack depth below the ground", "m", 0.01, 5000.0, 0.5, "%.2f"),
+    "crack_water": ("f_w, share of the crack filled with water", "-", 0.0, 1.0, 0.01, "%.2f"),
+    "kh": ("k_h, horizontal seismic coefficient", "-", 0.0, 0.99, 0.005, "%.3f"),
 }
+# inputs with no default: the box starts empty and the run waits until a value is entered (never invented)
+OPTIONAL = ("plan_r", "d_zone", "crack_depth")
 STRENGTH = {"EJC": "EJC (Extended Jiang Criterion)", "GHB": "GHB (conventional generalised Hoek-Brown)",
             "MC": "Mohr-Coulomb (constant c′, φ′)"}
-WATER = {"Dry": "Dry (u = 0)", "Wet": "Water table", "ru": "r_u (u = r_u γ h)"}
+WATER = {"Dry": "Dry (u = 0)", "Wet": "Water table", "Piezo": "Piezometric line", "ru": "r_u (u = r_u γ h)"}
+FACE = {"planar": "Planar", "benches": "Benches", "profile": "Points"}
+WALL = {"straight": "Straight", "concave": "Concave", "convex": "Convex"}
 CLOSURE = {"moscarda": "Moscarda: σ2 = ν(σ1 + σ3) (adopted)",
            "original": "Original: σ2 = σ3/ν − σ1 (admissibility check only)",
            "s2s3": "σ2 = σ3 (check: must reproduce GHB)"}
@@ -68,15 +88,86 @@ def to_state(inp: E.Inputs) -> dict:
     d["ru_value"] = 0.0 if inp.ru is None else float(inp.ru)
     d["cols"] = "square" if inp.n3y is None else "counts"
     d["n3y_value"] = inp.n3 if inp.n3y is None else int(inp.n3y)
+    # additions: the slope face, wall in plan, D zone, piezometric line, tension crack (off: empty or the planar values)
+    tb, tw = math.tan(math.radians(inp.beta)), math.tan(math.radians(inp.beta_w))
+    d["face"] = "planar" if inp.profile is None else "profile"
+    d["profile_text"] = points_text(((0.0, 0.0), (-inp.H / tb, inp.H)) if inp.profile is None else inp.profile)
+    d["bench_n"], d["bench_h"], d["bench_beta"], d["berm_w"] = 1, inp.H, inp.beta, 0.0
+    d["wall"] = "straight" if inp.plan_radius is None else ("concave" if inp.plan_radius > 0 else "convex")
+    d["plan_r"] = None if inp.plan_radius is None else abs(float(inp.plan_radius))
+    d["dz_on"] = inp.d_zone is not None
+    if inp.piezo is not None and inp.wet:
+        d["water"] = "Piezo"
+    d["piezo_text"] = points_text(((0.0, 0.0), (-inp.Hw / tw, inp.Hw)) if inp.piezo is None else inp.piezo)
+    d["crack_on"] = inp.crack_depth is not None
+    d["profile"] = d["piezo"] = None       # the points live in the text boxes
     sz = sizes_for(d, inp.n3, d["n3y_value"])
     d["dx_value"], d["dy_value"] = sz if sz else (inp.R / inp.n3, inp.R / inp.n3)
     return d
 
 
+def parse_points(text: str) -> list[tuple[float, float]]:
+    """Points [(x, z), ...] from text: one "x, z" pair per line (or separated by ";"). Raises ValueError naming the
+    line. Same as parsePoints in webapp/index.html."""
+    pts = []
+    lines = [ln.strip() for ln in re.split(r"[\n;]+", str(text or "")) if ln.strip()]
+    for q, ln in enumerate(lines):
+        v = [t for t in re.split(r"[\s,]+", ln) if t]
+        try:
+            x, z = (float(t) for t in v) if len(v) == 2 else (math.nan, math.nan)
+        except ValueError:
+            x = z = math.nan
+        if not (math.isfinite(x) and math.isfinite(z)):
+            raise ValueError(f'line {q + 1} ("{ln}") is not two numbers x, z')
+        pts.append((x, z))
+    return pts
+
+
+def points_text(pts) -> str:
+    return "\n".join(f"{float(x):.10g}, {float(z):.10g}" for x, z in pts)
+
+
+def bench_points(d: dict) -> list[tuple[float, float]]:
+    """Bench face from the toe: n benches of height h_b at beta_b, separated by berms w_b wide."""
+    n, h, w = int(d["bench_n"]), float(d["bench_h"]), float(d["berm_w"])
+    run = h / math.tan(math.radians(float(d["bench_beta"])))
+    pts, x, z = [(0.0, 0.0)], 0.0, 0.0
+    for k in range(n):
+        x -= run
+        z += h
+        pts.append((x, z))
+        if k < n - 1 and w > 0:
+            x -= w
+            pts.append((x, z))
+    return pts
+
+
+def face_fields(d: dict) -> tuple[float, float, Optional[tuple]]:
+    """(H, beta, profile) of the slope-face option: the planar H and beta, or the points (benches or typed) with
+    H = the crest edge's z and beta the overall angle from the toe. Same as faceFields in webapp/index.html."""
+    try:
+        pts = (bench_points(d) if d.get("face") == "benches" else
+               parse_points(d.get("profile_text", "")) if d.get("face") == "profile" else None)
+    except ValueError:
+        pts = None
+    if not pts or len(pts) < 2:
+        return float(d["H"]), float(d["beta"]), None
+    xe, he = pts[-1]
+    beta = math.degrees(math.atan(he / -xe)) if xe < 0 and he > 0 else float(d["beta"])
+    return float(he), beta, tuple((float(x), float(z)) for x, z in pts)
+
+
+def _opt(d: dict, name: str):
+    v = d.get(name)
+    return None if v is None or not math.isfinite(float(v)) else float(v)
+
+
 # 3D columns: N x N (the brief's grid), N x N_y, or plan sizes in metres converted to counts on the current circle
 def _geom(d: dict) -> E.Inputs:
-    return E.Inputs(H=float(d["H"]), beta=float(d["beta"]), xc=float(d["xc"]), zc=float(d["zc"]), R=float(d["R"]),
-                    base_circle=bool(d["base_circle"]))
+    H, beta, profile = face_fields(d)
+    return E.Inputs(H=H, beta=beta, xc=float(d["xc"]), zc=float(d["zc"]), R=float(d["R"]),
+                    base_circle=bool(d["base_circle"]), crest_slope=float(d.get("crest_slope", 0.0)),
+                    elong=float(d.get("elong", 1.0)), mid_length=float(d.get("mid_length", 0.0)), profile=profile)
 
 
 def _ceil4(v: float) -> float:
@@ -104,7 +195,7 @@ def sizes_for(d: dict, n: int, ny: int):
     span = span_of(d)
     if span is None:
         return None
-    return _clamp("dx_value", _ceil4(span / n)), _clamp("dy_value", _ceil4(float(d["R"]) / ny))
+    return _clamp("dx_value", _ceil4(span / n)), _clamp("dy_value", _ceil4(E.y_extent(_geom(d)) / ny))
 
 
 def col_counts(d: dict):
@@ -134,7 +225,7 @@ def mesh_problem(d: dict):
     n, ny = col_counts(d)
     out = []
     for sym, v, cnt, csym, axis, L in (("Δx", d["dx_value"], n, "N", "along x", span),
-                                        ("Δy", d["dy_value"], ny, "N_y", "across y", float(d["R"]))):
+                                        ("Δy", d["dy_value"], ny, "N_y", "across y", E.y_extent(_geom(d)))):
         if not 2 <= cnt <= 320:
             out.append(f"{sym} = {float(v):g} m gives {csym} = {cnt} column{'' if cnt == 1 else 's'} {axis} on this "
                        f"circle; {csym} must be from 2 to 320, so use {sym} from {_ceil4(L / 320):g} to "
@@ -148,9 +239,40 @@ def cols_text(d: dict) -> str:
         return ""
     n, ny = col_grid(d)
     ysym = "N" if d.get("cols", "square") == "square" else "N_y"
+    Y, R = E.y_extent(_geom(d)), float(d["R"])
+    dy = (f"Δy = R/{ysym} = {R / ny:.3f} m" if Y == R else
+          f"Δy = Y/{ysym} = {Y / ny:.3f} m (Y = {Y:.2f} m, the half-width across y)")
     return ((f"On this circle: N = {n} along x and N_y = {ny} across y. " if d.get("cols") == "size" else "")
-            + f"Columns {n} × {ny}: Δx = (x0 − x1)/N = {span / n:.3f} m by Δy = R/{ysym} = {float(d['R']) / ny:.3f} m. "
+            + f"Columns {n} × {ny}: Δx = (x0 − x1)/N = {span / n:.3f} m by {dy}. "
             "The height h = z_t − z_b of each column is set by the ground and the slip surface.")
+
+
+def input_problems(d: dict) -> list[str]:
+    """What stops a run: unparsable points, a required value not entered, the engine's checks of the additions, and
+    column sizes whose counts fall outside 2 to 320. Empty when the inputs can be solved."""
+    out = []
+    if d.get("face") == "profile":
+        try:
+            parse_points(d.get("profile_text", ""))
+        except ValueError as exc:
+            out.append(f"Face points: {exc}.")
+    if d.get("water") == "Piezo":
+        try:
+            parse_points(d.get("piezo_text", ""))
+        except ValueError as exc:
+            out.append(f"Piezometric line: {exc}.")
+    need = [("plan_r", d.get("wall", "straight") != "straight"), ("d_zone", d.get("dz_on") and d["strength"] != "MC"),
+            ("crack_depth", d.get("crack_on"))]
+    out += [f"Enter {NUM[k][0]} ({NUM[k][1]}): it has no default." for k, on in need if on and _opt(d, k) is None]
+    if not out:
+        try:
+            E.check_additions(to_inputs(d))
+        except ValueError as exc:
+            out.append(f"{str(exc)[:1].upper()}{str(exc)[1:]}.")
+    problem = mesh_problem(d)
+    if problem:
+        out.append(problem)
+    return out
 
 
 def to_inputs(d: dict) -> E.Inputs:
@@ -162,22 +284,38 @@ def to_inputs(d: dict) -> E.Inputs:
         model = {"moscarda": "ejc_moscarda", "original": "ejc_original", "s2s3": "ejc_sigma2_eq_sigma3"}[d["closure"]]
     native = d["iteration"] == "native_v15"
     n3, ny = col_counts(d)                 # N_y = N is the N x N grid
-    return E.Inputs(H=float(d["H"]), beta=float(d["beta"]), xc=float(d["xc"]), zc=float(d["zc"]), R=float(d["R"]),
+    H, beta, profile = face_fields(d)
+    wall = {"concave": 1.0, "convex": -1.0}.get(d.get("wall", "straight"), 0.0)
+    piezo = None
+    if d["water"] == "Piezo":
+        try:
+            piezo = tuple(parse_points(d.get("piezo_text", "")))
+        except ValueError:
+            piezo = None
+    plan_r, d_zone, crack = _opt(d, "plan_r"), _opt(d, "d_zone"), _opt(d, "crack_depth")
+    return E.Inputs(H=H, beta=beta, xc=float(d["xc"]), zc=float(d["zc"]), R=float(d["R"]),
                     gamma=float(d["gamma"]), sigma_ci=float(d["sigma_ci"]), mi=float(d["mi"]), gsi=float(d["gsi"]),
                     D=float(d["D"]), a_override=float(d["a_value"]) if d["a_on"] else None, nu=float(d["nu"]),
-                    model=model, wet=d["water"] == "Wet", Hw=float(d["Hw"]), beta_w=float(d["beta_w"]),
+                    model=model, wet=d["water"] in ("Wet", "Piezo"), Hw=float(d["Hw"]), beta_w=float(d["beta_w"]),
                     n3=n3, n3y=None if ny is None or ny == n3 else ny, n2=int(d["n2"]),
                     form="FH" if native else d["form"],
                     tension="none" if native else d["tension"], iteration=d["iteration"], c_mc=float(d["c_mc"]),
                     phi_mc=float(d["phi_mc"]), ru=float(d["ru_value"]) if d["water"] == "ru" else None,
-                    base_circle=bool(d["base_circle"]))
+                    base_circle=bool(d["base_circle"]), profile=profile, crest_slope=float(d.get("crest_slope", 0.0)),
+                    plan_radius=wall * plan_r if wall and plan_r is not None else None,
+                    elong=float(d.get("elong", 1.0)), mid_length=float(d.get("mid_length", 0.0)),
+                    d_zone=d_zone if d.get("dz_on") and d["strength"] != "MC" else None, piezo=piezo,
+                    crack_depth=crack if d.get("crack_on") else None,
+                    crack_water=float(d.get("crack_water", 0.0)) if d.get("crack_on") else 0.0, kh=float(d.get("kh", 0.0)))
 
 
 WIDGET_NAMES = list(NUM) + ["a_on", "strength", "closure", "water", "form", "tension", "iteration", "base_circle",
-                             "cols"]
+                             "cols", "face", "wall", "dz_on", "crack_on", "profile_text", "piezo_text"]
 
 
 def _wkeys(name: str) -> list[str]:
+    if name in OPTIONAL:
+        return [f"nb_{name}"]
     return [f"nb_{name}", f"sl_{name}"] if name in NUM else [f"w_{name}"]
 
 
@@ -202,7 +340,18 @@ def init_state():
         st.session_state.inp = to_state(PR.BY_KEY[PR.DEFAULT_KEY].inputs)
         st.session_state.preset = PR.DEFAULT_KEY
         st.session_state.preset_note = ""
+        code = st.query_params.get("case")
+        if code:                           # a case in the page link (Put this case in the page link)
+            try:
+                open_case(CF.decode_link(code))
+                st.session_state.case_msg = ("success", "Opened the case in this page's link.")
+            except ValueError as exc:
+                st.session_state.case_msg = ("error", f"The case in this page's link was not opened: {exc}.")
     d = st.session_state.inp
+    if "face" not in d:                    # a session that started before the additions
+        base = to_state(E.Inputs())
+        for k, v in base.items():
+            d.setdefault(k, v)
     if "cols" not in d:                    # a session that started before the column option was added
         n3 = int(d["n3"])
         sz = sizes_for(d, n3, n3)
@@ -213,6 +362,7 @@ def init_state():
 def apply_preset(key: str):
     p = PR.BY_KEY[key]
     st.session_state.preset = key
+    st.session_state.case_name = ""
     if p.inputs is None:
         st.session_state.preset_note = "empty"
         return
@@ -229,6 +379,124 @@ def _on_preset():
 
 def _on_reset():
     apply_preset(st.session_state.preset)
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# cases: save, open (a file or a case code, from this app or the web app) and the page link (casefile)
+# ---------------------------------------------------------------------------------------------------------------
+CHOICE_KEYS = {"strength": STRENGTH, "closure": CLOSURE, "form": FORM, "tension": TENSION, "iteration": ITER,
+               "cols": COLS, "face": FACE, "wall": WALL, "water": WATER}
+
+
+def _state_value(k: str, base, v):
+    """v for the state key k if it has the right type (else the base value): choices from their lists, free text
+    for the points, numbers for numbers."""
+    num = isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
+    if k in CHOICE_KEYS:
+        return v if isinstance(v, str) and v in CHOICE_KEYS[k] else base
+    if k in ("profile_text", "piezo_text"):
+        return v if isinstance(v, str) and len(v) <= 20000 else base
+    if k in OPTIONAL:
+        return None if v is None else float(v) if num else base
+    if isinstance(base, bool):
+        return v if isinstance(v, bool) else base
+    if isinstance(base, int):
+        return int(v) if num and float(v).is_integer() else base
+    if isinstance(base, float):
+        return float(v) if num else base
+    return base                            # engine fields such as model: set from the inputs
+
+
+def open_case(c: dict):
+    """Open a case: its engine inputs, with this app's page state (benches, sizes in metres...) where that gives the
+    same inputs. Raises ValueError if the case cannot be read."""
+    inp = CF.inputs_from_case(c)
+    d = to_state(inp)
+    ss = c.get("streamlit_state")
+    if isinstance(ss, dict):
+        cand = dict(d)
+        for k, v in ss.items():
+            if k in cand:
+                cand[k] = _state_value(k, cand[k], v)
+        try:
+            if to_inputs(cand) == inp:
+                d = cand
+        except (ValueError, KeyError, TypeError, ZeroDivisionError):
+            pass
+    st.session_state.inp = d
+    if c.get("preset") in PR.BY_KEY:
+        st.session_state.preset = c["preset"]
+    st.session_state.preset_note = ""
+    st.session_state.case_name = str(c.get("name") or "")[:80]
+    _write_widgets()
+
+
+def _open_file():
+    key = f"case_file_{st.session_state.get('case_n', 0)}"
+    f = st.session_state.get(key)
+    if f is None:
+        return
+    try:
+        data = f.getvalue()
+        if len(data) > 2_000_000:
+            raise ValueError("the file is over 2 MB, too large for a case")
+        open_case(CF.read_case(data))
+        st.session_state.case_msg = ("success", f"Opened {f.name}.")
+    except ValueError as exc:
+        st.session_state.case_msg = ("error", f"Not opened: {exc}.")
+    st.session_state.case_n = st.session_state.get("case_n", 0) + 1     # an empty uploader next time
+
+
+def _open_code():
+    text = str(st.session_state.get("case_code", "")).strip()
+    if not text:
+        st.session_state.case_msg = ("warning", "Paste a case code into the box first.")
+        return
+    try:
+        c = CF.read_case(text)
+        open_case(c)
+        st.session_state.case_msg = ("success", f"Opened {'“' + c['name'] + '”' if c.get('name') else 'the case'}.")
+    except ValueError as exc:
+        st.session_state.case_msg = ("error", f"Not opened: {exc}.")
+
+
+def _show_code(code: str):
+    st.session_state.case_code = code
+    st.session_state.case_msg = ("info", "The case code is in the box: copy it.")
+
+
+def _link(code: str):
+    st.query_params["case"] = code
+    st.session_state.case_msg = ("info", "This page's address now holds the case: copy it from the address bar to share "
+                                         "it with people who can open this app.")
+
+
+def case_box(inp: E.Inputs):
+    """Sidebar: save the case, open a case file or code, put the case in the page link."""
+    A = st.session_state.get("analysis")
+    if (A is None or A.inputs != inp) and not input_problems(st.session_state.inp) \
+            and inp.n3 * E.columns_across(inp, inp.n3) <= LIVE_MAX_N * LIVE_MAX_N:
+        A = _safe_run(inp)[0]              # live mesh: the run the page makes next (cached)
+    res = CF.results_of(A) if A is not None and A.inputs == inp else None
+    c = CF.make_case(inp, name=st.session_state.get("case_name", ""), preset=st.session_state.preset,
+                     ui_state=st.session_state.inp, results=res)
+    with st.sidebar.expander("Save, open or share a case", expanded=False):
+        st.download_button("Save case (.json)", CF.case_json(c), CF.file_name(c), "application/json", key="case_save",
+                           width="stretch")
+        st.file_uploader("Open a case file (saved by this app or the web app)", type=["json"],
+                         key=f"case_file_{st.session_state.get('case_n', 0)}", on_change=_open_file)
+        st.text_area("Case code: copy it to keep or send this case; paste one and press Open code.", key="case_code",
+                     height=90)
+        c1, c2 = st.columns(2)
+        c1.button("Show this case's code", key="case_code_make", on_click=_show_code, args=(CF.case_json(c),))
+        c2.button("Open code", key="case_code_open", on_click=_open_code)
+        st.button("Put this case in the page link", key="case_link", on_click=_link, args=(CF.encode_link(c),),
+                  width="stretch")
+        st.caption("A case holds the inputs (and the FoS when the results are for them). The web app opens the same "
+                   "files and codes. The report is on the Calculator page.")
+    msg = st.session_state.pop("case_msg", None)
+    if msg:
+        getattr(st.sidebar, msg[0])(msg[1])
 
 
 # ---------------------------------------------------------------------------------------------------------------
@@ -262,6 +530,33 @@ def _num(container, name: str, disabled: bool = False, label: str = ""):
     container.number_input(f"{label}{unit_txt} · {rng}", **kw)
     container.slider(f"{label} slider", min_value=lo, max_value=hi, step=step, key=sk, on_change=from_sl,
                      disabled=disabled, label_visibility="collapsed")
+
+
+def _num_opt(container, name: str, disabled: bool = False):
+    """A number with no default: an empty box until a value is entered (no slider)."""
+    label, unit, lo, hi, step, fmt = NUM[name]
+    k = f"nb_{name}"
+    if k not in st.session_state:
+        st.session_state[k] = st.session_state.inp[name]
+
+    def cb():
+        st.session_state.inp[name] = st.session_state[k]
+
+    unit_txt = "" if unit == "-" else f" ({unit})"
+    container.number_input(f"{label}{unit_txt} · {lo:g} to {hi:g}", min_value=lo, max_value=hi, step=step, format=fmt,
+                           key=k, on_change=cb, disabled=disabled, placeholder="enter a value (no default)",
+                           help=f"Valid range {lo:g} to {hi:g}{unit_txt}. There is no default: enter your value.")
+
+
+def _text(container, name: str, label: str, height: int = 120):
+    k = f"w_{name}"
+    if k not in st.session_state:
+        st.session_state[k] = st.session_state.inp[name]
+
+    def cb():
+        st.session_state.inp[name] = st.session_state[k]
+
+    container.text_area(label, key=k, on_change=cb, height=height)
 
 
 def _choice(container, name: str, label: str, options: dict, disabled=False, horizontal=False, on_change=None):
@@ -309,6 +604,39 @@ def _on_cols():
     _write_widgets()
 
 
+def _on_face():
+    """Switch the slope-face option. To points: the current face as points. To planar: keep H and beta unless the
+    face was changed to a valid one (one bench, or points other than the planar face's), whose height and overall
+    angle are then used. Same as setFace in webapp/index.html."""
+    d = st.session_state.inp
+    new = st.session_state["w_face"]
+    if new == d["face"]:
+        return
+    H, beta, prof = face_fields(d)
+    if new == "profile":
+        tb = math.tan(math.radians(beta))
+        d["profile_text"] = points_text(prof or ((0.0, 0.0), (-H / tb, H)))
+    elif new == "planar":
+        keep = None
+        if d["face"] == "benches" and int(d["bench_n"]) == 1:
+            keep = (float(d["bench_h"]), float(d["bench_beta"]))
+        elif prof:
+            tb = math.tan(math.radians(float(d["beta"])))
+            ok = not (d["face"] == "profile" and str(d["profile_text"]).strip()
+                      == points_text(((0.0, 0.0), (-float(d["H"]) / tb, float(d["H"])))))
+            if ok:
+                try:
+                    E.check_additions(E.Inputs(profile=prof))
+                except ValueError:
+                    ok = False
+            if ok:
+                keep = (H, float(f"{beta:.12g}"))
+        if keep:
+            d["H"], d["beta"] = keep
+    d["face"] = new
+    _write_widgets()
+
+
 def _on_iteration():
     if st.session_state.inp["iteration"] == "native_v15":
         st.session_state.inp["form"] = "FH"
@@ -330,9 +658,44 @@ def sidebar() -> E.Inputs:
     sb.selectbox("Preset", list(labels), format_func=labels.get, key="w_preset", on_change=_on_preset)
     sb.button("Reset inputs to preset", on_click=_on_reset, width="stretch")
     d = st.session_state.inp
-    with sb.expander("Geometry", expanded=False):
-        for n in ("H", "beta", "xc", "zc", "R"):
+    case_box(to_inputs(d))
+    with sb.expander("Slope", expanded=False):
+        if "w_face" not in st.session_state:
+            st.session_state["w_face"] = d["face"]
+        st.radio("Slope face", list(FACE), format_func=FACE.get, key="w_face", on_change=_on_face, horizontal=True)
+        if d["face"] == "planar":
+            _num(st, "H")
+            _num(st, "beta")
+        elif d["face"] == "benches":
+            for n in ("bench_n", "bench_h", "bench_beta", "berm_w"):
+                _num(st, n)
+        else:
+            _text(st, "profile_text", "Face points x, z (m), one per line, from the toe (0, 0) up to the crest edge")
+        if d["face"] != "planar":
+            H, beta, prof = face_fields(d)
+            if prof:
+                st.caption(f"Crest edge at x = {prof[-1][0]:.2f} m, H = {H:.2f} m; overall angle {beta:.2f}° from the "
+                           f"toe ({len(prof)} points).")
+        _num(st, "crest_slope")
+        _choice(st, "wall", "Wall in plan", WALL, horizontal=True)
+        if d["wall"] != "straight":
+            _num_opt(st, "plan_r")
+        st.caption(("Concave wall: the toe line is a circle of radius R_p around the pit, which lies inside it; the "
+                    "section is swept around its axis. " if d["wall"] == "concave" else
+                    "Convex wall (a nose): the toe line is a circle of radius R_p around an axis behind the slope. "
+                    if d["wall"] == "convex" else "")
+                   + "Ground behind the crest edge: flat (α = 0) or rising at α. The 2D section is the central one, "
+                   "y = 0.")
+    with sb.expander("Slip surface", expanded=False):
+        for n in ("xc", "zc", "R", "elong", "mid_length"):
             _num(st, n)
+        try:
+            half = E.y_extent(_geom(d))
+            st.caption(f"Half-width across y: {'L/2 + ' if float(d['mid_length']) > 0 else ''}λR = {half:.2f} m"
+                       + (" (the sphere)." if float(d["elong"]) == 1 and float(d["mid_length"]) == 0 else
+                          ". The central section y = 0 stays the circle (x_c, z_c, R), as in 2D."))
+        except ValueError:
+            pass
         _check(st, "base_circle", "Base circle: grid from exit to entry, floor columns allowed",
                "Off by default (thesis grid). Needed for circles that cross the toe level behind the toe (x_c ≤ 0), "
                "exit on the floor ahead of the toe, or stay above the toe level (face circles, R ≤ z_c).")
@@ -343,6 +706,11 @@ def sidebar() -> E.Inputs:
             _num(st, n, disabled=hb_off)
         _check(st, "a_on", "Override a (otherwise a from GSI, eq. 2.5)", disabled=hb_off)
         _num(st, "a_value", disabled=hb_off or not d["a_on"])
+        _check(st, "dz_on", "Apply D only within T of the face (D = 0 beyond)", disabled=hb_off,
+               help="Hoek et al. (2002): D is for the blast-damaged zone near the face. Bases closer than T to the face "
+                    "use D; the rest use D = 0. T has no default: enter it from your site.")
+        if d["dz_on"] and not hb_off:
+            _num_opt(st, "d_zone")
         mb, s, a = to_inputs(d).hb
         st.caption(f"m_b = {mb:.6f}, s = {s:.7f}, a used = {a:.6f}" + (" (not used by Mohr-Coulomb)" if hb_off else ""))
     with sb.expander("Strength model", expanded=True):
@@ -351,11 +719,27 @@ def sidebar() -> E.Inputs:
         _num(st, "nu", disabled=d["strength"] != "EJC")
         _num(st, "c_mc", disabled=not hb_off)
         _num(st, "phi_mc", disabled=not hb_off)
-    with sb.expander("Water", expanded=False):
-        _choice(st, "water", "Condition", WATER, horizontal=True)
+    with sb.expander("Water, tension crack and seismic load", expanded=False):
+        _choice(st, "water", "Pore pressure", WATER, horizontal=True)
         _num(st, "Hw", disabled=d["water"] != "Wet")
         _num(st, "beta_w", disabled=d["water"] != "Wet")
+        if d["water"] == "Piezo":
+            _text(st, "piezo_text", "Piezometric line x, z (m), one point per line, x decreasing (into the slope)", 100)
         _num(st, "ru_value", disabled=d["water"] != "ru")
+        st.caption({"Wet": "u = γ_w max(0, z_w − z_b), γ_w = 9.81 kN/m³; z_w = min(H_w, −x tan β_w).",
+                    "Piezo": "u = γ_w max(0, z_w − z_b) with z_w on the line through the points (constant beyond its "
+                             "ends).",
+                    "ru": "u = r_u γ h for every column and slice (h = column height)."}.get(d["water"], "u = 0."))
+        _check(st, "crack_on", "Tension crack at the back of the mass")
+        if d["crack_on"]:
+            _num_opt(st, "crack_depth")
+            _num(st, "crack_water")
+        _num(st, "kh")
+        st.caption(("The crack is vertical, where the slip circle on y = 0 first lies z_t below the ground from the "
+                    "back; the mass ends there, and water in it pushes on its face with γ_w h_w²/2 at h_w/3. "
+                    if d["crack_on"] else "")
+                   + "Seismic: a pseudo-static horizontal force k_h W at each column's centroid, towards the pit "
+                   "(0 = none).")
     with sb.expander("Mesh", expanded=True):
         if "w_cols" not in st.session_state:
             st.session_state["w_cols"] = d["cols"]
@@ -387,6 +771,9 @@ def sidebar() -> E.Inputs:
                        "path).")
         st.caption("Trial-stress projection (thesis Section 4.6) is always on; a run is accepted only if no base is "
                    "projected at convergence.")
+    for msg in input_problems(d):
+        if msg != mesh_problem(d):
+            sb.error(msg)
     return to_inputs(d)
 
 
@@ -417,9 +804,9 @@ def _safe_run(inp: E.Inputs):
 
 def analysis(inp: E.Inputs):
     """Run (live up to 40 x 40 columns, otherwise on the Run button) and return (analysis or None, stale flag)."""
-    problem = mesh_problem(st.session_state.inp)
-    if problem:
-        st.error(f"Input error: {problem}")
+    problems = input_problems(st.session_state.inp)
+    if problems:
+        st.error("Input error: " + " ".join(problems))
         return None, False
     n, ny = inp.n3, E.columns_across(inp, inp.n3)
     live = n * ny <= LIVE_MAX_N * LIVE_MAX_N

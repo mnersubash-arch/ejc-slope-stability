@@ -16,6 +16,8 @@ import engine as E
 
 DATA_FILE = Path(__file__).resolve().parent / "data" / "presets_law_desterre.json"
 DATA = json.loads(DATA_FILE.read_text())
+BASKOYAK_FILE = Path(__file__).resolve().parent / "data" / "presets_baskoyak.json"
+BASKOYAK = json.loads(BASKOYAK_FILE.read_text())
 
 MAIN = E.Inputs()
 CARRANZA = MAIN.with_(xc=207.28, zc=586.53, R=622.08)
@@ -94,6 +96,47 @@ def desterre_presets() -> list[Preset]:
     return out
 
 
+def baskoyak_presets() -> list[Preset]:
+    """Baskoyak barite pit (a real failure): GHB with the SLIDE back-analysis inputs, GHB with site and guideline inputs
+    (nothing fitted to the failure), and the EJC with a derived Poisson's ratio. All use the app's planar section and the
+    traced failure circle with the base-circle grid, from data/presets_baskoyak.json; checked by qa/qa_baskoyak.py."""
+    b = BASKOYAK
+    site, sec, circ, nu = b["site"], b["geometry"]["app_section"], b["geometry"]["failure_circle"], b["poisson_ratio"]
+    base = E.Inputs(H=sec["H_m"], beta=sec["beta_deg"], xc=circ["x_c_engine"], zc=circ["z_c"], R=circ["R"],
+                    gamma=site["gamma_kNm3"], sigma_ci=site["sigma_ci_MPa"], mi=site["m_i"], a_override=None,
+                    nu=nu["nu"], model="ghb", base_circle=True)
+    source = (f"Baskoyak barite open pit, western Anatolia (Turkey): a circular failure through one bench in heavily "
+              f"jointed, dry schist (Sonmez & Ulusay 1999, Case 2). gamma = {site['gamma_kNm3']} kN/m3, "
+              f"sigma_ci = {site['sigma_ci_MPa']} MPa, m_i = {site['m_i']:g}. Section and failure circle traced from "
+              f"Sonmez & Ulusay (1999) Fig. 7: H = {sec['H_m']} m, overall face {sec['beta_deg']} deg (planar here; the "
+              f"real section has a 2.2 m bench at 8.5 m and ground rising 5.1 deg behind the crest); failure circle "
+              f"x_c = {circ['x_c_engine']}, z_c = {circ['z_c']}, R = {circ['R']:.2f} m (engine coordinates), which exits "
+              f"on the pit floor 5.3 m ahead of the toe (base-circle grid). Record: data/presets_baskoyak.json; checks: "
+              f"qa/qa_baskoyak.py.")
+    failed = "the slope failed on the traced circle (Sonmez & Ulusay 1999), so F = 1 at failure"
+    slide = b["reported"]["LLC2016_SLIDE"]
+    site_note = ("GSI 16.5 from the field survey (Sonmez & Ulusay 2002, their modified GSI chart); D = 0.7 for a pit "
+                 "excavated mechanically without blasting (Hoek et al. 2002, as Li et al. 2016 note for this mine). "
+                 "No input is fitted to the failure.")
+    nu_note = (f"nu = {nu['nu']} is the rock-mass Poisson's ratio derived from Aydan, Tokashiki & Ulusay (2015) and "
+               f"Aydan's intact-rock relation (range {nu['range'][0]:.2f}-{nu['range'][1]:.2f}; not measured for this "
+               f"site). At "
+               f"the thesis nu = 0.271 the EJC has no admissible state above sigma_n = 95 kPa for this rock mass.")
+    return [
+        _p("baskoyak_slide_ghb", "GHB, SLIDE back-analysis inputs (GSI 16, D 0.68)", "Baskoyak (real failure)",
+           base.with_(gsi=slide["GSI"], D=slide["D"]),
+           source + f" GSI {slide['GSI']:g} and D {slide['D']} are the SLIDE back-analysis of Li, Lo & Cassidy (2016).",
+           "", f"Reported (reference only): SLIDE (Bishop) F = {slide['F']} on its own critical circle of the real "
+               f"section (Li et al. 2016); {failed}.", data=b),
+        _p("baskoyak_site_ghb", "GHB, site inputs, D 0.7 (forward prediction)", "Baskoyak (real failure)",
+           base.with_(gsi=b["site"]["GSI"]["SU2002"], D=b["reported"]["LLC2016_D_adopted"]),
+           source + " " + site_note, "", f"Reported (reference only): {failed}.", data=b),
+        _p("baskoyak_site_ejc", f"EJC (Moscarda closure), site inputs, D 0.7, nu = {nu['nu']}", "Baskoyak (real failure)",
+           base.with_(gsi=b["site"]["GSI"]["SU2002"], D=b["reported"]["LLC2016_D_adopted"], model="ejc_moscarda"),
+           source + " " + site_note + " " + nu_note, "", f"Reported (reference only): {failed}.", data=b),
+    ]
+
+
 PRESETS: list[Preset] = [
     # ---- this thesis, main sphere, Moscarda closure, EJC
     _p("thesis_dry_05", "Dry, a = 0.5", "This thesis", MAIN, SRC_THESIS,
@@ -161,6 +204,7 @@ PRESETS: list[Preset] = [
        "", "Moscarda reported 2D FoS 1.13 (his spreadsheet at nu = 0.271: 1.132)."),
     *law_presets(),
     *desterre_presets(),
+    *baskoyak_presets(),
 ]
 BY_KEY = {p.key: p for p in PRESETS}
 DEFAULT_KEY = "thesis_dry_05"

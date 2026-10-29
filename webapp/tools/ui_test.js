@@ -141,6 +141,9 @@ async function check(cond, label) { console.log(`${cond ? "ok  " : "FAIL"} ${lab
   await page.click("#tab-cross-section");
   await page.waitForTimeout(700);
   await page.screenshot({ path: path.join(SHOTS, "w1-desterre-section-light.png"), fullPage: false });
+  await page.selectOption("#preset", "baskoyak_site_ghb");
+  await waitSolved(page);
+  await check(await text(page, "#fos3") === "1.091379" && await text(page, "#fos2") === "1.032373", `Baskoyak site GHB: ${await text(page, "#fos3")} / ${await text(page, "#fos2")}`);
   await page.selectOption("#preset", "thesis_orig_0271");
   await waitSolved(page);
   console.log("     original closure:", (await text(page, "#orig")).slice(0, 200).replace(/\s+/g, " "));

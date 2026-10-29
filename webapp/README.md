@@ -9,7 +9,7 @@ Research tool for the prescribed-surface comparison in Mahat (2026) thesis; not 
 
 ## What the page does
 
-- **Inputs:** a number box and a slider for every input, the 53 presets of `ejc_app/presets.py`, and a "Reset inputs
+- **Inputs:** a number box and a slider for every input, the 56 presets of `ejc_app/presets.py`, and a "Reset inputs
   to preset" button. The number box takes any value in the valid range; the slider spans a window around the preset's
   value (for example ±H for the sphere centre and radius), re-centred when a typed value falls outside it.
 - **Updating:** results update live while N ≤ 40 and N_2D ≤ 640; above that, press Run. The engine runs in a Web Worker

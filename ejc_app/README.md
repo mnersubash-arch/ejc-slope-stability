@@ -126,9 +126,16 @@ Every preset fills all the inputs and shows its source:
   r_u = 0 or 0.5. They use Mohr-Coulomb, r_u and the base-circle grid. The preset information shows
   `needs_floor_columns` (whether the circle exits ahead of the toe) and his Slide2, spreadsheet-3D and Slide3
   values, as reference only.
+- **Baskoyak (real failure), 3 cases.** A circular failure through one bench in heavily jointed, dry schist at the
+  Baskoyak barite pit, Turkey (Sonmez & Ulusay 1999, Case 2): γ = 22.2 kN/m³, σci = 5.2 MPa, m_i = 7. The section
+  (H = 18.99 m, overall face 31.92°, planar here) and the failure circle (x_c = −2.19, z_c = 31.52, R = 32.40 m;
+  it exits on the pit floor, so the base-circle grid is used) are traced from their Fig. 7. Three input sets: GHB
+  with the SLIDE back-analysis of Li, Lo & Cassidy (2016) (GSI 16, D 0.68; SLIDE F = 1.007, reference only); GHB
+  with site and guideline inputs (GSI 16.5, D 0.7; nothing fitted to the failure); and the EJC with ν = 0.45, a
+  rock-mass value derived from published relations, not measured. `qa/qa_baskoyak.py` checks them.
 
 The Law and D'Esterre cases are read from `data/presets_law_desterre.json` (already mirrored to engine
-coordinates).
+coordinates), the Baskoyak cases from `data/presets_baskoyak.json` (sources, traced geometry, derivation of ν).
 
 ## Equations (thesis equation numbers)
 
@@ -308,6 +315,7 @@ INFO rows are reference values, never targets:
 | `plots.py` | Plotly figures (no Streamlit) |
 | `presets.py` | Preset cases and their sources |
 | `data/presets_law_desterre.json` | Law (2024) and D'Esterre (2024) cases in engine coordinates (source of those presets) |
+| `data/presets_baskoyak.json` | Baskoyak case: sources, site data, traced section and failure circle, derivation of ν (source of those presets) |
 | `verification.py` | Targets and the verification runner |
 | `tests/` | pytest suite: strength, LEM, targets, figures, headless pages |
 | `VERIFICATION.md` | The verification table |

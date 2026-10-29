@@ -28,6 +28,13 @@ def test_presets_fill_every_input_and_name_a_source():
     assert all(p.inputs.model == "mc" and p.inputs.base_circle and p.inputs.ru in (0.0, 0.5) for p in des)
     assert all("needs_floor_columns" in p.info for p in des)
     assert all(p.reference.startswith("Reported (reference only)") for p in law + des)
+    bas = PR.baskoyak_presets()
+    assert [p.key for p in bas] == ["baskoyak_slide_ghb", "baskoyak_site_ghb", "baskoyak_site_ejc"]
+    assert [p.inputs.model for p in bas] == ["ghb", "ghb", "ejc_moscarda"]
+    assert all(p.inputs.base_circle and p.inputs.nu == 0.45 and p.inputs.a_override is None for p in bas)
+    assert [(p.inputs.gsi, p.inputs.D) for p in bas] == [(16.0, 0.68), (16.5, 0.7), (16.5, 0.7)]
+    assert all(p.targets == "" and p.reference.startswith("Reported (reference only)") and p.data is PR.BASKOYAK
+               for p in bas)
 
 
 @pytest.mark.parametrize("page", ["calculator", "cross_section", "view3d", "fbd"])

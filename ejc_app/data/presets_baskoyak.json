@@ -1,0 +1,54 @@
+{
+  "_notes": [
+    "Compiled on 29 Oct 2026 from the sources below for the Baskoyak presets and qa/qa_baskoyak.py.",
+    "Figure coordinates: x into the slope from the toe, z up, metres. Engine coordinates mirror x: x_c(engine) = -x_c(figure).",
+    "The section and the slip circle are traced from the scan of Sonmez & Ulusay (1999) Fig. 7, the only published drawing of the section; the paper gives no dimensions in its text.",
+    "Poisson's ratio is not measured for this site: it is derived from published relations (poisson_ratio below) and matters only for the EJC preset.",
+    "Reported values are the authors' results for their own models and software. Show them as reference only, never as pass/fail targets."
+  ],
+  "sources": {
+    "SU1999": "Sonmez H, Ulusay R (1999). Modifications to the geological strength index (GSI) and their applicability to stability of slopes. Int J Rock Mech Min Sci 36(6):743-760. Case 2, Table 3, Table 4, Fig. 7.",
+    "SU2002": "Sonmez H, Ulusay R (2002). A discussion on the Hoek-Brown failure criterion and suggested modifications to the criterion verified by slope stability case studies. Yerbilimleri 26:77-99. Table 1, Case 1.",
+    "LLC2016": "Li AJ, Lo VH, Cassidy MJ (2016). Back analyses for slope failures in rock. Japanese Geotechnical Society Special Publication 2(26):967-970. Case 1.",
+    "ATU2015": "Aydan O, Tokashiki N, Ulusay R (2015). Rock Mass Quality Rating (RMQR) for rock engineering. International Journal of the JCRM 11(1):17-20. Eqs 1 and 3; Poisson's ratio constants alpha0 = 2.5, alpha100 = 1.0, beta = 1.",
+    "NDV2024": "Narimani S, Davarpanah SM, Vasarhelyi B (2024). Estimation of the Poisson's ratio of the rock mass. Periodica Polytechnica Civil Engineering 68(1):274-288. Quotes nu_i = 0.25 (1 + exp(-0.2 sigma_c)) for intact rock (Aydan et al.); the paper itself could not be opened here.",
+    "HCC2002": "Hoek E, Carranza-Torres C, Corkum B (2002). Hoek-Brown failure criterion - 2002 edition. D = 0.7 for open-pit slopes excavated mechanically, as LLC2016 apply to this mine."
+  },
+  "site": {
+    "name": "Baskoyak (Sarkikaraagac) barite open pit, western Anatolia, Turkey",
+    "failure": "Circular failure through a single bench in heavily jointed, homogeneous schist (SU1999 Case 2; SU2002 Case 1; LLC2016 Case 1). The calculated surface matched the failure surface delineated on site (SU1999).",
+    "rock": "Heavily broken schist, joint spacing 0.04 m in all directions; smooth to slickensided, highly weathered surfaces with soft coatings below 5 mm (SU1999 Table 3).",
+    "gamma_kNm3": 22.2,
+    "sigma_ci_MPa": 5.2,
+    "m_i": 7.0,
+    "GSI": {"SU1999": 16.0, "SU2002": 16.5, "LLC2016": 16.0},
+    "groundwater": "dry: no sign of groundwater in the boreholes or on the benches (SU1999)",
+    "excavation": "excavators, without blasting (SU1999); disturbance adjustment factor df = 0.97 in SU1999's own scheme"
+  },
+  "geometry": {
+    "traced_from": "SU1999 Fig. 7, scanned at 300 dpi: x axis 12.15 px/m (ticks every 5 m), y axis 11.97 px/m (ticks every 10 m); line centres. The right-hand elevation axis of the figure (1440-1450 m) does not agree with its metric y axis and is not used.",
+    "toe": [0.0, 0.0],
+    "bench": [[11.9, 8.5], [14.1, 8.5]],
+    "crest": [30.48, 18.99],
+    "ground_behind_crest": [[30.48, 18.99], [49.3, 20.68]],
+    "pit_floor_ends_at_x": -12.4,
+    "faces_deg": {"lower": "34-35", "upper": 32.6, "ground_behind_crest": 5.1},
+    "app_section": {"H_m": 18.99, "beta_deg": 31.92, "note": "the app's planar face from the toe to the crest edge, with a flat crest; it cannot carry the bench or the rising ground"},
+    "failure_circle": {"centre": [2.19, 31.52], "R": 32.40, "x_c_engine": -2.19, "z_c": 31.52,
+                       "fit": "least squares through 414 traced points, rms 0.05 m, largest residual 0.23 m (the figure labels it R = 33 m)",
+                       "exits": "on the pit floor 5.3 m ahead of the toe (lowest point 0.9 m below the floor), and on the ground 1.6 m behind the crest edge"}
+  },
+  "poisson_ratio": {
+    "nu": 0.45,
+    "range": [0.40, 0.49],
+    "derivation": "Rock-mass Poisson's ratio nu_m = nu_i (2.5 - 1.5 RMQR/100) (ATU2015 eq. 3 with beta = 1). RMR ~ GSI + 5 = 21.5 (Hoek's GSI = RMR89 - 5, extrapolated below RMR 23) gives RMQR = 100 RMR/(RMR + 1.1 (100 - RMR)) = 19.9 (ATU2015 eq. 1) and a factor 2.20. Intact nu_i = 0.25 (1 + exp(-0.2 x 5.2)) = 0.34 (NDV2024) gives 0.74, beyond the limit 0.5; an intact value of 0.15-0.20 gives 0.33-0.44. Adopted 0.45 within 0.40-0.49 (the engine needs nu < 0.5).",
+    "admissibility": "With the Moscarda closure, sigma2 = nu (sigma1 + sigma3) >= sigma3 needs sigma1/sigma3 >= (1 - nu)/nu. For this rock mass (GSI 16.5, D 0.7) the EJC has no admissible state above sigma_n = 95 kPa at nu = 0.271, 152 kPa at 0.30, 255 kPa at 0.33, 450 kPa at 0.36 and 1119 kPa at 0.40; at 0.45 and 0.49 it is admissible over 1-5000 kPa. The critical surface reaches about 147 kPa."
+  },
+  "reported": {
+    "LLC2016_SLIDE": {"F": 1.007, "GSI": 16.0, "m_i": 7.0, "D": 0.68, "method": "SLIDE, Bishop simplified, the program's critical circle on the real section (bench and rising ground)"},
+    "LLC2016_D_adopted": 0.7,
+    "SU1999_Table4_Case2": {"df": 0.97, "approach_1": 1.70, "approach_2": 1.62, "approach_3": 1.59,
+                            "approach_4_limit_equilibrium": {"b_m": 20.28, "b_s": 7.34},
+                            "program": "HOBRSLP (Sonmez et al. 1998), back analysis of the failure surface of Fig. 7; strength from SU1999 eqs 1-5 and 8-9 (a = 0.65 - GSI/200 for GSI < 25)"}
+  }
+}

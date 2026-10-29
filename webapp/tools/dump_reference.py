@@ -126,6 +126,8 @@ for p in PR.law_presets():
     add(f"preset {p.key} 640", p.inputs.with_(n2=640), (2,))
 for p in PR.desterre_presets():
     add(f"preset {p.key}", p.inputs)
+for p in PR.baskoyak_presets():
+    add(f"preset {p.key}", p.inputs)
 print(f"{len(cases)} cases in {time.time() - t0:.1f} s", file=sys.stderr)
 
 # strength fixtures and principal states
@@ -195,7 +197,8 @@ for name, inp, dims, opts in (
         ("taylor 60", TAYLOR75.with_(beta=60.0), (2,), {}),
         ("desterre DE-1.5-c1-ru0, 2D and 3D", PR.BY_KEY["desterre_DE-1.5-c1-ru0"].inputs, (2, 3), {}),
         ("desterre DE-2.5-c4-ru0.5, front limit 1", PR.BY_KEY["desterre_DE-2.5-c4-ru0.5"].inputs, (2,), {"front": 1.0}),
-        ("main ghb dry, 2D and 3D", MAIN.with_(model="ghb"), (2, 3), {})):
+        ("main ghb dry, 2D and 3D", MAIN.with_(model="ghb"), (2, 3), {}),
+        ("baskoyak site GHB, base circle, 2D and 3D", PR.BY_KEY["baskoyak_site_ghb"].inputs, (2, 3), {})):
     searches.append(dict(name=name, inputs=inputs_dict(inp), dims=list(dims), opts=opts,
                          result=search_dict(E.critical_search(inp, dims=dims, **opts))))
 print(f"{len(searches)} searches in {time.time() - t1:.1f} s", file=sys.stderr)

@@ -296,6 +296,40 @@ def test_desterre_presets_accepted(p):
     assert a3.accepted and a2.accepted, (a3.reason, a2.reason)
 
 
+@pytest.mark.parametrize("p", PR.baskoyak_presets(), ids=lambda p: p.key)
+def test_baskoyak_presets(p):
+    """Baskoyak, a real failure (qa/qa_baskoyak.py): the traced failure circle exits on the pit floor 5.3 m ahead of
+    the toe, so it needs the base-circle grid with floor columns, and leaves no vertical face."""
+    x_entry, x_exit = E.slip_extent(p.inputs)
+    m = E.build_mesh(p.inputs, 2, p.inputs.n2)
+    assert x_exit == pytest.approx(5.31, abs=0.01) and np.sum(m.x > 0) > 0 and m.x0 == x_exit
+    assert E.vertical_faces(p.inputs) == {"back": 0.0, "front": 0.0}
+    a3, a2 = r3(p.inputs), r2(p.inputs)
+    assert a3.accepted and a2.accepted, (a3.reason, a2.reason)
+
+
+def test_baskoyak_failure_circle_values():
+    """FoS on the traced failure circle (20x20, 40 slices). An independent Bishop code agrees with the 2D values to about
+    1e-13 (qa/qa_baskoyak.py, part 1), and webapp/engine.js gives the same (tools/verify_engine.js)."""
+    expect = {"baskoyak_slide_ghb": (1.0994826738133618, 1.0405085691341465),
+              "baskoyak_site_ghb": (1.091378904274315, 1.0323730417036225),
+              "baskoyak_site_ejc": (1.2078459090080444, 1.1439444219442805)}
+    for key, (f3, f2) in expect.items():
+        inp = PR.BY_KEY[key].inputs
+        assert r3(inp).fos == pytest.approx(f3, rel=1e-12) and r2(inp).fos == pytest.approx(f2, rel=1e-12)
+
+
+def test_baskoyak_ejc_needs_a_high_nu():
+    """With the Moscarda closure, sigma2 = nu (sigma1 + sigma3) stays above sigma3 only while sigma1/sigma3 >= (1 - nu)/nu.
+    This rock mass fails at lower ratios, so at the thesis nu = 0.271 the EJC has no admissible state above about
+    95 kPa and the failure circle is rejected; the preset's nu = 0.45 is admissible."""
+    inp = PR.BY_KEY["baskoyak_site_ejc"].inputs
+    low = inp.with_(nu=0.271)
+    assert list(E.solve_strength([90.0, 100.0], low.strength()).accepted) == [True, False]
+    assert r2(low).status == "REJECTED" and r3(low).status == "REJECTED"
+    assert E.solve_strength([100.0, 1000.0, 5000.0], inp.strength()).accepted.all()
+
+
 @pytest.mark.parametrize("p", PR.law_presets(), ids=lambda p: p.key)
 def test_law_cross_check_against_reference_code(p):
     for key, value in p.data["engine_check"].items():

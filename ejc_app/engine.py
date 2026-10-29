@@ -12,7 +12,7 @@ substituted for the EJC, and a factor of safety is reported only for a run that 
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field, fields, replace
 from functools import lru_cache
 from typing import Optional
 
@@ -490,6 +490,17 @@ class Inputs:
     base_circle: bool = False               # grid from exit to entry, floor columns allowed (see build_mesh)
     # column shape (addition, off by default): 3D columns across y; None = N, the brief's N x N grid
     n3y: Optional[int] = None
+    # geometry, water and loading (additions, all off by default; see check_additions and the README)
+    profile: Optional[tuple] = None         # face from the toe to the crest edge, ((0, 0), (x, z), ...); None = planar
+    crest_slope: float = 0.0                # ground behind the crest edge rises at this angle (deg)
+    plan_radius: Optional[float] = None     # toe line in plan: radius (m), > 0 concave wall, < 0 convex; None = straight
+    elong: float = 1.0                      # end caps of the slip surface: half-width across y / R (1 = sphere)
+    mid_length: float = 0.0                 # cylindrical middle part of the slip surface, length along y (m)
+    d_zone: Optional[float] = None          # D applies within this distance (m) of the face; None = everywhere
+    piezo: Optional[tuple] = None           # piezometric line ((x, z), ...), x decreasing; replaces H_w, beta_w (wet)
+    crack_depth: Optional[float] = None     # tension crack at the back of the mass, depth below the ground (m)
+    crack_water: float = 0.0                # share of the crack depth filled with water
+    kh: float = 0.0                         # pseudo-static horizontal seismic coefficient (towards the pit)
 
     @property
     def hb(self) -> tuple[float, float, float]:
@@ -526,6 +537,127 @@ def sphere_z(x, y, xc: float, zc: float, R: float):
         return np.where(q >= 0, zc - np.sqrt(np.where(q >= 0, q, 0.0)), np.nan)
 
 
+# ---- additions: slope profile, crest slope, walls curved in plan, piezometric line, tension crack -----------------
+# All off by default; without them ground() and water() are ground_z() and water_z(), the thesis surfaces.
+def _points(pts, what: str) -> np.ndarray:
+    """The polyline ((x, z), ...) as an (n, 2) array: at least two finite points, x strictly decreasing."""
+    if not (isinstance(pts, (tuple, list)) and len(pts) >= 2
+            and all(isinstance(q, (tuple, list)) and len(q) == 2 for q in pts)):
+        raise ValueError(f"the {what} needs at least two points (x, z)")
+    a = np.asarray(pts, dtype=float)
+    if not np.all(np.isfinite(a)):
+        raise ValueError(f"the {what} has a point that is not a number")
+    if not np.all(a[1:, 0] < a[:-1, 0]):
+        raise ValueError(f"the {what} runs back into the slope: x must decrease from point to point")
+    return a
+
+
+def check_additions(inp: "Inputs") -> None:
+    """Validate the additions (each off by default); raise ValueError with the reason. Same as checkAdditions."""
+    if inp.profile is not None:
+        a = _points(inp.profile, "slope profile")
+        if a[0, 0] != 0 or a[0, 1] != 0:
+            raise ValueError("the slope profile starts at the toe, (0, 0)")
+        if not np.all(a[1:, 1] >= a[:-1, 1]):
+            raise ValueError("the slope profile cannot descend: z must not decrease from point to point")
+        if not a[-1, 1] > 0:
+            raise ValueError("the slope profile must end above the toe (crest edge z > 0)")
+    if not (math.isfinite(inp.crest_slope) and 0 <= inp.crest_slope < 90):
+        raise ValueError("require 0 <= crest slope < 90 deg")
+    if inp.plan_radius is not None and not (math.isfinite(inp.plan_radius) and inp.plan_radius != 0):
+        raise ValueError("the plan radius must be a number other than 0 (positive: concave wall; negative: convex)")
+    if not (math.isfinite(inp.elong) and inp.elong > 0):
+        raise ValueError("the slip-surface elongation must be positive")
+    if not (math.isfinite(inp.mid_length) and inp.mid_length >= 0):
+        raise ValueError("the length of the cylindrical middle part must be zero or positive")
+    if inp.d_zone is not None and not (math.isfinite(inp.d_zone) and inp.d_zone >= 0):
+        raise ValueError("the disturbed-zone thickness T must be zero or positive")
+    if inp.piezo is not None:
+        _points(inp.piezo, "piezometric line")
+    if inp.crack_depth is not None and not (math.isfinite(inp.crack_depth) and inp.crack_depth > 0):
+        raise ValueError("the tension crack depth must be positive")
+    if not (math.isfinite(inp.crack_water) and 0 <= inp.crack_water <= 1):
+        raise ValueError("the crack water fill must be from 0 to 1")
+    if not (math.isfinite(inp.kh) and 0 <= inp.kh < 1):
+        raise ValueError("require 0 <= k_h < 1")
+
+
+def face_points(inp: "Inputs") -> tuple[np.ndarray, np.ndarray]:
+    """The excavated face from the toe (0, 0) to the crest edge, as (x, z) arrays: the profile, or the planar face."""
+    if inp.profile is None:
+        return np.array([0.0, -inp.H / math.tan(math.radians(inp.beta))]), np.array([0.0, inp.H])
+    a = np.asarray(inp.profile, dtype=float)
+    return a[:, 0].copy(), a[:, 1].copy()
+
+
+def face_height(inp: "Inputs") -> float:
+    """Height of the crest edge above the toe: H, or the last point of the profile."""
+    return float(inp.profile[-1][1]) if inp.profile is not None else inp.H
+
+
+def _interp_desc(x, px: np.ndarray, pz: np.ndarray):
+    """Piecewise-linear z through the points (px, pz), px strictly decreasing; outside [px[-1], px[0]] the end segments
+    are extended. Same as interpDesc in webapp/engine.js."""
+    x = np.asarray(x, dtype=float)
+    k = np.clip(np.searchsorted(-px, -x, side="right") - 1, 0, len(px) - 2)
+    return pz[k] + (x - px[k]) * (pz[k + 1] - pz[k]) / (px[k + 1] - px[k])
+
+
+def plan_x(inp: "Inputs", x, y):
+    """Section coordinate of the point (x, y): its signed horizontal distance from the toe line, negative behind it.
+    Straight wall: x. Wall curved in plan (``plan_radius`` R_p): the toe line is a circle of radius |R_p| about a
+    vertical axis at (R_p, 0), the pit inside it (R_p > 0, concave) or outside it (R_p < 0, convex nose), and the
+    coordinate is |R_p| - r (concave) or r - |R_p| (convex), r = sqrt((x - R_p)^2 + y^2). Same as planX."""
+    x = np.asarray(x, dtype=float)
+    rp = inp.plan_radius
+    if rp is None:
+        return x
+    y = np.asarray(y, dtype=float)
+    r = np.sqrt((x - rp) * (x - rp) + y * y)
+    return (rp - r) if rp > 0 else (r + rp)
+
+
+def ground(inp: "Inputs", x, y=None):
+    """Ground surface z_t: the pit floor (z = 0) ahead of the toe, the face (planar at beta, or the profile) and the
+    crest behind the crest edge (flat, or rising at crest_slope). With y (3D) on a wall curved in plan, the section is
+    swept around the plan axis (plan_x). Without additions it is ground_z, the thesis ground. Same as ground in
+    webapp/engine.js."""
+    xs = np.asarray(x, dtype=float) if y is None else plan_x(inp, x, y)
+    if inp.profile is None and inp.crest_slope == 0:
+        return ground_z(xs, inp.H, inp.beta)
+    px, pz = face_points(inp)
+    xe, he = px[-1], pz[-1]
+    tc = math.tan(math.radians(inp.crest_slope))
+    face = -xs * math.tan(math.radians(inp.beta)) if inp.profile is None else _interp_desc(xs, px, pz)
+    return np.where(xs > 0, 0.0, np.where(xs >= xe, face, he + (xe - xs) * tc))
+
+
+def water(inp: "Inputs", x, y=None):
+    """Water table z_w: min(H_w, -x tan beta_w) behind the toe (water_z), or the piezometric line (``piezo``, constant
+    beyond its end points). With y on a wall curved in plan, swept as the ground. Same as water in webapp/engine.js."""
+    xs = np.asarray(x, dtype=float) if y is None else plan_x(inp, x, y)
+    if inp.piezo is None:
+        return water_z(xs, inp.Hw, inp.beta_w)
+    a = np.asarray(inp.piezo, dtype=float)
+    px, pz = a[:, 0], a[:, 1]
+    return np.where(xs >= px[0], pz[0], np.where(xs <= px[-1], pz[-1], _interp_desc(xs, px, pz)))
+
+
+def face_distance(inp: "Inputs", x, z):
+    """Shortest distance (m) from the section points (x, z) to the excavated face (toe to crest edge). Same as
+    faceDistance in webapp/engine.js."""
+    px, pz = face_points(inp)
+    x, z = np.asarray(x, dtype=float), np.asarray(z, dtype=float)
+    best = np.full(np.broadcast(x, z).shape, np.inf)
+    for k in range(len(px) - 1):
+        ax, az = px[k], pz[k]
+        dx, dz = px[k + 1] - ax, pz[k + 1] - az
+        t = np.minimum(np.maximum(((x - ax) * dx + (z - az) * dz) / (dx * dx + dz * dz), 0.0), 1.0)
+        ex, ez = x - (ax + t * dx), z - (az + t * dz)
+        best = np.minimum(best, np.sqrt(ex * ex + ez * ez))
+    return best
+
+
 @dataclass
 class Mesh:
     """Active columns (3D half-model) or slices (2D, unit thickness). Index ``i``, ``j`` are 1-based cell numbers."""
@@ -552,6 +684,12 @@ class Mesh:
     u: np.ndarray              # kPa
     zw: np.ndarray
     ny: int = 1                # cells across y (3D: columns_across; 2D: 1)
+    n_x: Optional[np.ndarray] = None    # unit base normal into the mass, x and y components (z component: g)
+    n_y: Optional[np.ndarray] = None
+    xsec: Optional[np.ndarray] = None   # section coordinate (plan_x; x on a straight wall)
+    zone: Optional[np.ndarray] = None   # base within d_zone of the face (disturbance zone), else None
+    crack: Optional[dict] = None        # tension crack: x and the water force on each row (crack_forces)
+    ext: Optional[dict] = None          # driving terms of crack water and seismic load (external_terms), else None
 
     @property
     def count(self) -> int:
@@ -568,14 +706,15 @@ def slip_extent(inp: Inputs, n: int = 20001) -> tuple[float, float]:
     """Entry and exit of the slip circle on the central section y = 0: the ends of the x-interval where the ground
     (pit floor z_t = 0 ahead of the toe included) is above the circle. Sampled on n points over [x_c - R, x_c + R],
     each end refined by bisection. Raises ValueError if the circle does not cut the ground."""
+    check_additions(inp)
     xc, zc, R = inp.xc, inp.zc, inp.R
 
     def above(x):
-        return bool(ground_z(x, inp.H, inp.beta) - sphere_z(x, 0.0, xc, zc, R) > 0)
+        return bool(ground(inp, x) - sphere_z(x, 0.0, xc, zc, R) > 0)
 
     xs = np.linspace(xc - R, xc + R, n)
     with np.errstate(invalid="ignore"):
-        d = ground_z(xs, inp.H, inp.beta) - sphere_z(xs, 0.0, xc, zc, R)
+        d = ground(inp, xs) - sphere_z(xs, 0.0, xc, zc, R)
     pos = np.isfinite(d) & (d > 0)
     if not pos.any():
         raise ValueError("the slip circle does not cut the ground: there is no sliding mass")
@@ -598,14 +737,53 @@ def slip_extent(inp: Inputs, n: int = 20001) -> tuple[float, float]:
     return x_entry, x_exit
 
 
+def crack_x(inp: Inputs, n: int = 20001) -> Optional[float]:
+    """Position of the tension crack, the vertical plane x = x_tc (addition, ``crack_depth``): on the central section
+    y = 0, the first point from the back of the mass (slip_extent) at which the slip circle lies crack_depth below the
+    ground; the back end itself if the mass already ends in a vertical face that high. Sampled on n points, refined by
+    bisection. None without a crack. Same as crackX in webapp/engine.js."""
+    if inp.crack_depth is None:
+        return None
+    dc = inp.crack_depth
+    x_entry, x_exit = slip_extent(inp)
+    if not inp.base_circle:                          # the default grid's mass ends at the toe
+        x_exit = min(x_exit, 0.0)
+    xc, zc, R = inp.xc, inp.zc, inp.R
+
+    def depth(x):
+        return ground(inp, x) - sphere_z(x, 0.0, xc, zc, R)
+
+    xs = np.linspace(x_entry, x_exit, n)
+    with np.errstate(invalid="ignore"):
+        d = depth(xs)
+    deep = np.isfinite(d) & (d >= dc)
+    if not deep.any():
+        raise ValueError(f"the tension crack ({dc:g} m) is deeper than the sliding mass on the central section "
+                         f"(at most {float(np.nanmax(d)):.4g} m deep)")
+    k = int(np.argmax(deep))
+    if k == 0:
+        return float(xs[0])
+    a, b = float(xs[k - 1]), float(xs[k])           # shallower than dc at a, at least dc at b
+    for _ in range(200):
+        mid = 0.5 * (a + b)
+        if mid in (a, b):
+            break
+        if float(depth(mid)) >= dc:
+            b = mid
+        else:
+            a = mid
+    return 0.5 * (a + b)
+
+
 def vertical_faces(inp: Inputs) -> dict:
     """Heights of the vertical faces that bound the sliding mass where the slip circle on y = 0 ends below the ground:
     at its back extreme x_c - R (z = z_c), and with the base-circle grid also at its front extreme x_c + R (the default
     grid stops at the toe). No force acts on such a face: at the back it works as an open tension crack. Heights below
     1e-9 H (rounding) count as zero. Same as verticalFaces in webapp/engine.js."""
-    xc, zc, R, tol = inp.xc, inp.zc, inp.R, 1e-9 * inp.H
-    back = float(ground_z(xc - R, inp.H, inp.beta)) - zc if inp.base_circle or xc - R <= 0 else 0.0
-    front = float(ground_z(xc + R, inp.H, inp.beta)) - zc if inp.base_circle else 0.0
+    check_additions(inp)
+    xc, zc, R, tol = inp.xc, inp.zc, inp.R, 1e-9 * face_height(inp)
+    back = float(ground(inp, xc - R)) - zc if (inp.base_circle or xc - R <= 0) and inp.crack_depth is None else 0.0
+    front = float(ground(inp, xc + R)) - zc if inp.base_circle else 0.0
     return {"back": back if back > tol else 0.0, "front": front if front > tol else 0.0}
 
 
@@ -644,19 +822,28 @@ def with_n3(inp: Inputs, n: int) -> Inputs:
     return inp.with_(n3=n, n3y=None if inp.n3y is None else columns_across(inp, n))
 
 
+def y_extent(inp: Inputs) -> float:
+    """Half-width of the slip surface across y (m), the 3D grid's y range: R for the sphere, lam R + L/2 with the
+    ellipsoidal caps (elong lam) and the cylindrical middle part (mid_length L)."""
+    half = 0.5 * inp.mid_length
+    return inp.elong * inp.R + half if half > 0 else inp.elong * inp.R
+
+
 def column_size(inp: Inputs) -> tuple[float, float]:
-    """Plan size of the 3D columns, (dx, dy) in m: dx = (x0 - x1)/N along x, dy = R/N_y across y."""
+    """Plan size of the 3D columns, (dx, dy) in m: dx = (x0 - x1)/N along x, dy = y_extent/N_y across y (R/N_y for
+    the sphere)."""
     x0, x1 = grid_x_range(inp)
-    return (x0 - x1) / inp.n3, inp.R / columns_across(inp, inp.n3)
+    return (x0 - x1) / inp.n3, y_extent(inp) / columns_across(inp, inp.n3)
 
 
 def counts_for_size(inp: Inputs, dx: float, dy: float) -> tuple[int, int]:
     """Columns along x and across y whose plan size is at most dx by dy (m) on the current geometry:
-    N = ceil((x0 - x1)/dx), N_y = ceil(R/dy), each at least 1 (a relative 1e-9 below a whole number counts as it)."""
+    N = ceil((x0 - x1)/dx), N_y = ceil(y_extent/dy), each at least 1 (a relative 1e-9 below a whole number counts as
+    it)."""
     if not (dx > 0 and dy > 0):
         raise ValueError("the column length and width must be positive")
     x0, x1 = grid_x_range(inp)
-    return (max(1, math.ceil((x0 - x1) / dx * (1 - 1e-9))), max(1, math.ceil(inp.R / dy * (1 - 1e-9))))
+    return (max(1, math.ceil((x0 - x1) / dx * (1 - 1e-9))), max(1, math.ceil(y_extent(inp) / dy * (1 - 1e-9))))
 
 
 def build_mesh(inp: Inputs, dim: int, n: int) -> Mesh:
@@ -683,12 +870,19 @@ def build_mesh(inp: Inputs, dim: int, n: int) -> Mesh:
             raise ValueError("choose a water table (wet) or r_u, not both")
         if not 0 <= inp.ru < 1:
             raise ValueError("require 0 <= r_u < 1")
+    check_additions(inp)
     xc, zc, R = inp.xc, inp.zc, inp.R
     x0, x1 = grid_x_range(inp)
+    if dim == 3 and inp.plan_radius is not None and inp.plan_radius < 0 and not x1 > inp.plan_radius:
+        raise ValueError(f"a convex wall needs its plan axis behind the sliding mass: the plan radius must exceed "
+                         f"{-x1:.4g} m, the distance from the toe to the back of the grid")
     dx = (x0 - x1) / n
     ny = columns_across(inp, n) if dim == 3 else 1
+    lam = inp.elong if dim == 3 else 1.0             # 2D: the central section is the circle for any elongation
+    half = 0.5 * inp.mid_length if dim == 3 else 0.0  # half-length of the cylindrical middle part
+    x_tc = crack_x(inp)
     if dim == 3:
-        dy = R / ny
+        dy = y_extent(inp) / ny
         ii, jj = np.meshgrid(np.arange(1, n + 1), np.arange(1, ny + 1), indexing="ij")
         ii, jj = ii.ravel(), jj.ravel()
         y = (jj - 0.5) * dy
@@ -698,29 +892,101 @@ def build_mesh(inp: Inputs, dim: int, n: int) -> Mesh:
         jj = np.ones(n, dtype=int)
         y = np.zeros(n)
     x = x0 - (ii - 0.5) * dx
-    q = R * R - (x - xc) ** 2 - y ** 2
-    keep = (q > 0) if inp.base_circle else (q > 0) & (x <= 0)
-    ii, jj, x, y, q = ii[keep], jj[keep], x[keep], y[keep], q[keep]
+    yc = np.maximum(y - half, 0.0) if half > 0 else y    # distance into the end cap (y beyond the middle part)
+    q = R * R - (x - xc) ** 2 - (yc / lam) ** 2
+    xs = plan_x(inp, x, y) if dim == 3 else x
+    keep = (q > 0) if inp.base_circle else (q > 0) & (xs <= 0)
+    if x_tc is not None:
+        keep &= x >= x_tc                            # the mass ends at the tension crack
+    ii, jj, x, y, yc, q, xs = ii[keep], jj[keep], x[keep], y[keep], yc[keep], q[keep], xs[keep]
     zb = zc - np.sqrt(q)
-    zt = ground_z(x, inp.H, inp.beta)
+    zt = ground(inp, x, y) if dim == 3 else ground(inp, x)
     h = zt - zb
     keep = h > 0
-    ii, jj, x, y, q, zb, zt, h = (v[keep] for v in (ii, jj, x, y, q, zb, zt, h))
+    ii, jj, x, y, yc, q, xs, zb, zt, h = (v[keep] for v in (ii, jj, x, y, yc, q, xs, zb, zt, h))
     ah = np.full(len(x), dx * dy)
-    g = np.sqrt(q) / R
-    rho = np.sqrt(R * R - y * y) if dim == 3 else np.full(len(x), R)
+    if lam == 1.0 and half == 0:
+        g = np.sqrt(q) / R
+        n_x, n_y = (xc - x) / R, -y / R
+        rho = np.sqrt(R * R - y * y) if dim == 3 else np.full(len(x), R)
+    else:                     # ellipsoidal caps: normal along (x_c - x, -y_c/lam^2, z_c - z_b), y_c = max(y - L/2, 0)
+        yl = yc / (lam * lam)
+        nrm = np.sqrt((x - xc) ** 2 + yl * yl + q)
+        g = np.sqrt(q) / nrm
+        n_x, n_y = (xc - x) / nrm, -yl / nrm
+        rho = np.sqrt(R * R - (yc / lam) ** 2)
     kap = (xc - x) / rho
     if inp.ru is not None:
         zw = np.full(len(x), np.nan)
         u = inp.ru * inp.gamma * h
     elif inp.wet:
-        zw = water_z(x, inp.Hw, inp.beta_w)
+        zw = water(inp, x, y) if dim == 3 else water(inp, x)
         u = GAMMA_W * np.maximum(0.0, zw - zb)
     else:
         zw = np.full(len(x), np.nan)
         u = np.zeros(len(x))
-    return Mesh(dim, n, x0, x1, dx, dy, ii, jj, x, y, zb, zt, h, ah, g, ah / g, rho, kap,
-                inp.gamma * h * ah, u, zw, ny)
+    zone = face_distance(inp, xs, zb) <= inp.d_zone if inp.d_zone is not None else None
+    m = Mesh(dim, n, x0, x1, dx, dy, ii, jj, x, y, zb, zt, h, ah, g, ah / g, rho, kap,
+             inp.gamma * h * ah, u, zw, ny, n_x, n_y, xs, zone)
+    if x_tc is not None:
+        m.crack = crack_forces(inp, m, x_tc)
+    if inp.kh > 0 or (m.crack is not None and m.crack["P"] > 0):
+        m.ext = external_terms(inp, m)
+    return m
+
+
+def crack_forces(inp: Inputs, m: Mesh, x_tc: float) -> dict:
+    """Water in the tension crack (addition): a horizontal force on the crack face x = x_tc, towards the pit. On the
+    central section the water stands crack_water times the crack depth above the crack bottom, and that level holds
+    across y. On each row (2D: the section, per metre; 3D: each strip dy wide of the half-model) the force is
+    P = gamma_w h_w^2 / 2 (times dy) at h_w/3 above the crack bottom, with the lever arm e = z_c - z_P about the
+    rotation axis; rho is the row's radius. Same as crackForces in webapp/engine.js."""
+    xc, zc, R = inp.xc, inp.zc, inp.R
+    lam = inp.elong if m.dim == 3 else 1.0
+    half = 0.5 * inp.mid_length if m.dim == 3 else 0.0
+    d0 = x_tc - xc
+    zb0 = zc - math.sqrt(R * R - d0 * d0)
+    level = zb0 + inp.crack_water * (float(ground(inp, x_tc)) - zb0)
+    ys = [(j - 0.5) * m.dy for j in range(1, m.ny + 1)] if m.dim == 3 else [0.0]
+    width = m.dy if m.dim == 3 else 1.0
+    rows = []
+    for y in ys:
+        yl = (max(y - half, 0.0) if half > 0 else y) / lam
+        qq = R * R - d0 * d0 - yl * yl
+        if not qq > 0:
+            continue
+        zbot = zc - math.sqrt(qq)
+        ztop = float(ground(inp, x_tc, y)) if m.dim == 3 else float(ground(inp, x_tc))
+        if not ztop > zbot:
+            continue
+        hw = min(max(level - zbot, 0.0), ztop - zbot)
+        zp = zbot + hw / 3.0
+        rows.append({"y": y, "zbot": zbot, "ztop": ztop, "hw": hw, "P": 0.5 * GAMMA_W * hw * hw * width, "zP": zp,
+                     "e": zc - zp, "rho": math.sqrt(R * R - yl * yl) if m.dim == 3 else R})
+    tot = mh = mm = 0.0
+    for r in rows:
+        tot += r["P"]
+        mh += r["P"] * r["e"] / r["rho"]
+        mm += r["P"] * r["e"]
+    return {"x": x_tc, "level": level, "rows": rows, "P": tot, "MH": mh, "MM": mm}
+
+
+def external_terms(inp: Inputs, m: Mesh) -> dict:
+    """Driving terms of the additions in the global equation (eqs 4.14 and 4.15, extended): the seismic force k_h W
+    of each column or slice, horizontal towards the pit at its centroid (z_b + z_t)/2, and the crack water force
+    (crack_forces). A horizontal force Q at height z_Q has the moment Q (z_c - z_Q) about the rotation axis, in the
+    sense of the weight's (W (x_c - x)); F_M adds these moments to sum W (x_c - x), and F_H adds each one divided by the
+    lever arm rho of its column or row, as W kappa = W (x_c - x)/rho. Local vertical balance (eq. 4.12) is unchanged,
+    since the forces are horizontal. Same as externalTerms in webapp/engine.js."""
+    e = inp.zc - 0.5 * (m.zb + m.zt)
+    E = inp.kh * m.w
+    out = {"kh": inp.kh, "E": E, "e": e, "Ex": float(np.sum(E)), "EH": float(np.sum(E * e / m.rho)),
+           "EM": float(np.sum(E * e)), "P": 0.0, "PH": 0.0, "PM": 0.0}
+    if m.crack is not None:
+        out.update(P=m.crack["P"], PH=m.crack["MH"], PM=m.crack["MM"])
+    out["H"] = out["EH"] + out["PH"]
+    out["M"] = out["EM"] + out["PM"]
+    return out
 
 
 # ---------------------------------------------------------------------------------------------------------------
@@ -765,6 +1031,7 @@ class LemResult:
     safeguard: str = "project"
     projection_limit: Optional[float] = None      # kPa
     projection_value: Optional[float] = None      # kPa
+    projection_limits: Optional[tuple] = None     # (disturbed zone, beyond) with the disturbance zone, kPa
 
     @property
     def accepted(self) -> bool:
@@ -790,11 +1057,21 @@ def _sensitivity(c, t, tau, sn, tension, tens):
     return c_e, t_e, tau_e
 
 
+def _drive(m: Mesh, xc: float, form: str):
+    """Denominator of the global equation: sum(W kappa) for F_H, sum(W (x_c - x)) for F_M, plus the driving terms of
+    the additions (external_terms) when there are any."""
+    base = np.sum(m.w * (xc - m.x)) if form == "FM" else np.sum(m.w * m.kap)
+    if m.ext is None:
+        return base
+    return base + (m.ext["M"] if form == "FM" else m.ext["H"])
+
+
 def _global_f(m: Mesh, tau_e, xc: float, form: str) -> float:
-    """F_H = sum(tau_s A)/sum(W kappa) (eq. 4.14, governing); F_M = sum(tau_s A rho)/sum(W (x_c - x)) (eq. 4.15)."""
+    """F_H = sum(tau_s A)/sum(W kappa) (eq. 4.14, governing); F_M = sum(tau_s A rho)/sum(W (x_c - x)) (eq. 4.15).
+    With seismic load or crack water the denominators gain their driving terms (_drive)."""
     if form == "FM":
-        return float(np.sum(tau_e * m.area * m.rho) / np.sum(m.w * (xc - m.x)))
-    return float(np.sum(tau_e * m.area) / np.sum(m.w * m.kap))
+        return float(np.sum(tau_e * m.area * m.rho) / _drive(m, xc, form))
+    return float(np.sum(tau_e * m.area) / _drive(m, xc, form))
 
 
 def _local_sn(m: Mesh, c_e, t_e, F):
@@ -815,6 +1092,49 @@ def projection_limit(st: Strength) -> Optional[float]:
         return tensile
     edge = admissible_sn_min(st)
     return max(tensile, edge) if math.isfinite(edge) else tensile
+
+
+@dataclass(frozen=True, eq=False)
+class ZonedStrength:
+    """Disturbance zone (addition, ``d_zone``): the strength ``inner`` (D as given) on the bases in ``zone`` and
+    ``outer`` (D = 0) on the others. Same as zonedStrength in webapp/engine.js."""
+
+    inner: Strength
+    outer: Strength
+    zone: np.ndarray
+
+    @property
+    def model(self) -> str:
+        return self.inner.model
+
+
+def strength_at(sn_kpa, st) -> StrengthResult:
+    """solve_strength for a Strength, or for a ZonedStrength each zone with its own strength."""
+    if not isinstance(st, ZonedStrength):
+        return solve_strength(sn_kpa, st)
+    z = st.zone
+    if z.all():
+        return solve_strength(sn_kpa, st.inner)
+    if not z.any():
+        return solve_strength(sn_kpa, st.outer)
+    t = np.atleast_1d(np.asarray(sn_kpa, dtype=float))
+    a, b = solve_strength(t[z], st.inner), solve_strength(t[~z], st.outer)
+    out = {}
+    for f in fields(StrengthResult):
+        va, vb = getattr(a, f.name), getattr(b, f.name)
+        arr = np.empty(len(t), dtype=np.result_type(va, vb))
+        arr[z], arr[~z] = va, vb
+        out[f.name] = arr
+    return StrengthResult(**out)
+
+
+def strength_for(inp: "Inputs", m: Mesh):
+    """The strength of the run: inp.strength(), or with the disturbance zone a ZonedStrength (D within d_zone of the
+    face, D = 0 beyond). Mohr-Coulomb has no D, so the zone does not apply to it."""
+    st = inp.strength()
+    if m.zone is None or st.model == "mc":
+        return st
+    return ZonedStrength(st, inp.with_(D=0.0).strength(), m.zone)
 
 
 ITERATIONS = {"default": "Default (brief §1.4): F from F_H/F_M at the current strength, then sigma_n",
@@ -867,15 +1187,25 @@ def solve(m: Mesh, st: Strength, xc: float, gamma: float, form: str = "FH", tens
     if m.count == 0:
         res.reason = "No active columns."
         return res
-    drive = np.sum(m.w * (xc - m.x)) if form == "FM" else np.sum(m.w * m.kap)
+    drive = _drive(m, xc, form)
     if not drive > 0:
         res.reason = "Non-positive driving sum."
         return res
     sn = (gamma * m.h - m.u) * m.g ** 2
-    limit = projection_limit(st) if safeguard == "project" else None
+    if safeguard != "project":
+        limit = None
+    elif isinstance(st, ZonedStrength):              # disturbance zone: each base with its zone's limit
+        li, lo = projection_limit(st.inner), projection_limit(st.outer)
+        limit = np.where(st.zone, li, lo)
+        value = limit + np.maximum(1e-9, 0.001 * np.abs(limit))
+        res.projection_limit, res.projection_value = li, li + max(1e-9, 0.001 * abs(li))
+        res.projection_limits = (li, lo)
+    else:
+        limit = projection_limit(st)
     if limit is not None:
-        value = limit + max(1e-9, 0.001 * abs(limit))
-        res.projection_limit, res.projection_value = limit, value
+        if not isinstance(st, ZonedStrength):
+            value = limit + max(1e-9, 0.001 * abs(limit))
+            res.projection_limit, res.projection_value = limit, value
 
         def project(v):
             p = v <= limit
@@ -887,7 +1217,7 @@ def solve(m: Mesh, st: Strength, xc: float, gamma: float, form: str = "FH", tens
     f_old = 1.0 if iteration == "native_v15" else None
     tens = np.zeros(m.count, dtype=bool)
     for it in range(1, max_iter + 1):
-        stg = solve_strength(sn, st)
+        stg = strength_at(sn, st)
         res.iterations = it
         failed = ~stg.accepted
         if st.model == "mc":
@@ -930,18 +1260,18 @@ def solve(m: Mesh, st: Strength, xc: float, gamma: float, form: str = "FH", tens
         if dF < TOL_DF and move < TOL_DSN:
             if iteration == "native_v15":       # the final state is rebuilt at the converged F
                 sn, _ = _local_sn(m, c_e, t_e, F)
-            return _final_checks(res, m, st, xc, F, sn, tens, dF, move)
+            return _final_checks(res, m, st, xc, F, sn, tens, dF, move, limit)
     res.status = "NOT CONVERGED"
     res.reason = f"No convergence in {max_iter} iterations; no accepted FoS."
     res.sn = sn
     return res
 
 
-def _final_checks(res: LemResult, m: Mesh, st: Strength, xc: float, F: float, sn: np.ndarray,
-                  tens_used: np.ndarray, dF: float, move: float) -> LemResult:
+def _final_checks(res: LemResult, m: Mesh, st, xc: float, F: float, sn: np.ndarray,
+                  tens_used: np.ndarray, dF: float, move: float, limit=None) -> LemResult:
     """Independent check of the converged state: fresh strength at the final sigma_n, then the local (vertical)
     and global residuals at the reported F (brief §1.4 step 4)."""
-    stg = solve_strength(sn, st)
+    stg = strength_at(sn, st)
     t = np.tan(stg.phi)
     tens = tens_used | (sn < 0) if res.tension != "none" else tens_used
     c_e, t_e, tau_e = _sensitivity(stg.c, t, stg.tau, sn, res.tension, tens_used)
@@ -950,7 +1280,7 @@ def _final_checks(res: LemResult, m: Mesh, st: Strength, xc: float, F: float, sn
         local = np.abs(m.w - (sn + m.u) * m.ah - tau_e * m.area * m.kap / F) / m.w
     f_glob = _global_f(m, tau_e, xc, res.form)
     glob = abs(f_glob - F) / F
-    bishop = float(np.sum((c_e * m.ah + (m.w - m.u * m.ah) * t_e) / ma) / np.sum(m.w * m.kap))
+    bishop = float(np.sum((c_e * m.ah + (m.w - m.u * m.ah) * t_e) / ma) / _drive(m, xc, "FH"))
     bishop_res = abs(bishop - F) / F
     acc = stg.accepted
     finite = np.isfinite(stg.f)
@@ -986,8 +1316,13 @@ def _final_checks(res: LemResult, m: Mesh, st: Strength, xc: float, F: float, sn
     if res.projection_limit is not None:
         last_proj = res.history[-1][5] if res.history else 0
         checks.append(Check("Projected bases at convergence", float(last_proj), "0", last_proj == 0))
-        checks.append(Check("Min sigma_n above the projection limit (kPa)", float(np.min(sn) - res.projection_limit),
-                            "> 0", bool(np.all(sn > res.projection_limit))))
+        if res.projection_limits is None:
+            checks.append(Check("Min sigma_n above the projection limit (kPa)",
+                                float(np.min(sn) - res.projection_limit), "> 0",
+                                bool(np.all(sn > res.projection_limit))))
+        else:                                    # disturbance zone: each base against its zone's limit
+            checks.append(Check("Min sigma_n above the projection limit (kPa)", float(np.min(sn - limit)), "> 0",
+                                bool(np.all(sn > limit))))
     res.strength, res.sn, res.c_used, res.tan_used, res.tau_used = stg, sn, c_e, t_e, tau_e
     res.tensile, res.m_alpha, res.local_res = tens_used, ma, local
     res.global_res, res.bishop_res, res.checks = glob, bishop_res, checks
@@ -1021,14 +1356,14 @@ class Analysis:
 
 
 def run_3d(inp: Inputs) -> LemResult:
-    return solve(build_mesh(inp, 3, inp.n3), inp.strength(), inp.xc, inp.gamma, inp.form, inp.tension, inp.iteration,
-                 inp.safeguard)
+    m = build_mesh(inp, 3, inp.n3)
+    return solve(m, strength_for(inp, m), inp.xc, inp.gamma, inp.form, inp.tension, inp.iteration, inp.safeguard)
 
 
 def run_2d(inp: Inputs) -> LemResult:
     """Bishop on the central section (brief §1.5, eq. 4.16); F_M = F_H there (rho = R), so F_H is used."""
-    return solve(build_mesh(inp, 2, inp.n2), inp.strength(), inp.xc, inp.gamma, "FH", inp.tension, inp.iteration,
-                 inp.safeguard)
+    m = build_mesh(inp, 2, inp.n2)
+    return solve(m, strength_for(inp, m), inp.xc, inp.gamma, "FH", inp.tension, inp.iteration, inp.safeguard)
 
 
 def run(inp: Inputs) -> Analysis:
@@ -1076,6 +1411,8 @@ def mass_forces(inp: Inputs, r: LemResult) -> dict:
     U act along n, through the sphere centre, so their moments are zero; S has lever arm rho. Vertical balance holds
     element by element (eq. 4.12); horizontal force balance is not part of the method. The method's own global
     equation is sum S = sum W kappa for F_H (eq. 4.14) and sum S rho = sum W (x_c - x) for F_M (eq. 4.15).
+    With the additions: the seismic forces E = k_h W and the crack water force P (horizontal, towards the pit) join
+    the totals and the moments, and the method's equation gains their driving terms (external_terms).
     Same as massForces in webapp/engine.js.
     """
     m = r.mesh
@@ -1083,7 +1420,7 @@ def mass_forces(inp: Inputs, r: LemResult) -> dict:
     if r.sn is None or r.tau_used is None or F is None:
         raise ValueError("no converged state for this run")
     mult = 2.0 if m.dim == 3 else 1.0
-    nx, ny, nz = (inp.xc - m.x) / inp.R, -m.y / inp.R, m.g.copy()
+    nx, ny, nz = m.n_x, m.n_y, m.g.copy()
     sx, sz = -(inp.zc - m.zb) / m.rho, (inp.xc - m.x) / m.rho
     W, N, U = m.w.copy(), r.sn * m.area, m.u * m.area
     S = r.tau_used * m.area / F
@@ -1100,12 +1437,23 @@ def mass_forces(inp: Inputs, r: LemResult) -> dict:
     fm = r.form == "FM"
     lhs = -m_s if fm else float(mult * np.sum(S))
     rhs = m_w if fm else float(mult * np.sum(W * m.kap))
+    moments = {"W": m_w, "N": 0.0, "U": 0.0, "S": m_s, "net": m_w + m_s}
+    el = {"x": m.x, "y": m.y, "zb": m.zb, "zm": (m.zb + m.zt) / 2, "W": W, "N": N, "U": U, "S": S, "nx": nx,
+          "ny": ny, "nz": nz, "sx": sx, "sz": sz}
+    ext = m.ext
+    if ext is not None:                          # seismic load and crack water (additions)
+        totals["E"] = {"x": float(mult * ext["Ex"]), "z": 0.0}
+        totals["P"] = {"x": float(mult * ext["P"]), "z": 0.0}
+        totals["net"]["x"] += totals["E"]["x"] + totals["P"]["x"]
+        moments["E"], moments["P"] = float(mult * ext["EM"]), float(mult * ext["PM"])
+        moments["net"] += moments["E"] + moments["P"]
+        rhs += float(mult * (ext["M"] if fm else ext["H"]))
+        el["E"] = ext["E"]
     return {"F": F, "dim": m.dim, "mult": mult, "count": m.count, "form": r.form, "weight": -totals["W"]["z"],
-            "totals": totals, "moments": {"W": m_w, "N": 0.0, "U": 0.0, "S": m_s, "net": m_w + m_s},
+            "totals": totals, "moments": moments,
             "method": {"form": r.form, "lhs": lhs, "rhs": rhs, "residual": (lhs - rhs) / rhs},
-            "vertical_max_rel": float(np.max(np.abs(vert) / W)) if m.count else 0.0,
-            "el": {"x": m.x, "y": m.y, "zb": m.zb, "zm": (m.zb + m.zt) / 2, "W": W, "N": N, "U": U, "S": S, "nx": nx,
-                   "ny": ny, "nz": nz, "sx": sx, "sz": sz}}
+            "vertical_max_rel": float(np.max(np.abs(vert) / W)) if m.count else 0.0, "el": el,
+            "crack": m.crack}
 
 
 # ---------------------------------------------------------------------------------------------------------------
@@ -1129,6 +1477,34 @@ def ground_at(s: float, H: float, tan_b: float) -> tuple[float, float]:
     return (-H / tan_b - (s - H), H)
 
 
+def ground_point(inp: Inputs, s: float) -> tuple[float, float]:
+    """Point of the ground at the search parameter s (m), as ground_at: the pit floor for s <= 0 (x = -s), the face
+    for 0 < s <= h_e (h_e the crest edge height) and the crest behind the edge for s > h_e, at s - h_e behind it
+    (rising at crest_slope). The planar face is followed by height (ground_at); a profile by its length, scaled so
+    that s = h_e at the crest edge (so the search reaches the berms). Same as groundPoint in webapp/engine.js."""
+    if inp.profile is None and inp.crest_slope == 0:
+        return ground_at(s, inp.H, math.tan(math.radians(inp.beta)))
+    he = face_height(inp)
+    if s <= 0:
+        return (-s, 0.0)
+    px, pz = face_points(inp)
+    if s <= he:
+        if inp.profile is None:
+            return (-s / math.tan(math.radians(inp.beta)), s)
+        seg = [math.sqrt((px[k + 1] - px[k]) * (px[k + 1] - px[k]) + (pz[k + 1] - pz[k]) * (pz[k + 1] - pz[k]))
+               for k in range(len(px) - 1)]
+        total = 0.0
+        for v in seg:
+            total += v
+        target, run = s / he * total, 0.0
+        for k, v in enumerate(seg):
+            if target <= run + v or k == len(seg) - 1:
+                t = min(max((target - run) / v, 0.0), 1.0)
+                return (float(px[k] + t * (px[k + 1] - px[k])), float(pz[k] + t * (pz[k + 1] - pz[k])))
+            run += v
+    return (float(px[-1]) - (s - he), he + (s - he) * math.tan(math.radians(inp.crest_slope)))
+
+
 def circle_from_exits(pf, pb, t: float) -> dict:
     """Circle through the front exit pf and the back exit pb (x_b < x_f, z_b >= z_f) whose lower arc joins them. The
     centre lies on the chord's perpendicular bisector, d = (c/2)(dz/dx + 1/t - 1) above the chord's midpoint, so that
@@ -1143,10 +1519,10 @@ def circle_from_exits(pf, pb, t: float) -> dict:
 
 
 def search_surface(inp: Inputs, p) -> dict:
-    """The surface of search parameters p = (a, b, t): front exit at s = aH, back exit at s = bH (ground_at),
-    curvature t (circle_from_exits)."""
-    H, tan_b = inp.H, math.tan(math.radians(inp.beta))
-    front, back = ground_at(p[0] * H, H, tan_b), ground_at(p[1] * H, H, tan_b)
+    """The surface of search parameters p = (a, b, t): front exit at s = aH, back exit at s = bH (ground_point; H the
+    crest edge height), curvature t (circle_from_exits)."""
+    H = face_height(inp)
+    front, back = ground_point(inp, p[0] * H), ground_point(inp, p[1] * H)
     return {**circle_from_exits(front, back, p[2]), "front": front, "back": back}
 
 
@@ -1155,7 +1531,7 @@ def single_mass(inp: Inputs) -> bool:
     as slip_extent samples it: one sliding mass, with no vertical face at the circle's extremes (base-circle grid)."""
     xs = np.linspace(inp.xc - inp.R, inp.xc + inp.R, 20001)
     with np.errstate(invalid="ignore"):
-        d = ground_z(xs, inp.H, inp.beta) - sphere_z(xs, 0.0, inp.xc, inp.zc, inp.R)
+        d = ground(inp, xs) - sphere_z(xs, 0.0, inp.xc, inp.zc, inp.R)
     on = np.isfinite(d) & (d > 0)
     runs = int(on[0]) + int(np.count_nonzero(on[1:] & ~on[:-1]))
     return runs == 1 and not on[0] and not on[-1]
@@ -1248,7 +1624,7 @@ def critical_search(inp: Inputs, dims=(2,), progress=None, **opts) -> dict:
     o = {**SEARCH, **opts}
     dims = list(dims)
     t0 = time.perf_counter()
-    H, base = inp.H, bool(inp.base_circle)
+    base = bool(inp.base_circle)
     na, nb, nt = o["grid_base"] if base else o["grid"]
     lo0 = -o["front"] if base else 0
     hi1 = 1 + o["back"]
@@ -1428,3 +1804,195 @@ def critical_search(inp: Inputs, dims=(2,), progress=None, **opts) -> dict:
         say(f"{dim}D: done")
     out["ms"] = (time.perf_counter() - t0) * 1000.0
     return out
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# studies (additions): EJC against GHB, parameter sweeps, back-analysis, Monte Carlo
+# ---------------------------------------------------------------------------------------------------------------
+def _attempt(inp: Inputs, dim: int) -> dict:
+    """FoS, status and reason of one run; an input error is reported as status INPUT ERROR."""
+    try:
+        r = run_3d(inp) if dim == 3 else run_2d(inp)
+        return {"fos": r.fos, "status": r.status, "reason": "" if r.fos is not None else r.reason}
+    except ValueError as e:
+        return {"fos": None, "status": "INPUT ERROR", "reason": str(e)}
+
+
+COMPARE = (("ejc", "ejc_moscarda"), ("ghb", "ghb"))
+
+
+def compare_models(inp: Inputs) -> dict:
+    """EJC (Moscarda closure, at the given nu) and GHB on the same surface, mesh and inputs, 3D and 2D: FoS, status and
+    reason of each, the 3D/2D ratio of each model and the EJC/GHB ratio in 3D and 2D (None where a FoS is withheld).
+    Same as compareModels in webapp/engine.js."""
+    out = {"models": {}, "ratio": {}}
+    for key, model in COMPARE:
+        b = inp.with_(model=model)
+        row = {}
+        for dim in (3, 2):
+            a = _attempt(b, dim)
+            row[f"fos{dim}"], row[f"status{dim}"], row[f"reason{dim}"] = a["fos"], a["status"], a["reason"]
+        row["ratio"] = row["fos3"] / row["fos2"] if row["fos3"] is not None and row["fos2"] is not None else None
+        out["models"][key] = row
+    e, g = out["models"]["ejc"], out["models"]["ghb"]
+    for dim in (3, 2):
+        out["ratio"][f"ejc_ghb{dim}"] = (e[f"fos{dim}"] / g[f"fos{dim}"]
+                                         if e[f"fos{dim}"] is not None and g[f"fos{dim}"] is not None else None)
+    return out
+
+
+def parameter_sweep(inp: Inputs, name: str, values, models=("ejc_moscarda", "ghb"), dims=(3, 2), progress=None) -> list:
+    """The FoS for each value of the input ``name`` (any numeric input), for each strength model and dimension:
+    rows {"value", "<model>": {"fos3", "status3", "reason3", "fos2", ...}}. Same as parameterSweep."""
+    if not hasattr(inp, name):
+        raise ValueError(f"unknown input {name!r}")
+    rows = []
+    for q, v in enumerate(values):
+        row = {"value": float(v)}
+        for model in models:
+            b = inp.with_(**{name: float(v), "model": model})
+            cell = {}
+            for dim in dims:
+                a = _attempt(b, dim)
+                cell[f"fos{dim}"], cell[f"status{dim}"], cell[f"reason{dim}"] = a["fos"], a["status"], a["reason"]
+            row[model] = cell
+        rows.append(row)
+        if progress:
+            progress(q + 1, len(values), f"{name} = {float(v):g}")
+    return rows
+
+
+def back_analysis(inp: Inputs, name: str, lo: float, hi: float, target: float = 1.0, dim: int = 2,
+                  rel_tol: float = 1e-6, max_steps: int = 60, progress=None) -> dict:
+    """The value of the input ``name`` in [lo, hi] at which the FoS (dim 3 or 2) equals ``target``, by bisection.
+    F - target must change sign between lo and hi, with an accepted FoS at both; each step solves at the midpoint and
+    keeps the half with the sign change, until the bracket is narrower than rel_tol (hi - lo). The value reported is
+    the linear interpolation of F across the final bracket, solved once more. If the FoS steps (a column entering the
+    mass), the result is the step. Same as backAnalysis in webapp/engine.js."""
+    if not hasattr(inp, name):
+        raise ValueError(f"unknown input {name!r}")
+    if not (math.isfinite(lo) and math.isfinite(hi) and lo < hi):
+        raise ValueError("require lo < hi")
+    steps = []
+
+    def f(v):
+        a = _attempt(inp.with_(**{name: float(v)}), dim)
+        steps.append({"value": float(v), "fos": a["fos"], "status": a["status"]})
+        if progress:
+            progress(len(steps), max_steps + 3, f"{name} = {float(v):.6g}")
+        return a
+
+    out = {"name": name, "target": target, "dim": dim, "value": None, "fos": None, "bracket": [lo, hi],
+           "steps": steps, "message": ""}
+    fa, fb = f(lo), f(hi)
+    for v, a in ((lo, fa), (hi, fb)):
+        if a["fos"] is None:
+            out["message"] = f"no accepted FoS at {name} = {v:g} ({a['status']}): narrow the range"
+            return out
+    ga, gb = fa["fos"] - target, fb["fos"] - target
+    if ga * gb > 0:
+        out["message"] = (f"the FoS does not cross {target:g} between {name} = {lo:g} (F = {fa['fos']:.6f}) and "
+                          f"{hi:g} (F = {fb['fos']:.6f}): widen the range")
+        return out
+    a, b, width = lo, hi, rel_tol * (hi - lo)
+    for _ in range(max_steps):
+        if b - a <= width:
+            break
+        mid = 0.5 * (a + b)
+        fm = f(mid)
+        if fm["fos"] is None:
+            out["message"] = f"no accepted FoS at {name} = {mid:.6g} ({fm['status']})"
+            out["bracket"] = [a, b]
+            return out
+        gm = fm["fos"] - target
+        if ga * gm <= 0:
+            b, gb = mid, gm
+        else:
+            a, ga = mid, gm
+    v = a + (0.0 - ga) * (b - a) / (gb - ga) if gb != ga else 0.5 * (a + b)
+    fv = f(v)
+    out.update(value=v, fos=fv["fos"], bracket=[a, b])
+    if fv["fos"] is None:
+        out["message"] = f"no accepted FoS at the result ({fv['status']})"
+    return out
+
+
+def mulberry32(seed: int):
+    """Seeded uniform random numbers in [0, 1) (Mulberry32, 32-bit integer arithmetic), the same stream as mulberry32
+    in webapp/engine.js."""
+    a = int(seed) & 0xFFFFFFFF
+
+    def imul(x, y):
+        return (x * y) & 0xFFFFFFFF
+
+    def nxt():
+        nonlocal a
+        a = (a + 0x6D2B79F5) & 0xFFFFFFFF
+        t = imul(a ^ (a >> 15), 1 | a)
+        t = ((t + imul(t ^ (t >> 7), 61 | t)) & 0xFFFFFFFF) ^ t
+        return ((t ^ (t >> 14)) & 0xFFFFFFFF) / 4294967296.0
+    return nxt
+
+
+def monte_carlo(inp: Inputs, variables, n: int, seed: int = 1, models=None, dims=(3, 2), progress=None) -> dict:
+    """Monte Carlo analysis (addition): ``variables`` = [(name, mean, sd, lo, hi), ...], each sampled from a normal
+    distribution truncated to [lo, hi] (Box-Muller from the seeded Mulberry32 stream, rejection outside the limits; the
+    variables in the given order, sample by sample), and the FoS of each sample for each model and dimension. Returns
+    the samples and, per model and dimension, the accepted count, mean, standard deviation, reliability index
+    (mean - 1)/sd, probability of failure P(F < 1) among accepted results with its standard error, and the 5 %, 50 %
+    and 95 % values. Same as monteCarlo in webapp/engine.js."""
+    if not (isinstance(n, (int, np.integer)) and n >= 1):
+        raise ValueError("the number of samples must be a positive integer")
+    models = models or ((inp.model,) if inp.model != "ejc_original" else ("ejc_moscarda",))
+    rnd = mulberry32(seed)
+
+    def normal():
+        u1 = 1.0 - rnd()
+        u2 = rnd()
+        return math.sqrt(-2.0 * math.log(u1)) * math.cos(2.0 * math.pi * u2)
+
+    for name, mean, sd, lo, hi in variables:
+        if not hasattr(inp, name):
+            raise ValueError(f"unknown input {name!r}")
+        if not (sd >= 0 and lo <= mean <= hi):
+            raise ValueError(f"{name}: require sd >= 0 and lo <= mean <= hi")
+    samples = []
+    for k in range(n):
+        vals = {}
+        for name, mean, sd, lo, hi in variables:
+            v = mean
+            if sd > 0:
+                for _ in range(1000):
+                    v = mean + sd * normal()
+                    if lo <= v <= hi:
+                        break
+                else:
+                    raise ValueError(f"{name}: no sample inside [{lo:g}, {hi:g}] in 1000 draws")
+            vals[name] = v
+        b = inp.with_(**vals)
+        row = {"values": vals}
+        for model in models:
+            for dim in dims:
+                a = _attempt(b.with_(model=model), dim)
+                row[f"{model}{dim}"] = a["fos"]
+        samples.append(row)
+        if progress:
+            progress(k + 1, n, f"sample {k + 1} of {n}")
+    stats = {}
+    for model in models:
+        for dim in dims:
+            f = np.array([s[f"{model}{dim}"] for s in samples if s[f"{model}{dim}"] is not None], dtype=float)
+            st = {"n": n, "accepted": int(len(f)), "mean": None, "sd": None, "beta": None, "pof": None, "pof_se": None,
+                  "p05": None, "p50": None, "p95": None}
+            if len(f):
+                st["mean"] = float(np.mean(f))
+                st["sd"] = float(np.std(f, ddof=1)) if len(f) > 1 else 0.0
+                st["beta"] = (st["mean"] - 1.0) / st["sd"] if st["sd"] > 0 else None
+                p = float(np.mean(f < 1.0))
+                st["pof"], st["pof_se"] = p, math.sqrt(p * (1 - p) / len(f))
+                fs = np.sort(f)
+                for key, qq in (("p05", 0.05), ("p50", 0.5), ("p95", 0.95)):
+                    st[key] = float(fs[min(len(fs) - 1, int(math.floor(qq * len(fs))))])
+            stats[f"{model}{dim}"] = st
+    return {"samples": samples, "stats": stats, "models": list(models), "dims": list(dims), "seed": seed,
+            "variables": [list(v) for v in variables]}

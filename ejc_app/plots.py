@@ -279,7 +279,10 @@ def column_forces(inp: E.Inputs, r: E.LemResult, k: int) -> dict:
     if r.sn is None or r.tau_used is None or F is None:
         raise ValueError("no converged state for this element")
     x, y, zb = m.x[k], m.y[k], m.zb[k]
-    n = np.array([inp.xc - x, -y, inp.zc - zb]) / inp.R
+    if inp.elong == 1 and not inp.mid_length > 0:
+        n = np.array([inp.xc - x, -y, inp.zc - zb]) / inp.R
+    else:                                    # ellipsoidal caps or a cylindrical middle: the mesh's base normal
+        n = np.array([m.n_x[k], m.n_y[k], m.g[k]])
     s_dir = np.array([-(inp.zc - zb), 0.0, inp.xc - x]) / m.rho[k]
     N = r.sn[k] * m.area[k]
     U = m.u[k] * m.area[k]

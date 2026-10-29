@@ -43,7 +43,8 @@ def arr(a):
 
 
 def inputs_dict(inp):
-    return {k: num(v) if not isinstance(v, str) else v for k, v in dataclasses.asdict(inp).items()}
+    return {k: v if isinstance(v, str) else [[num(a) for a in q] for q in v] if isinstance(v, tuple) else num(v)
+            for k, v in dataclasses.asdict(inp).items()}
 
 
 def mass(inp, r):
@@ -64,7 +65,11 @@ def lem(r):
                 checks=[dict(name=c.name, value=num(c.value), passed=bool(c.passed)) for c in r.checks],
                 history=[[num(v) for v in row] for row in r.history],
                 sn=arr(r.sn), tau_used=arr(r.tau_used), projection_limit=num(r.projection_limit),
-                global_res=num(r.global_res), bishop_res=num(r.bishop_res))
+                global_res=num(r.global_res), bishop_res=num(r.bishop_res),
+                projection_limits=None if r.projection_limits is None else [num(v) for v in r.projection_limits],
+                zone=None if r.mesh.zone is None else int(np.sum(r.mesh.zone)),
+                crack=None if r.mesh.crack is None else {k: num(r.mesh.crack[k]) for k in ("x", "level", "P", "MH", "MM")},
+                ext=None if r.mesh.ext is None else {k: num(r.mesh.ext[k]) for k in ("Ex", "EH", "EM", "H", "M")})
 
 
 def run_case(name, inp, dims=(3, 2)):
@@ -144,6 +149,53 @@ add("columns n3y = 0", MAIN.with_(n3y=0))
 add("columns n3y = 2.5", MAIN.with_(n3y=2.5), (3,))
 print(f"{len(cases)} cases in {time.time() - t0:.1f} s", file=sys.stderr)
 
+# geometry, water and loading additions
+BAS = PR.BY_KEY["baskoyak_site_ghb"].inputs
+REAL = ((0.0, 0.0), (-11.9, 8.5), (-14.1, 8.5), (-30.48, 18.99))          # Baskoyak real section (traced)
+CREST = math.degrees(math.atan((20.68 - 18.99) / (49.3 - 30.48)))
+PIEZO = ((50.0, 0.0), (0.0, 0.0), (-150.0, 150.0), (-600.0, 300.0))
+add("add: profile baskoyak real section", BAS.with_(profile=REAL, crest_slope=CREST))
+add("add: profile baskoyak, 2000 slices", BAS.with_(profile=REAL, crest_slope=CREST, n2=2000), (2,))
+add("add: profile ejc", PR.BY_KEY["baskoyak_site_ejc"].inputs.with_(profile=REAL, crest_slope=CREST))
+add("add: crest slope 10", MAIN.with_(crest_slope=10.0))
+add("add: crest slope 25 base circle", MAIN.with_(crest_slope=25.0, base_circle=True))
+add("add: concave 800", MAIN.with_(plan_radius=800.0))
+add("add: concave 3000 wet", WET.with_(plan_radius=3000.0), (3,))
+add("add: convex -1500", MAIN.with_(plan_radius=-1500.0), (3,))
+add("add: convex too small", MAIN.with_(plan_radius=-200.0))
+add("add: elong 2", MAIN.with_(elong=2.0, n3y=30), (3,))
+add("add: elong 0.5", MAIN.with_(elong=0.5), (3,))
+add("add: mid 1000", MAIN.with_(mid_length=1000.0, n3y=40), (3,))
+add("add: elong 1.5 mid 500 FM", MAIN.with_(elong=1.5, mid_length=500.0, form="FM"), (3,))
+add("add: zone 10 ghb D 0.7", MAIN.with_(model="ghb", D=0.7, a_override=None, d_zone=10.0))
+add("add: zone 10 ejc D 0.7", MAIN.with_(D=0.7, d_zone=10.0))
+add("add: zone 0 ghb", MAIN.with_(model="ghb", D=0.7, a_override=None, d_zone=0.0))
+add("add: zone mc ignored", MAIN.with_(model="mc", c_mc=50.0, phi_mc=35.0, d_zone=10.0), (3,))
+add("add: piezo", MAIN.with_(wet=True, piezo=PIEZO))
+add("add: piezo concave", MAIN.with_(wet=True, piezo=PIEZO, plan_radius=1500.0), (3,))
+add("add: crack 20 dry", MAIN.with_(crack_depth=20.0))
+add("add: crack 20 water 0.5", MAIN.with_(crack_depth=20.0, crack_water=0.5))
+add("add: crack 20 water 1 FM", MAIN.with_(crack_depth=20.0, crack_water=1.0, form="FM"), (3,))
+add("add: crack too deep", MAIN.with_(crack_depth=60.0))
+add("add: kh 0.1", MAIN.with_(kh=0.1))
+add("add: kh 0.1 FM wet", WET.with_(kh=0.1, form="FM"), (3,))
+add("add: kh 0.1 native", MAIN.with_(kh=0.1, iteration="native_v15"))
+add("add: kh 0.2 ghb C0", MAIN.with_(kh=0.2, model="ghb", tension="C0"))
+add("add: all, baskoyak", BAS.with_(profile=REAL, crest_slope=5.0, plan_radius=300.0, elong=1.5, mid_length=20.0,
+                                     d_zone=3.0, kh=0.05, crack_depth=1.0, crack_water=0.5, n3y=25))
+add("add: all, thesis wet", WET.with_(plan_radius=2000.0, elong=1.2, d_zone=25.0, D=0.5, kh=0.05, crack_depth=10.0,
+                                       crack_water=0.5, crest_slope=5.0))
+for bad, kw in (("profile not from the toe", {"profile": ((1.0, 0.0), (-10.0, 5.0))}),
+                ("profile back and forth", {"profile": ((0.0, 0.0), (-10.0, 5.0), (-5.0, 8.0))}),
+                ("profile descends", {"profile": ((0.0, 0.0), (-10.0, 5.0), (-20.0, 4.0))}),
+                ("profile one point", {"profile": ((0.0, 0.0),)}),
+                ("crest slope 90", {"crest_slope": 90.0}), ("plan radius 0", {"plan_radius": 0.0}),
+                ("elong 0", {"elong": 0.0}), ("mid -1", {"mid_length": -1.0}), ("zone -1", {"d_zone": -1.0}),
+                ("piezo forward", {"piezo": ((0.0, 0.0), (10.0, 5.0))}), ("crack 0", {"crack_depth": 0.0}),
+                ("crack water 2", {"crack_water": 2.0}), ("kh 1", {"kh": 1.0}), ("kh -0.1", {"kh": -0.1})):
+    add(f"add error: {bad}", MAIN.with_(**kw))
+print(f"{len(cases)} cases with the additions", file=sys.stderr)
+
 # column helpers: columns across y for other N (mesh studies, the search's finer mesh), plan size, counts for a size
 columns = []
 for inp, n in ((MAIN, 40), (MAIN.with_(n3y=7), 40), (MAIN.with_(n3y=7), 10), (MAIN.with_(n3y=7), 3),
@@ -154,8 +206,32 @@ for inp, n in ((MAIN, 40), (MAIN.with_(n3y=7), 40), (MAIN.with_(n3y=7), 10), (MA
 for inp, dx, dy in ((MAIN, 20.0, 20.0), (MAIN, 10.0, 10.0), (MAIN, 1000.0, 1000.0), (MAIN, *E.column_size(MAIN)),
                     (MAIN.with_(n3y=37), *E.column_size(MAIN.with_(n3y=37))),
                     (PR.BY_KEY["baskoyak_site_ejc"].inputs, 1.0, 0.5),
-                    (PR.BY_KEY["desterre_DE-1.5-c3-ru0.5"].inputs, 0.25, 0.25)):
+                    (PR.BY_KEY["desterre_DE-1.5-c3-ru0.5"].inputs, 0.25, 0.25),
+                    (MAIN.with_(elong=1.5, mid_length=300.0), 20.0, 20.0)):
     columns.append(dict(inputs=inputs_dict(inp), dx=num(dx), dy=num(dy), counts=list(E.counts_for_size(inp, dx, dy))))
+for inp, n in ((MAIN.with_(elong=1.5, mid_length=300.0, n3y=30), 20),):
+    columns.append(dict(inputs=inputs_dict(inp), n=n, across=E.columns_across(inp, n),
+                        size=[num(v) for v in E.column_size(inp)]))
+
+# studies: EJC against GHB, sweeps, back-analysis, Monte Carlo, the random stream
+studies = {"compare": [], "sweep": [], "back": [], "mc": [], "rng": []}
+for inp in (MAIN, WET.with_(kh=0.05), BAS):
+    studies["compare"].append(dict(inputs=inputs_dict(inp), result=E.compare_models(inp)))
+for inp, name, vals, models, dims in ((MAIN, "gsi", [30.0, 42.0, 60.0], ("ejc_moscarda", "ghb"), (3, 2)),
+                                      (MAIN, "kh", [0.0, 0.1, 0.2], ("ghb",), (2,)),
+                                      (BAS, "D", [0.5, 0.7, 0.9], ("ghb",), (3, 2))):
+    studies["sweep"].append(dict(inputs=inputs_dict(inp), name=name, values=vals, models=list(models), dims=list(dims),
+                                 rows=E.parameter_sweep(inp, name, vals, models, dims)))
+for inp, name, lo, hi, target, dim in ((BAS, "D", 0.5, 0.9, 1.0, 2), (MAIN.with_(model="ghb"), "kh", 0.0, 0.5, 1.5, 3),
+                                       (MAIN, "gsi", 20.0, 30.0, 1.0, 2)):
+    studies["back"].append(dict(inputs=inputs_dict(inp), name=name, lo=lo, hi=hi, target=target, dim=dim,
+                                result=E.back_analysis(inp, name, lo, hi, target, dim)))
+mc_vars = [("gsi", 42.0, 5.0, 10.0, 100.0), ("sigma_ci", 77.7, 15.0, 1.0, 300.0), ("D", 0.1, 0.1, 0.0, 1.0)]
+studies["mc"].append(dict(inputs=inputs_dict(MAIN.with_(model="ghb")), variables=[list(v) for v in mc_vars], n=12, seed=7,
+                          dims=[2], result=E.monte_carlo(MAIN.with_(model="ghb"), mc_vars, 12, seed=7, dims=(2,))))
+for seed in (0, 1, 7, 123456789, 4294967295):
+    r = E.mulberry32(seed)
+    studies["rng"].append(dict(seed=seed, values=[r() for _ in range(20)]))
 
 # strength fixtures and principal states
 fixtures = []
@@ -229,7 +305,11 @@ for name, inp, dims, opts in (
         ("desterre DE-1.5-c1-ru0, 20 x 9 columns, 2D and 3D",
          PR.BY_KEY["desterre_DE-1.5-c1-ru0"].inputs.with_(n3y=9), (2, 3), {}),
         ("desterre DE-1.5-c1-ru0, 8 x 170 columns (finer mesh at the 320 cap), 2D and 3D",
-         PR.BY_KEY["desterre_DE-1.5-c1-ru0"].inputs.with_(n3=8, n3y=170), (2, 3), {})):
+         PR.BY_KEY["desterre_DE-1.5-c1-ru0"].inputs.with_(n3=8, n3y=170), (2, 3), {}),
+        ("baskoyak site GHB on the real section (profile, crest slope), 2D and 3D",
+         BAS.with_(profile=REAL, crest_slope=CREST), (2, 3), {}),
+        ("desterre DE-1.5-c1-ru0 with k_h 0.1 and a tension crack 0.5 m half full, 2D",
+         PR.BY_KEY["desterre_DE-1.5-c1-ru0"].inputs.with_(kh=0.1, crack_depth=0.5, crack_water=0.5), (2,), {})):
     searches.append(dict(name=name, inputs=inputs_dict(inp), dims=list(dims), opts=opts,
                          result=search_dict(E.critical_search(inp, dims=dims, **opts))))
 print(f"{len(searches)} searches in {time.time() - t1:.1f} s", file=sys.stderr)
@@ -237,11 +317,13 @@ print(f"{len(searches)} searches in {time.time() - t1:.1f} s", file=sys.stderr)
 faces = []
 DE = PR.BY_KEY["desterre_DE-1.5-c1-ru0"].inputs
 for inp in (MAIN, MAIN.with_(xc=25.0, zc=250.0, R=251.0), MAIN.with_(xc=500.0, zc=-10.0, R=400.0), TAYLOR75, DE,
-            DE.with_(xc=-2.0, zc=-0.5, R=3.0), MAIN.with_(base_circle=True)):
+            DE.with_(xc=-2.0, zc=-0.5, R=3.0), MAIN.with_(base_circle=True),
+            MAIN.with_(xc=25.0, zc=250.0, R=251.0, crack_depth=5.0), MAIN.with_(xc=25.0, zc=250.0, R=251.0, crest_slope=8.0),
+            BAS.with_(profile=REAL, crest_slope=CREST)):
     faces.append(dict(inputs=inputs_dict(inp), faces={k: num(v) for k, v in E.vertical_faces(inp).items()}))
 
 ref = dict(hb=[num(v) for v in E.hoek_brown_parameters(42.0, 10.0, 0.0)], cases=cases, fixtures=fixtures,
-           original_closure=ocm, extents=extents, searches=searches, faces=faces, columns=columns)
+           original_closure=ocm, extents=extents, searches=searches, faces=faces, columns=columns, studies=studies)
 OUT.mkdir(parents=True, exist_ok=True)
 (OUT / "reference.json").write_text(json.dumps(ref))
 

@@ -346,7 +346,8 @@
     H: 360, beta: 50, xc: 355.7423115, zc: 644.4192949, R: 725.2669975, gamma: 27, sigma_ci: 77.7, mi: 10, gsi: 42,
     D: 0, a_override: 0.5, nu: 0.271, model: "ejc_moscarda", wet: false, Hw: 360, beta_w: 50, n3: 20, n2: 40,
     form: "FH", tension: "none", iteration: "default", safeguard: "project", c_mc: 0, phi_mc: 0, ru: null,
-    base_circle: false, n3y: null,
+    base_circle: false, n3y: null, profile: null, crest_slope: 0, plan_radius: null, elong: 1, mid_length: 0,
+    d_zone: null, piezo: null, crack_depth: null, crack_water: 0, kh: 0,
   });
   const inputs = (kw = {}) => Object.freeze(Object.assign({}, DEFAULT_INPUTS, kw));
   function hb(inp) {
@@ -368,10 +369,98 @@
     return q >= 0 ? zc - Math.sqrt(q) : NaN;
   }
 
+  // ---- additions: slope profile, crest slope, walls curved in plan, piezometric line, tension crack ---------------
+  // All off by default; without them ground() and water() are groundZ() and waterZ(), the thesis surfaces.
+  const isNone = (v) => v === null || v === undefined;
+  /** The polyline [[x, z], ...] checked: at least two finite points, x strictly decreasing. */
+  function points(pts, what) {
+    if (!(Array.isArray(pts) && pts.length >= 2 && pts.every((q) => Array.isArray(q) && q.length === 2)))
+      throw new Error(`the ${what} needs at least two points (x, z)`);
+    const a = pts.map((q) => [Number(q[0]), Number(q[1])]);
+    if (!a.every((q) => Number.isFinite(q[0]) && Number.isFinite(q[1]))) throw new Error(`the ${what} has a point that is not a number`);
+    for (let k = 1; k < a.length; k++) if (!(a[k][0] < a[k - 1][0])) throw new Error(`the ${what} runs back into the slope: x must decrease from point to point`);
+    return a;
+  }
+  /** Validate the additions (each off by default). Same as check_additions in ejc_app/engine.py. */
+  function checkAdditions(inp) {
+    if (!isNone(inp.profile)) {
+      const a = points(inp.profile, "slope profile");
+      if (a[0][0] !== 0 || a[0][1] !== 0) throw new Error("the slope profile starts at the toe, (0, 0)");
+      for (let k = 1; k < a.length; k++) if (!(a[k][1] >= a[k - 1][1])) throw new Error("the slope profile cannot descend: z must not decrease from point to point");
+      if (!(a[a.length - 1][1] > 0)) throw new Error("the slope profile must end above the toe (crest edge z > 0)");
+    }
+    if (!(Number.isFinite(inp.crest_slope) && inp.crest_slope >= 0 && inp.crest_slope < 90)) throw new Error("require 0 <= crest slope < 90 deg");
+    if (!isNone(inp.plan_radius) && !(Number.isFinite(inp.plan_radius) && inp.plan_radius !== 0))
+      throw new Error("the plan radius must be a number other than 0 (positive: concave wall; negative: convex)");
+    if (!(Number.isFinite(inp.elong) && inp.elong > 0)) throw new Error("the slip-surface elongation must be positive");
+    if (!(Number.isFinite(inp.mid_length) && inp.mid_length >= 0)) throw new Error("the length of the cylindrical middle part must be zero or positive");
+    if (!isNone(inp.d_zone) && !(Number.isFinite(inp.d_zone) && inp.d_zone >= 0)) throw new Error("the disturbed-zone thickness T must be zero or positive");
+    if (!isNone(inp.piezo)) points(inp.piezo, "piezometric line");
+    if (!isNone(inp.crack_depth) && !(Number.isFinite(inp.crack_depth) && inp.crack_depth > 0)) throw new Error("the tension crack depth must be positive");
+    if (!(Number.isFinite(inp.crack_water) && inp.crack_water >= 0 && inp.crack_water <= 1)) throw new Error("the crack water fill must be from 0 to 1");
+    if (!(Number.isFinite(inp.kh) && inp.kh >= 0 && inp.kh < 1)) throw new Error("require 0 <= k_h < 1");
+  }
+  /** The excavated face from the toe (0, 0) to the crest edge, as [x[], z[]]: the profile, or the planar face. */
+  function facePoints(inp) {
+    if (isNone(inp.profile)) return [[0, -inp.H / Math.tan(inp.beta * DEG)], [0, inp.H]];
+    return [inp.profile.map((q) => Number(q[0])), inp.profile.map((q) => Number(q[1]))];
+  }
+  const faceHeight = (inp) => (isNone(inp.profile) ? inp.H : Number(inp.profile[inp.profile.length - 1][1]));
+  /** Piecewise-linear z through the points (px, pz), px strictly decreasing; outside [px[last], px[0]] the end segments
+   *  are extended. Same as _interp_desc. */
+  function interpDesc(x, px, pz) {
+    const n = px.length;
+    let k = -1;
+    for (let i = 0; i < n; i++) { if (px[i] >= x) k = i; else break; }
+    k = Math.min(Math.max(k, 0), n - 2);
+    return pz[k] + (x - px[k]) * (pz[k + 1] - pz[k]) / (px[k + 1] - px[k]);
+  }
+  /** Section coordinate of (x, y): signed horizontal distance from the toe line, negative behind it (x on a straight
+   *  wall; on a wall curved in plan, |R_p| - r (concave) or r - |R_p| (convex), r from the plan axis at (R_p, 0)).
+   *  Same as plan_x. */
+  function planX(inp, x, y) {
+    const rp = inp.plan_radius;
+    if (isNone(rp)) return x;
+    const r = Math.sqrt((x - rp) * (x - rp) + y * y);
+    return rp > 0 ? rp - r : r + rp;
+  }
+  /** Ground surface z_t at (x[, y]): pit floor, face (planar or profile), crest (flat or rising at crest_slope); swept in
+   *  plan on a curved wall. Same as ground in ejc_app/engine.py. */
+  function ground(inp, x, y) {
+    const xs = isNone(y) ? x : planX(inp, x, y);
+    if (isNone(inp.profile) && !inp.crest_slope) return groundZ(xs, inp.H, inp.beta);
+    const [px, pz] = facePoints(inp), xe = px[px.length - 1], he = pz[pz.length - 1];
+    if (xs > 0) return 0;
+    if (xs >= xe) return isNone(inp.profile) ? -xs * Math.tan(inp.beta * DEG) : interpDesc(xs, px, pz);
+    return he + (xe - xs) * Math.tan(inp.crest_slope * DEG);
+  }
+  /** Water table z_w at (x[, y]): waterZ, or the piezometric line (constant beyond its end points). Same as water. */
+  function water(inp, x, y) {
+    const xs = isNone(y) ? x : planX(inp, x, y);
+    if (isNone(inp.piezo)) return waterZ(xs, inp.Hw, inp.beta_w);
+    const px = inp.piezo.map((q) => Number(q[0])), pz = inp.piezo.map((q) => Number(q[1])), n = px.length;
+    if (xs >= px[0]) return pz[0];
+    if (xs <= px[n - 1]) return pz[n - 1];
+    return interpDesc(xs, px, pz);
+  }
+  /** Shortest distance (m) from the section point (x, z) to the excavated face. Same as face_distance. */
+  function faceDistance(inp, x, z) {
+    const [px, pz] = facePoints(inp);
+    let best = Infinity;
+    for (let k = 0; k < px.length - 1; k++) {
+      const ax = px[k], az = pz[k], dx = px[k + 1] - ax, dz = pz[k + 1] - az;
+      const t = Math.min(Math.max(((x - ax) * dx + (z - az) * dz) / (dx * dx + dz * dz), 0), 1);
+      const ex = x - (ax + t * dx), ez = z - (az + t * dz);
+      best = Math.min(best, Math.sqrt(ex * ex + ez * ez));
+    }
+    return best;
+  }
+
   /** Entry and exit of the slip circle on y = 0 (ends of the interval where the ground is above the circle). */
   function slipExtent(inp, n = 20001) {
+    checkAdditions(inp);
     const { xc, zc, R } = inp;
-    const above = (x) => groundZ(x, inp.H, inp.beta) - sphereZ(x, 0, xc, zc, R) > 0;
+    const above = (x) => ground(inp, x) - sphereZ(x, 0, xc, zc, R) > 0;
     const xs = linspace(xc - R, xc + R, n);
     let first = -1, last = -1;
     for (let i = 0; i < n; i++) if (above(xs[i])) { if (first < 0) first = i; last = i; }
@@ -393,10 +482,39 @@
    *  default grid stops at the toe). No force acts on such a face: at the back it works as an open tension crack.
    *  Heights below 1e-9 H (rounding) count as zero. Same as vertical_faces in ejc_app/engine.py. */
   function verticalFaces(inp) {
-    const { xc, zc, R, H, beta } = inp, tol = 1e-9 * H;
-    const back = inp.base_circle || xc - R <= 0 ? groundZ(xc - R, H, beta) - zc : 0;
-    const front = inp.base_circle ? groundZ(xc + R, H, beta) - zc : 0;
+    checkAdditions(inp);
+    const { xc, zc, R } = inp, tol = 1e-9 * faceHeight(inp);
+    const back = (inp.base_circle || xc - R <= 0) && isNone(inp.crack_depth) ? ground(inp, xc - R) - zc : 0;
+    const front = inp.base_circle ? ground(inp, xc + R) - zc : 0;
     return { back: back > tol ? back : 0, front: front > tol ? front : 0 };
+  }
+
+  /** Position of the tension crack, the vertical plane x = x_tc: on y = 0, the first point from the back of the mass
+   *  where the circle lies crack_depth below the ground (the back end itself if the mass ends in a face that high).
+   *  Null without a crack. Same as crack_x in ejc_app/engine.py. */
+  function crackX(inp, n = 20001) {
+    if (isNone(inp.crack_depth)) return null;
+    const dc = inp.crack_depth;
+    let [xEntry, xExit] = slipExtent(inp);
+    if (!inp.base_circle) xExit = Math.min(xExit, 0);
+    const { xc, zc, R } = inp;
+    const depth = (x) => ground(inp, x) - sphereZ(x, 0, xc, zc, R);
+    const xs = linspace(xEntry, xExit, n);
+    let k = -1, dmax = -Infinity;
+    for (let i = 0; i < n; i++) {
+      const d = depth(xs[i]);
+      if (!Number.isNaN(d) && d > dmax) dmax = d;
+      if (k < 0 && Number.isFinite(d) && d >= dc) k = i;
+    }
+    if (k < 0) throw new Error(`the tension crack (${fmtG(dc, 6)} m) is deeper than the sliding mass on the central section (at most ${fmtG(dmax, 4)} m deep)`);
+    if (k === 0) return xs[0];
+    let a = xs[k - 1], b = xs[k];
+    for (let it = 0; it < 200; it++) {
+      const mid = 0.5 * (a + b);
+      if (mid === a || mid === b) break;
+      if (depth(mid) >= dc) b = mid; else a = mid;
+    }
+    return 0.5 * (a + b);
   }
 
   /** The grid's x range on the central section, [x0, x1] with x0 > x1: brief §1.4, x0 = x_c - sqrt(R^2 - z_c^2) and
@@ -428,17 +546,22 @@
   /** The inputs with n columns along x and the columns across y scaled to keep their shape (mesh studies). */
   const withN3 = (inp, n) => inputs(Object.assign({}, inp,
     { n3: n, n3y: inp.n3y === null || inp.n3y === undefined ? null : columnsAcross(inp, n) }));
-  /** Plan size of the 3D columns, [dx, dy] in m: dx = (x0 - x1)/N along x, dy = R/N_y across y. */
+  /** Half-width of the slip surface across y: R for the sphere, lam R + L/2 with the caps and middle part. */
+  function yExtent(inp) {
+    const half = 0.5 * inp.mid_length;
+    return half > 0 ? inp.elong * inp.R + half : inp.elong * inp.R;
+  }
+  /** Plan size of the 3D columns, [dx, dy] in m: dx = (x0 - x1)/N along x, dy = yExtent/N_y across y. */
   function columnSize(inp) {
     const [x0, x1] = gridXRange(inp);
-    return [(x0 - x1) / inp.n3, inp.R / columnsAcross(inp, inp.n3)];
+    return [(x0 - x1) / inp.n3, yExtent(inp) / columnsAcross(inp, inp.n3)];
   }
   /** Columns along x and across y whose plan size is at most dx by dy (m): N = ceil((x0 - x1)/dx), N_y = ceil(R/dy),
    *  each at least 1 (a relative 1e-9 below a whole number counts as it). Same as counts_for_size. */
   function countsForSize(inp, dx, dy) {
     if (!(dx > 0 && dy > 0)) throw new Error("the column length and width must be positive");
     const [x0, x1] = gridXRange(inp);
-    return [Math.max(1, Math.ceil((x0 - x1) / dx * (1 - 1e-9))), Math.max(1, Math.ceil(inp.R / dy * (1 - 1e-9)))];
+    return [Math.max(1, Math.ceil((x0 - x1) / dx * (1 - 1e-9))), Math.max(1, Math.ceil(yExtent(inp) / dy * (1 - 1e-9)))];
   }
 
   function buildMesh(inp, dim, n) {
@@ -448,41 +571,99 @@
       if (inp.wet) throw new Error("choose a water table (wet) or r_u, not both");
       if (!(inp.ru >= 0 && inp.ru < 1)) throw new Error("require 0 <= r_u < 1");
     }
+    checkAdditions(inp);
     const { xc, zc, R } = inp;
     const [x0, x1] = gridXRange(inp);
+    if (dim === 3 && !isNone(inp.plan_radius) && inp.plan_radius < 0 && !(x1 > inp.plan_radius))
+      throw new Error(`a convex wall needs its plan axis behind the sliding mass: the plan radius must exceed ${fmtG(-x1, 4)} m, the distance from the toe to the back of the grid`);
     const dx = (x0 - x1) / n;
-    const ny = dim === 3 ? columnsAcross(inp, n) : 1, dy = dim === 3 ? R / ny : 1;
-    const cols = { i: [], j: [], x: [], y: [], zb: [], zt: [], h: [], q: [] };
+    const ny = dim === 3 ? columnsAcross(inp, n) : 1;
+    const lam = dim === 3 ? inp.elong : 1, half = dim === 3 ? 0.5 * inp.mid_length : 0;
+    const xtc = crackX(inp);
+    const dy = dim === 3 ? yExtent(inp) / ny : 1;
+    const cols = { i: [], j: [], x: [], y: [], yc: [], zb: [], zt: [], h: [], q: [], xs: [] };
     for (let i = 1; i <= n; i++) {
       for (let j = 1; j <= ny; j++) {
         const x = x0 - (i - 0.5) * dx, y = dim === 3 ? (j - 0.5) * dy : 0;
-        const ddx = x - xc, q = R * R - ddx * ddx - y * y;
-        if (!(q > 0) || (!inp.base_circle && !(x <= 0))) continue;
-        const zb = zc - Math.sqrt(q), zt = groundZ(x, inp.H, inp.beta), h = zt - zb;
+        const yc = half > 0 ? Math.max(y - half, 0) : y;     // distance into the end cap
+        const ddx = x - xc, yl = yc / lam, q = R * R - ddx * ddx - yl * yl;
+        const xs = dim === 3 ? planX(inp, x, y) : x;
+        if (!(q > 0) || (!inp.base_circle && !(xs <= 0))) continue;
+        if (xtc !== null && !(x >= xtc)) continue;          // the mass ends at the tension crack
+        const zb = zc - Math.sqrt(q), zt = dim === 3 ? ground(inp, x, y) : ground(inp, x), h = zt - zb;
         if (!(h > 0)) continue;
-        cols.i.push(i); cols.j.push(j); cols.x.push(x); cols.y.push(y); cols.zb.push(zb); cols.zt.push(zt);
-        cols.h.push(h); cols.q.push(q);
+        cols.i.push(i); cols.j.push(j); cols.x.push(x); cols.y.push(y); cols.yc.push(yc); cols.zb.push(zb); cols.zt.push(zt);
+        cols.h.push(h); cols.q.push(q); cols.xs.push(xs);
       }
     }
     const cnt = cols.x.length, f64 = (a) => Float64Array.from(a);
     const x = f64(cols.x), y = f64(cols.y), zb = f64(cols.zb), h = f64(cols.h);
     const ah = new Float64Array(cnt).fill(dx * dy);
-    const g = map(cnt, (k) => Math.sqrt(cols.q[k]) / R);
-    const rho = map(cnt, (k) => (dim === 3 ? Math.sqrt(R * R - y[k] * y[k]) : R));
+    let g, nx, nyv, rho;
+    if (lam === 1 && half === 0) {
+      g = map(cnt, (k) => Math.sqrt(cols.q[k]) / R);
+      nx = map(cnt, (k) => (xc - x[k]) / R); nyv = map(cnt, (k) => -y[k] / R);
+      rho = map(cnt, (k) => (dim === 3 ? Math.sqrt(R * R - y[k] * y[k]) : R));
+    } else {                  // ellipsoidal caps: normal along (x_c - x, -y_c/lam^2, z_c - z_b), y_c = max(y - L/2, 0)
+      const yl = map(cnt, (k) => cols.yc[k] / (lam * lam));
+      const nrm = map(cnt, (k) => Math.sqrt((x[k] - xc) * (x[k] - xc) + yl[k] * yl[k] + cols.q[k]));
+      g = map(cnt, (k) => Math.sqrt(cols.q[k]) / nrm[k]);
+      nx = map(cnt, (k) => (xc - x[k]) / nrm[k]); nyv = map(cnt, (k) => -yl[k] / nrm[k]);
+      rho = map(cnt, (k) => { const v = cols.yc[k] / lam; return Math.sqrt(R * R - v * v); });
+    }
     const kap = map(cnt, (k) => (xc - x[k]) / rho[k]);
     let u, zw;
     if (inp.ru !== null && inp.ru !== undefined) {
       zw = new Float64Array(cnt).fill(NaN); u = map(cnt, (k) => inp.ru * inp.gamma * h[k]);
     } else if (inp.wet) {
-      zw = map(cnt, (k) => waterZ(x[k], inp.Hw, inp.beta_w)); u = map(cnt, (k) => GAMMA_W * Math.max(0, zw[k] - zb[k]));
+      zw = map(cnt, (k) => (dim === 3 ? water(inp, x[k], y[k]) : water(inp, x[k]))); u = map(cnt, (k) => GAMMA_W * Math.max(0, zw[k] - zb[k]));
     } else {
       zw = new Float64Array(cnt).fill(NaN); u = new Float64Array(cnt);
     }
+    const xsec = f64(cols.xs);
+    const zone = isNone(inp.d_zone) ? null : Uint8Array.from(xsec, (v, k) => (faceDistance(inp, v, zb[k]) <= inp.d_zone ? 1 : 0));
     const mesh = { dim, n, ny, x0, x1, dx, dy, i: Int32Array.from(cols.i), j: Int32Array.from(cols.j), x, y, zb,
       zt: f64(cols.zt), h, ah, g, area: map(cnt, (k) => ah[k] / g[k]), rho, kap,
-      w: map(cnt, (k) => inp.gamma * h[k] * ah[k]), u, zw, count: cnt };
+      w: map(cnt, (k) => inp.gamma * h[k] * ah[k]), u, zw, count: cnt, n_x: nx, n_y: nyv, xsec, zone, crack: null, ext: null };
     mesh.volume = (dim === 3 ? 2 : 1) * sum(map(cnt, (k) => h[k] * ah[k]));
+    if (xtc !== null) mesh.crack = crackForces(inp, mesh, xtc);
+    if (inp.kh > 0 || (mesh.crack && mesh.crack.P > 0)) mesh.ext = externalTerms(inp, mesh);
     return mesh;
+  }
+
+  /** Water in the tension crack: P = gamma_w h_w^2 / 2 per row (times dy in 3D) on the crack face, towards the pit, at
+   *  h_w/3 above the crack bottom; the water level is set on the central section. Same as crack_forces. */
+  function crackForces(inp, m, xtc) {
+    const { xc, zc, R } = inp, lam = m.dim === 3 ? inp.elong : 1, half = m.dim === 3 ? 0.5 * inp.mid_length : 0;
+    const d0 = xtc - xc, zb0 = zc - Math.sqrt(R * R - d0 * d0);
+    const level = zb0 + inp.crack_water * (ground(inp, xtc) - zb0);
+    const ys = m.dim === 3 ? Array.from({ length: m.ny }, (_, q) => (q + 1 - 0.5) * m.dy) : [0];
+    const width = m.dim === 3 ? m.dy : 1, rows = [];
+    for (const y of ys) {
+      const yl = (half > 0 ? Math.max(y - half, 0) : y) / lam;
+      const qq = R * R - d0 * d0 - yl * yl;
+      if (!(qq > 0)) continue;
+      const zbot = zc - Math.sqrt(qq), ztop = m.dim === 3 ? ground(inp, xtc, y) : ground(inp, xtc);
+      if (!(ztop > zbot)) continue;
+      const hw = Math.min(Math.max(level - zbot, 0), ztop - zbot), zp = zbot + hw / 3;
+      rows.push({ y, zbot, ztop, hw, P: 0.5 * GAMMA_W * hw * hw * width, zP: zp, e: zc - zp,
+        rho: m.dim === 3 ? Math.sqrt(R * R - yl * yl) : R });
+    }
+    let tot = 0, mh = 0, mm = 0;
+    for (const r of rows) { tot += r.P; mh += r.P * r.e / r.rho; mm += r.P * r.e; }
+    return { x: xtc, level, rows, P: tot, MH: mh, MM: mm };
+  }
+
+  /** Driving terms of seismic load (k_h W at each centroid, towards the pit) and crack water in the global equation:
+   *  each horizontal force's moment Q (z_c - z_Q) about the rotation axis, added to F_M's sum W (x_c - x) and, divided
+   *  by its lever arm rho, to F_H's sum W kappa. Same as external_terms in ejc_app/engine.py. */
+  function externalTerms(inp, m) {
+    const n = m.count, e = map(n, (k) => inp.zc - 0.5 * (m.zb[k] + m.zt[k])), E = map(n, (k) => inp.kh * m.w[k]);
+    const out = { kh: inp.kh, E, e, Ex: sum(E), EH: sum(map(n, (k) => E[k] * e[k] / m.rho[k])), EM: sum(map(n, (k) => E[k] * e[k])),
+      P: 0, PH: 0, PM: 0 };
+    if (m.crack) { out.P = m.crack.P; out.PH = m.crack.MH; out.PM = m.crack.MM; }
+    out.H = out.EH + out.PH; out.M = out.EM + out.PM;
+    return out;
   }
 
   // ---------------------------------------------------------------------------------------------------------------
@@ -496,9 +677,15 @@
     }
     return [ce, te, taue];
   }
+  /** Denominator of the global equation: sum W kappa (F_H) or sum W (x_c - x) (F_M), plus the additions' driving terms. */
+  function drive(m, xc, form) {
+    const base = form === "FM" ? sum(map(m.count, (k) => m.w[k] * (xc - m.x[k]))) : sum(map(m.count, (k) => m.w[k] * m.kap[k]));
+    if (!m.ext) return base;
+    return base + (form === "FM" ? m.ext.M : m.ext.H);
+  }
   function globalF(m, taue, xc, form) {
-    if (form === "FM") return sum(map(m.count, (k) => taue[k] * m.area[k] * m.rho[k])) / sum(map(m.count, (k) => m.w[k] * (xc - m.x[k])));
-    return sum(map(m.count, (k) => taue[k] * m.area[k])) / sum(map(m.count, (k) => m.w[k] * m.kap[k]));
+    if (form === "FM") return sum(map(m.count, (k) => taue[k] * m.area[k] * m.rho[k])) / drive(m, xc, form);
+    return sum(map(m.count, (k) => taue[k] * m.area[k])) / drive(m, xc, form);
   }
   function localSn(m, ce, te, F) {
     const ma = map(m.count, (k) => m.g[k] + m.kap[k] * te[k] / F);
@@ -514,6 +701,31 @@
     return Number.isFinite(edge) ? Math.max(tensile, edge) : tensile;
   }
 
+  /** Disturbance zone: the strength inner (D as given) on the bases in zone, outer (D = 0) on the others. */
+  const zonedStrength = (inner, outer, zone) => ({ zoned: true, inner, outer, zone, model: inner.model });
+  /** solveStrength, or for a zoned strength each zone with its own strength. Same as strength_at. */
+  function strengthAt(sn, st) {
+    if (!st.zoned) return solveStrength(sn, st);
+    const z = st.zone, n = sn.length, ia = [], ib = [];
+    for (let k = 0; k < n; k++) (z[k] ? ia : ib).push(k);
+    if (!ib.length) return solveStrength(sn, st.inner);
+    if (!ia.length) return solveStrength(sn, st.outer);
+    const a = solveStrength(Float64Array.from(ia, (k) => sn[k]), st.inner), b = solveStrength(Float64Array.from(ib, (k) => sn[k]), st.outer);
+    const out = emptyStrength(n);
+    for (const f of Object.keys(out)) {
+      ia.forEach((k, q) => { out[f][k] = a[f][q]; });
+      ib.forEach((k, q) => { out[f][k] = b[f][q]; });
+    }
+    return out;
+  }
+  /** The run's strength: strengthOf(inp), or with the disturbance zone D within d_zone of the face and D = 0 beyond
+   *  (not for Mohr-Coulomb). Same as strength_for. */
+  function strengthFor(inp, m) {
+    const st = strengthOf(inp);
+    if (!m.zone || st.model === "mc") return st;
+    return zonedStrength(st, strengthOf(inputs(Object.assign({}, inp, { D: 0 }))), m.zone);
+  }
+
   function solve(m, st, xc, gamma, form = "FH", tension = "none", iteration = "default", safeguard = "project",
     maxIter = MAX_ITER) {
     if (form !== "FH" && form !== "FM") throw new Error("form must be FH or FM");
@@ -527,19 +739,29 @@
     const res = { dim: m.dim, status: "REJECTED", reason: "", fos: null, f_trial: null, iterations: 0, form, tension,
       iteration, mesh: m, strength: null, sn: null, c_used: null, tan_used: null, tau_used: null, tensile: null,
       m_alpha: null, local_res: null, global_res: NaN, bishop_res: NaN, checks: [], history: [], projections: 0,
-      rejected_index: null, safeguard, projection_limit: null, projection_value: null };
+      rejected_index: null, safeguard, projection_limit: null, projection_value: null, projection_limits: null };
     if (st.model === "ejc_original") {
       res.status = "NOT APPLICABLE";
       res.reason = "The original closure is an admissibility check only and never produces a FoS.";
       return res;
     }
     if (m.count === 0) { res.reason = "No active columns."; return res; }
-    const drive = form === "FM" ? sum(map(m.count, (k) => m.w[k] * (xc - m.x[k]))) : sum(map(m.count, (k) => m.w[k] * m.kap[k]));
-    if (!(drive > 0)) { res.reason = "Non-positive driving sum."; return res; }
+    const d0 = drive(m, xc, form);
+    if (!(d0 > 0)) { res.reason = "Non-positive driving sum."; return res; }
     let sn = map(m.count, (k) => (gamma * m.h[k] - m.u[k]) * (m.g[k] * m.g[k]));
-    const limit = safeguard === "project" ? projectionLimit(st) : null;
+    let limit = null, limitArr = null;
+    if (safeguard === "project") {
+      if (st.zoned) {                                   // disturbance zone: each base with its zone's limit
+        const li = projectionLimit(st.inner), lo = projectionLimit(st.outer);
+        limitArr = map(m.count, (k) => (st.zone[k] ? li : lo));
+        res.projection_limit = li; res.projection_value = li + Math.max(1e-9, 0.001 * Math.abs(li)); res.projection_limits = [li, lo];
+      } else limit = projectionLimit(st);
+    }
     let project = (v) => [v, 0];
-    if (limit !== null) {
+    if (limitArr) {
+      const valArr = map(m.count, (k) => limitArr[k] + Math.max(1e-9, 0.001 * Math.abs(limitArr[k])));
+      project = (v) => { let c = 0; const o = map(v.length, (k) => (v[k] <= limitArr[k] ? (c++, valArr[k]) : v[k])); return [o, c]; };
+    } else if (limit !== null) {
       const value = limit + Math.max(1e-9, 0.001 * Math.abs(limit));
       res.projection_limit = limit; res.projection_value = value;
       project = (v) => { let c = 0; const o = map(v.length, (k) => (v[k] <= limit ? (c++, value) : v[k])); return [o, c]; };
@@ -548,7 +770,7 @@
     let fOld = iteration === "native_v15" ? 1.0 : null;
     let tens = new Uint8Array(m.count);
     for (let it = 1; it <= maxIter; it++) {
-      const stg = solveStrength(sn, st);
+      const stg = strengthAt(sn, st);
       res.iterations = it;
       const bad = [];
       for (let k = 0; k < m.count; k++) {
@@ -587,7 +809,7 @@
       fOld = F;
       if (dF < TOL_DF && move < TOL_DSN) {
         if (iteration === "native_v15") [sn] = localSn(m, ce, te, F);
-        return finalChecks(res, m, st, xc, F, sn, tens, dF, move);
+        return finalChecks(res, m, st, xc, F, sn, tens, dF, move, limitArr);
       }
     }
     res.status = "NOT CONVERGED";
@@ -596,8 +818,8 @@
     return res;
   }
 
-  function finalChecks(res, m, st, xc, F, sn, tensUsed, dF, move) {
-    const stg = solveStrength(sn, st), n = m.count;
+  function finalChecks(res, m, st, xc, F, sn, tensUsed, dF, move, limitArr = null) {
+    const stg = strengthAt(sn, st), n = m.count;
     const t = map(n, (k) => Math.tan(stg.phi[k]));
     const tens = map(n, (k) => (res.tension !== "none" ? (tensUsed[k] || sn[k] < 0 ? 1 : 0) : tensUsed[k]));
     const [ce, te, taue] = sensitivity(stg.c, t, stg.tau, sn, res.tension, tensUsed);
@@ -605,7 +827,7 @@
     const local = map(n, (k) => Math.abs(m.w[k] - (sn[k] + m.u[k]) * m.ah[k] - taue[k] * m.area[k] * m.kap[k] / F) / m.w[k]);
     const glob = Math.abs(globalF(m, taue, xc, res.form) - F) / F;
     const bishop = sum(map(n, (k) => (ce[k] * m.ah[k] + (m.w[k] - m.u[k] * m.ah[k]) * te[k]) / ma[k])) /
-      sum(map(n, (k) => m.w[k] * m.kap[k]));
+      drive(m, xc, "FH");
     const bishopRes = Math.abs(bishop - F) / F;
     const acc = Array.from(stg.code, (c) => c === OK);
     const nanMax = (a) => { let v = -Infinity, any = false; for (const x of a) if (!Number.isNaN(x)) { any = true; if (x > v) v = x; } return any ? v : NaN; };
@@ -640,8 +862,13 @@
     if (res.projection_limit !== null) {
       const last = res.history.length ? res.history[res.history.length - 1][5] : 0;
       checks.push(chk("Projected bases at convergence", last, "0", last === 0));
-      checks.push(chk("Min sigma_n above the projection limit (kPa)", arrMin(sn) - res.projection_limit, "> 0",
-        all(sn, (v) => v > res.projection_limit)));
+      if (!res.projection_limits) {
+        checks.push(chk("Min sigma_n above the projection limit (kPa)", arrMin(sn) - res.projection_limit, "> 0",
+          all(sn, (v) => v > res.projection_limit)));
+      } else {                                          // disturbance zone: each base against its zone's limit
+        checks.push(chk("Min sigma_n above the projection limit (kPa)", arrMin(map(n, (k) => sn[k] - limitArr[k])), "> 0",
+          all(sn, (v, k) => v > limitArr[k])));
+      }
     }
     Object.assign(res, { strength: stg, sn, c_used: ce, tan_used: te, tau_used: taue, tensile: Uint8Array.from(tensUsed),
       m_alpha: ma, local_res: local, global_res: glob, bishop_res: bishopRes, checks, f_trial: F });
@@ -659,10 +886,8 @@
   // ---------------------------------------------------------------------------------------------------------------
   // one case = 3D + 2D; helpers for the pages
   // ---------------------------------------------------------------------------------------------------------------
-  const run3d = (inp) => solve(buildMesh(inp, 3, inp.n3), strengthOf(inp), inp.xc, inp.gamma, inp.form, inp.tension,
-    inp.iteration, inp.safeguard);
-  const run2d = (inp) => solve(buildMesh(inp, 2, inp.n2), strengthOf(inp), inp.xc, inp.gamma, "FH", inp.tension,
-    inp.iteration, inp.safeguard);
+  const run3d = (inp) => { const m = buildMesh(inp, 3, inp.n3); return solve(m, strengthFor(inp, m), inp.xc, inp.gamma, inp.form, inp.tension, inp.iteration, inp.safeguard); };
+  const run2d = (inp) => { const m = buildMesh(inp, 2, inp.n2); return solve(m, strengthFor(inp, m), inp.xc, inp.gamma, "FH", inp.tension, inp.iteration, inp.safeguard); };
   function run(inp) {
     const r3 = run3d(inp), r2 = run2d(inp);
     return { inputs: inp, r3, r2, ratio: r3.fos !== null && r2.fos !== null ? r3.fos / r2.fos : null };
@@ -675,7 +900,8 @@
     const m = r.mesh, F = r.fos !== null ? r.fos : r.f_trial;
     if (!r.sn || !r.tau_used || F === null) throw new Error("no converged state for this element");
     const x = m.x[k], y = m.y[k], zb = m.zb[k];
-    const nvec = [(inp.xc - x) / inp.R, -y / inp.R, (inp.zc - zb) / inp.R];
+    const sphere = inp.elong === 1 && !(inp.mid_length > 0);
+    const nvec = sphere ? [(inp.xc - x) / inp.R, -y / inp.R, (inp.zc - zb) / inp.R] : [m.n_x[k], m.n_y[k], m.g[k]];
     const svec = [-(inp.zc - zb) / m.rho[k], 0, (inp.xc - x) / m.rho[k]];
     const N = r.sn[k] * m.area[k], U = m.u[k] * m.area[k], S = r.tau_used[k] * m.area[k] / F, W = m.w[k];
     const resid = W - (N + U) * m.g[k] - S * m.kap[k];
@@ -697,7 +923,7 @@
     const m = r.mesh, F = r.fos !== null ? r.fos : r.f_trial;
     if (!r.sn || !r.tau_used || F === null) throw new Error("no converged state for this run");
     const n = m.count, mult = m.dim === 3 ? 2 : 1, xc = inp.xc, zc = inp.zc, R = inp.R;
-    const nx = map(n, (k) => (xc - m.x[k]) / R), ny = map(n, (k) => -m.y[k] / R), nz = Float64Array.from(m.g);
+    const nx = Float64Array.from(m.n_x), ny = Float64Array.from(m.n_y), nz = Float64Array.from(m.g);
     const sx = map(n, (k) => -(zc - m.zb[k]) / m.rho[k]), sz = map(n, (k) => (xc - m.x[k]) / m.rho[k]);
     const W = Float64Array.from(m.w), N = map(n, (k) => r.sn[k] * m.area[k]), U = map(n, (k) => m.u[k] * m.area[k]);
     const S = map(n, (k) => r.tau_used[k] * m.area[k] / F);
@@ -711,10 +937,19 @@
     const lhs = fm ? -mS : mult * sum(S), rhs = fm ? mW : mult * sum(map(n, (k) => W[k] * m.kap[k]));
     let vmax = 0;
     for (let k = 0; k < n; k++) vmax = Math.max(vmax, Math.abs(vert[k]) / W[k]);
-    return { F, dim: m.dim, mult, count: n, form: r.form, weight: -totals.W.z, totals,
-      moments: { W: mW, N: 0, U: 0, S: mS, net: mW + mS },
-      method: { form: r.form, lhs, rhs, residual: (lhs - rhs) / rhs }, vertical_max_rel: vmax,
-      el: { x: m.x, y: m.y, zb: m.zb, zm: map(n, (k) => (m.zb[k] + m.zt[k]) / 2), W, N, U, S, nx, ny, nz, sx, sz } };
+    const moments = { W: mW, N: 0, U: 0, S: mS, net: mW + mS };
+    const el = { x: m.x, y: m.y, zb: m.zb, zm: map(n, (k) => (m.zb[k] + m.zt[k]) / 2), W, N, U, S, nx, ny, nz, sx, sz };
+    let rhsAll = rhs;
+    if (m.ext) {                                        // seismic load and crack water (additions)
+      totals.E = { x: mult * m.ext.Ex, z: 0 }; totals.P = { x: mult * m.ext.P, z: 0 };
+      totals.net.x += totals.E.x + totals.P.x;
+      moments.E = mult * m.ext.EM; moments.P = mult * m.ext.PM;
+      moments.net += moments.E + moments.P;
+      rhsAll += mult * (fm ? m.ext.M : m.ext.H);
+      el.E = m.ext.E;
+    }
+    return { F, dim: m.dim, mult, count: n, form: r.form, weight: -totals.W.z, totals, moments,
+      method: { form: r.form, lhs, rhs: rhsAll, residual: (lhs - rhsAll) / rhsAll }, vertical_max_rel: vmax, el, crack: m.crack };
   }
 
   // ---------------------------------------------------------------------------------------------------------------
@@ -746,11 +981,38 @@
     return { xc: (pf[0] + pb[0]) / 2 + d * dz / c, zc: (pf[1] + pb[1]) / 2 + d * dx / c, R: Math.sqrt(h * h + d * d) };
   }
 
-  /** The surface of search parameters p = [a, b, t]: front exit at s = aH, back exit at s = bH (groundAt), curvature
-   *  t (circleFromExits). */
+  /** Point of the ground at the search parameter s (m), as groundAt: pit floor for s <= 0, the face up to the crest edge
+   *  height h_e (planar: by height; profile: by its length, scaled so that s = h_e at the edge), the crest behind the
+   *  edge at s - h_e (rising at crest_slope). Same as ground_point in ejc_app/engine.py. */
+  function groundPoint(inp, s) {
+    if (isNone(inp.profile) && !inp.crest_slope) return groundAt(s, inp.H, Math.tan(inp.beta * DEG));
+    const he = faceHeight(inp);
+    if (s <= 0) return [-s, 0];
+    const [px, pz] = facePoints(inp);
+    if (s <= he) {
+      if (isNone(inp.profile)) return [-s / Math.tan(inp.beta * DEG), s];
+      const seg = [];
+      for (let k = 0; k < px.length - 1; k++) seg.push(Math.sqrt((px[k + 1] - px[k]) * (px[k + 1] - px[k]) + (pz[k + 1] - pz[k]) * (pz[k + 1] - pz[k])));
+      let total = 0;
+      for (const v of seg) total += v;
+      const target = s / he * total;
+      let run = 0;
+      for (let k = 0; k < seg.length; k++) {
+        if (target <= run + seg[k] || k === seg.length - 1) {
+          const t = Math.min(Math.max((target - run) / seg[k], 0), 1);
+          return [px[k] + t * (px[k + 1] - px[k]), pz[k] + t * (pz[k + 1] - pz[k])];
+        }
+        run += seg[k];
+      }
+    }
+    return [px[px.length - 1] - (s - he), he + (s - he) * Math.tan(inp.crest_slope * DEG)];
+  }
+
+  /** The surface of search parameters p = [a, b, t]: front exit at s = aH, back exit at s = bH (groundPoint; H the crest
+   *  edge height), curvature t (circleFromExits). */
   function searchSurface(inp, p) {
-    const H = inp.H, tanB = Math.tan(inp.beta * DEG);
-    const front = groundAt(p[0] * H, H, tanB), back = groundAt(p[1] * H, H, tanB);
+    const H = faceHeight(inp);
+    const front = groundPoint(inp, p[0] * H), back = groundPoint(inp, p[1] * H);
     return Object.assign(circleFromExits(front, back, p[2]), { front, back });
   }
 
@@ -760,7 +1022,7 @@
     const { xc, zc, R } = inp, n = 20001, xs = linspace(xc - R, xc + R, n);
     let runs = 0, prev = false, first = -1, last = -1;
     for (let i = 0; i < n; i++) {
-      const on = groundZ(xs[i], inp.H, inp.beta) - sphereZ(xs[i], 0, xc, zc, R) > 0;
+      const on = ground(inp, xs[i]) - sphereZ(xs[i], 0, xc, zc, R) > 0;
       if (on) { if (!prev) runs++; if (first < 0) first = i; last = i; }
       prev = on;
     }
@@ -818,7 +1080,7 @@
   function criticalSearch(inp, opts = {}, progress = null) {
     const o = Object.assign({}, SEARCH), dims = opts.dims || [2];
     for (const [k, v] of Object.entries(opts)) if (v !== undefined && v !== null) o[k] = v;
-    const t0 = Date.now(), H = inp.H, base = !!inp.base_circle;
+    const t0 = Date.now(), base = !!inp.base_circle;
     const [na, nb, nt] = base ? o.grid_base : o.grid;
     const lo0 = base ? -o.front : 0, hi1 = 1 + o.back;
     const sp = [(1 - lo0) / na, hi1 / nb, 1 / nt], step = sp.map((v) => v / 2);
@@ -963,11 +1225,155 @@
     return out;
   }
 
+  // ---------------------------------------------------------------------------------------------------------------
+  // studies (additions): EJC against GHB, parameter sweeps, back-analysis, Monte Carlo
+  // ---------------------------------------------------------------------------------------------------------------
+  function attempt(inp, dim) {
+    try {
+      const r = dim === 3 ? run3d(inp) : run2d(inp);
+      return { fos: r.fos, status: r.status, reason: r.fos !== null ? "" : r.reason };
+    } catch (e) { return { fos: null, status: "INPUT ERROR", reason: String((e && e.message) || e) }; }
+  }
+  const COMPARE = [["ejc", "ejc_moscarda"], ["ghb", "ghb"]];
+  /** EJC (Moscarda closure) and GHB on the same surface, mesh and inputs, 3D and 2D, with the 3D/2D and EJC/GHB ratios.
+   *  Same as compare_models in ejc_app/engine.py. */
+  function compareModels(inp) {
+    const out = { models: {}, ratio: {} };
+    for (const [key, model] of COMPARE) {
+      const b = inputs(Object.assign({}, inp, { model })), row = {};
+      for (const dim of [3, 2]) {
+        const a = attempt(b, dim);
+        row["fos" + dim] = a.fos; row["status" + dim] = a.status; row["reason" + dim] = a.reason;
+      }
+      row.ratio = row.fos3 !== null && row.fos2 !== null ? row.fos3 / row.fos2 : null;
+      out.models[key] = row;
+    }
+    const e = out.models.ejc, g = out.models.ghb;
+    for (const dim of [3, 2]) out.ratio["ejc_ghb" + dim] = e["fos" + dim] !== null && g["fos" + dim] !== null ? e["fos" + dim] / g["fos" + dim] : null;
+    return out;
+  }
+  /** The FoS for each value of the input name, each model and dimension. Same as parameter_sweep. */
+  function parameterSweep(inp, name, values, models = ["ejc_moscarda", "ghb"], dims = [3, 2], progress = null) {
+    if (!(name in inp)) throw new Error(`unknown input '${name}'`);
+    const rows = [];
+    values.forEach((v, q) => {
+      const row = { value: Number(v) };
+      for (const model of models) {
+        const b = inputs(Object.assign({}, inp, { [name]: Number(v), model })), cell = {};
+        for (const dim of dims) {
+          const a = attempt(b, dim);
+          cell["fos" + dim] = a.fos; cell["status" + dim] = a.status; cell["reason" + dim] = a.reason;
+        }
+        row[model] = cell;
+      }
+      rows.push(row);
+      if (progress) progress({ done: q + 1, total: values.length, label: `${name} = ${fmtG(Number(v), 6)}` });
+    });
+    return rows;
+  }
+  /** The value of the input name in [lo, hi] at which the FoS (dim) equals target, by bisection, then the linear
+   *  interpolation across the final bracket solved once more. Same as back_analysis in ejc_app/engine.py. */
+  function backAnalysis(inp, name, lo, hi, target = 1, dim = 2, relTol = 1e-6, maxSteps = 60, progress = null) {
+    if (!(name in inp)) throw new Error(`unknown input '${name}'`);
+    if (!(Number.isFinite(lo) && Number.isFinite(hi) && lo < hi)) throw new Error("require lo < hi");
+    const steps = [];
+    const f = (v) => {
+      const a = attempt(inputs(Object.assign({}, inp, { [name]: Number(v) })), dim);
+      steps.push({ value: Number(v), fos: a.fos, status: a.status });
+      if (progress) progress({ done: steps.length, total: maxSteps + 3, label: `${name} = ${fmtG(Number(v), 6)}` });
+      return a;
+    };
+    const out = { name, target, dim, value: null, fos: null, bracket: [lo, hi], steps, message: "" };
+    const fa = f(lo), fb = f(hi);
+    for (const [v, a] of [[lo, fa], [hi, fb]]) {
+      if (a.fos === null) { out.message = `no accepted FoS at ${name} = ${fmtG(v, 6)} (${a.status}): narrow the range`; return out; }
+    }
+    let ga = fa.fos - target, gb = fb.fos - target;
+    if (ga * gb > 0) {
+      out.message = `the FoS does not cross ${fmtG(target, 6)} between ${name} = ${fmtG(lo, 6)} (F = ${fa.fos.toFixed(6)}) and ` +
+        `${fmtG(hi, 6)} (F = ${fb.fos.toFixed(6)}): widen the range`;
+      return out;
+    }
+    let a = lo, b = hi;
+    const width = relTol * (hi - lo);
+    for (let it = 0; it < maxSteps; it++) {
+      if (b - a <= width) break;
+      const mid = 0.5 * (a + b), fm = f(mid);
+      if (fm.fos === null) { out.message = `no accepted FoS at ${name} = ${fmtG(mid, 6)} (${fm.status})`; out.bracket = [a, b]; return out; }
+      const gm = fm.fos - target;
+      if (ga * gm <= 0) { b = mid; gb = gm; } else { a = mid; ga = gm; }
+    }
+    const v = gb !== ga ? a + (0 - ga) * (b - a) / (gb - ga) : 0.5 * (a + b);
+    const fv = f(v);
+    Object.assign(out, { value: v, fos: fv.fos, bracket: [a, b] });
+    if (fv.fos === null) out.message = `no accepted FoS at the result (${fv.status})`;
+    return out;
+  }
+  /** Seeded uniform random numbers in [0, 1) (Mulberry32), the same stream as mulberry32 in ejc_app/engine.py. */
+  function mulberry32(seed) {
+    let a = seed >>> 0;
+    return () => {
+      a = (a + 0x6D2B79F5) >>> 0;
+      let t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+  /** Monte Carlo: variables [[name, mean, sd, lo, hi], ...] sampled from truncated normals (Box-Muller on the seeded
+   *  stream, rejection outside the limits), the FoS of each sample per model and dimension, and the statistics.
+   *  Same as monte_carlo in ejc_app/engine.py. */
+  function monteCarlo(inp, variables, n, seed = 1, models = null, dims = [3, 2], progress = null) {
+    if (!(Number.isInteger(n) && n >= 1)) throw new Error("the number of samples must be a positive integer");
+    models = models || (inp.model !== "ejc_original" ? [inp.model] : ["ejc_moscarda"]);
+    const rnd = mulberry32(seed);
+    const normal = () => { const u1 = 1 - rnd(), u2 = rnd(); return Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2); };
+    for (const [name, mean, sd, lo, hi] of variables) {
+      if (!(name in inp)) throw new Error(`unknown input '${name}'`);
+      if (!(sd >= 0 && lo <= mean && mean <= hi)) throw new Error(`${name}: require sd >= 0 and lo <= mean <= hi`);
+    }
+    const samples = [];
+    for (let k = 0; k < n; k++) {
+      const vals = {};
+      for (const [name, mean, sd, lo, hi] of variables) {
+        let v = mean;
+        if (sd > 0) {
+          let ok = false;
+          for (let tr = 0; tr < 1000; tr++) { v = mean + sd * normal(); if (lo <= v && v <= hi) { ok = true; break; } }
+          if (!ok) throw new Error(`${name}: no sample inside [${fmtG(lo, 6)}, ${fmtG(hi, 6)}] in 1000 draws`);
+        }
+        vals[name] = v;
+      }
+      const b = inputs(Object.assign({}, inp, vals)), row = { values: vals };
+      for (const model of models) for (const dim of dims) row[model + dim] = attempt(inputs(Object.assign({}, b, { model })), dim).fos;
+      samples.push(row);
+      if (progress) progress({ done: k + 1, total: n, label: `sample ${k + 1} of ${n}` });
+    }
+    const stats = {};
+    for (const model of models) for (const dim of dims) {
+      const f = Float64Array.from(samples.filter((s) => s[model + dim] !== null), (s) => s[model + dim]);
+      const st = { n, accepted: f.length, mean: null, sd: null, beta: null, pof: null, pof_se: null, p05: null, p50: null, p95: null };
+      if (f.length) {
+        st.mean = sum(f) / f.length;
+        st.sd = f.length > 1 ? Math.sqrt(sum(map(f.length, (k) => (f[k] - st.mean) * (f[k] - st.mean))) / (f.length - 1)) : 0;
+        st.beta = st.sd > 0 ? (st.mean - 1) / st.sd : null;
+        let below = 0;
+        for (const v of f) if (v < 1) below++;
+        const pf = below / f.length;
+        st.pof = pf; st.pof_se = Math.sqrt(pf * (1 - pf) / f.length);
+        const fs = Array.from(f).sort((a, b) => a - b);
+        for (const [key, qq] of [["p05", 0.05], ["p50", 0.5], ["p95", 0.95]]) st[key] = fs[Math.min(fs.length - 1, Math.floor(qq * fs.length))];
+      }
+      stats[model + dim] = st;
+    }
+    return { samples, stats, models: models.slice(), dims: dims.slice(), seed, variables: variables.map((v) => v.slice()) };
+  }
+
   const api = { GAMMA_W, MODELS, REASONS, ITERATIONS, OK, SHEAR, NO_STATE, DOMAIN, hoekBrownParameters, makeStrength,
     closureConstants, principalState, scanSigma3, admissibleSnMin, solveStrength, originalClosureMinimum,
     DEFAULT_INPUTS, inputs, hb, strengthOf, groundZ, waterZ, sphereZ, slipExtent, verticalFaces, gridXRange,
-    columnsAcross, withN3, columnSize, countsForSize, buildMesh,
-    projectionLimit, solve,
+    columnsAcross, withN3, columnSize, countsForSize, buildMesh, checkAdditions, facePoints, faceHeight, interpDesc,
+    planX, ground, water, faceDistance, crackX, crackForces, externalTerms, yExtent, strengthAt, strengthFor,
+    projectionLimit, solve, groundPoint, compareModels, parameterSweep, backAnalysis, mulberry32, monteCarlo, COMPARE,
     run3d, run2d, run, gravityCap, columnForces, massForces, SEARCH, groundAt, circleFromExits, searchSurface,
     singleMass, nelderMead, criticalSearch, sum, fmtG, DEG, RAD };
   if (typeof module !== "undefined" && module.exports) module.exports = api;

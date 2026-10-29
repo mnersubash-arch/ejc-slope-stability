@@ -57,6 +57,15 @@ for (const c of ref.cases) {
     if (js.mesh.count !== py.count) fail(`${tag}: count js ${js.mesh.count} py ${py.count}`);
     if (rel(js.mesh.volume, py.volume) > 1e-13) fail(`${tag}: volume js ${js.mesh.volume} py ${py.volume}`);
     if (rel(js.mesh.x0, py.x0) > 1e-14 || rel(js.mesh.x1, py.x1) > 1e-14) fail(`${tag}: grid ends differ`);
+    if (JSON.stringify(js.projection_limits) !== JSON.stringify(py.projection_limits) &&
+      !(js.projection_limits && py.projection_limits && js.projection_limits.every((v, q) => rel(v, py.projection_limits[q]) <= 1e-12)))
+      fail(`${tag}: projection limits js ${js.projection_limits} py ${py.projection_limits}`);
+    if ((js.mesh.zone ? js.mesh.zone.reduce((a, b) => a + b, 0) : null) !== (py.zone === undefined ? null : py.zone)) fail(`${tag}: disturbance zone count`);
+    for (const [key, keys] of [["crack", ["x", "level", "P", "MH", "MM"]], ["ext", ["Ex", "EH", "EM", "H", "M"]]]) {
+      const pv = py[key] === undefined ? null : py[key], jv = js.mesh[key];
+      if (!pv !== !jv) { fail(`${tag}: ${key} present js ${!!jv} py ${!!pv}`); continue; }
+      if (pv) for (const k of keys) if (!(Math.abs(jv[k] - val(pv[k])) <= 1e-12 * Math.max(1, Math.abs(val(pv[k]))))) fail(`${tag}: ${key}.${k} js ${jv[k]} py ${pv[k]}`);
+    }
     if (js.mesh.n !== py.n || js.mesh.ny !== py.ny || rel(js.mesh.dx, py.dx) > 1e-14 || rel(js.mesh.dy, py.dy) > 1e-14)
       fail(`${tag}: grid js ${js.mesh.n} x ${js.mesh.ny} (${js.mesh.dx} by ${js.mesh.dy} m) py ${py.n} x ${py.ny} (${py.dx} by ${py.dy} m)`);
     if (rel(js.projection_limit, py.projection_limit) > 1e-12) fail(`${tag}: projection limit js ${js.projection_limit} py ${py.projection_limit}`);
@@ -155,6 +164,53 @@ for (const x of ref.columns || []) {                  // 3D columns across y, pl
   if (w.n3 !== x.n || (inp.n3y === null ? w.n3y !== null : w.n3y !== x.across)) fail(`${tag}: withN3 js ${w.n3} x ${w.n3y}`);
 }
 
+// studies (additions): EJC against GHB, sweeps, back-analysis, Monte Carlo and the random stream
+let studies = 0;
+const st = ref.studies || { compare: [], sweep: [], back: [], mc: [], rng: [] };
+const sameRun = (a, b) => (a === null || a === undefined ? b === null || b === undefined : b !== null && b !== undefined && rel(a, b) <= 1e-12);
+for (const c of st.compare) {
+  studies++;
+  const r = E.compareModels(inputsOf(c.inputs)), p = c.result;
+  for (const key of ["ejc", "ghb"]) for (const k of ["fos3", "fos2", "ratio"]) if (!sameRun(r.models[key][k], p.models[key][k])) fail(`compare ${key} ${k} js ${r.models[key][k]} py ${p.models[key][k]}`);
+  for (const key of ["ejc", "ghb"]) for (const k of ["status3", "status2", "reason3", "reason2"]) if (r.models[key][k] !== p.models[key][k] && !/original closure/.test(p.models[key][k])) fail(`compare ${key} ${k}: js ${r.models[key][k]} py ${p.models[key][k]}`);
+  for (const k of ["ejc_ghb3", "ejc_ghb2"]) if (!sameRun(r.ratio[k], p.ratio[k])) fail(`compare ratio ${k}`);
+}
+for (const c of st.sweep) {
+  studies++;
+  const rows = E.parameterSweep(inputsOf(c.inputs), c.name, c.values, c.models, c.dims);
+  c.rows.forEach((pr, q) => {
+    if (rows[q].value !== pr.value) fail(`sweep ${c.name}: value ${q}`);
+    for (const model of c.models) for (const dim of c.dims) {
+      const a = rows[q][model], b = pr[model];
+      if (!sameRun(a["fos" + dim], b["fos" + dim]) || a["status" + dim] !== b["status" + dim]) fail(`sweep ${c.name} = ${pr.value} ${model} ${dim}D js ${a["fos" + dim]} py ${b["fos" + dim]}`);
+    }
+  });
+}
+for (const c of st.back) {
+  studies++;
+  const r = E.backAnalysis(inputsOf(c.inputs), c.name, c.lo, c.hi, c.target, c.dim), p = c.result;
+  if (!sameRun(r.value, p.value) || !sameRun(r.fos, p.fos) || r.message !== p.message || r.steps.length !== p.steps.length)
+    fail(`back-analysis ${c.name}: js ${r.value} (F ${r.fos}, ${r.steps.length} steps, "${r.message}") py ${p.value} (F ${p.fos}, ${p.steps.length} steps, "${p.message}")`);
+  r.steps.forEach((s, q) => { if (!sameRun(s.value, p.steps[q].value) || !sameRun(s.fos, p.steps[q].fos)) fail(`back-analysis ${c.name} step ${q}`); });
+}
+for (const c of st.mc) {
+  studies++;
+  const r = E.monteCarlo(inputsOf(c.inputs), c.variables, c.n, c.seed, null, c.dims), p = c.result;
+  r.samples.forEach((s, q) => {
+    for (const [k, v] of Object.entries(p.samples[q].values)) if (rel(s.values[k], v) > 1e-12) fail(`monte carlo sample ${q} ${k} js ${s.values[k]} py ${v}`);
+    for (const key of Object.keys(p.samples[q])) if (key !== "values" && !sameRun(s[key], p.samples[q][key])) fail(`monte carlo sample ${q} ${key}`);
+  });
+  for (const [key, ps] of Object.entries(p.stats)) for (const [k, v] of Object.entries(ps)) {
+    const jv = r.stats[key][k];
+    if (!(v === null ? jv === null : jv !== null && Math.abs(jv - v) <= 1e-12 * Math.max(1, Math.abs(v)))) fail(`monte carlo stats ${key}.${k} js ${jv} py ${v}`);
+  }
+}
+for (const c of st.rng) {
+  studies++;
+  const r = E.mulberry32(c.seed), got = c.values.map(() => r());
+  if (got.some((v, q) => v !== c.values[q])) fail(`mulberry32 seed ${c.seed}: js ${got.slice(0, 3)} py ${c.values.slice(0, 3)}`);
+}
+
 // critical-surface searches: every field, the clouds of surfaces tried included; FoS and other numbers to 1e-12
 // (relative), lengths and search parameters to 1e-12 of H (V8's tan and the C library's can differ in the last bit, so
 // a coordinate near zero can differ by more than 1e-12 of itself)
@@ -204,7 +260,7 @@ for (const s of ref.searches || []) {
 
 console.log(`${compared} runs, ${fx} fixture arrays, ${ref.original_closure.length} original-closure minima ` +
   `(and ${Object.keys(EDGE_MINIMA).length} against 50-digit values), ` +
-  `${ref.extents.length} extents, ${(ref.faces || []).length} vertical-face cases, ${(ref.columns || []).length} column-shape cases, ${masses} whole-mass force sets compared (worst ${worstMass.toExponential(1)} of the weight), ` +
+  `${ref.extents.length} extents, ${(ref.faces || []).length} vertical-face cases, ${(ref.columns || []).length} column-shape cases, ${studies} study checks, ${masses} whole-mass force sets compared (worst ${worstMass.toExponential(1)} of the weight), ` +
   `${searches} critical-surface searches (${surfaces} surfaces, every field; worst length diff ${worstLen.toExponential(1)} of H); ` +
   `worst FoS rel diff ${worstFos.toExponential(2)}, worst sigma_n rel diff ` +
   `${worstArr.toExponential(2)}; ${fails} failures`);

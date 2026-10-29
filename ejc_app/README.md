@@ -37,7 +37,15 @@ Nothing in this folder deploys it to a public host.
      for that mass, not for a circular slip surface (`engine.vertical_faces`; see below);
    - PASS/FAIL for every final check, with the largest residuals;
    - CSV downloads of the column and slice results;
-   - studies: a critical-surface search (below), a mesh study (eq. 4.17) and a ν sweep.
+   - a one-page HTML report (`report.py`): the FoS, the cross-section, the notes, the inputs in use and the studies
+     run on them;
+   - studies: a critical-surface search (below), a mesh study (eq. 4.17), a ν sweep, EJC against GHB, a parameter
+     sweep, a back-analysis and Monte Carlo (see "Additions").
+
+   The sidebar also has **Save, open or share a case** (`casefile.py`): save the inputs as a JSON file, open a file
+   or a pasted case code, or put the case in the page's link to share it. The web app reads and writes the same
+   files and codes, so a case opens in either app with the same inputs. Its inputs for the additions (slope face,
+   wall in plan, slip-surface shape, D zone, piezometric line, tension crack, k_h) are described under "Additions".
 
    The Mesh panel sets the 3D columns as N × N (the default), N × N_y, or a plan size Δx × Δy in metres (see
    "Column shape" below), and shows each column's plan size; the results give the grid and the range of column
@@ -289,6 +297,136 @@ The brief's 3D mesh has N × N cells (§1.4), so the column plan size is set by 
   FoS is 2.7060; with 20 × 40 (19.6 m by 18.1 m) it is 2.7202, and with columns of at most 20 m by 20 m (20 × 37)
   2.7135.
 
+### Additions: geometry, water, loading and studies (all off by default)
+
+Nine additions extend the method beyond the thesis, added on request on 29 October 2026. Each is off by default, and
+with all of them off the engine takes the thesis code path: the verification table is unchanged (89 PASS, 0 FAIL),
+and 144 runs of the thesis, GHB, Law, D'Esterre and Baskoyak cases gave the same results, bit for bit, before and
+after the change. Each formulation is standard limit-equilibrium practice or plain geometry, written out here so you
+can check it; nothing was fitted to a result. `engine.py` and `webapp/engine.js` implement them line for line
+(`webapp/README.md`), and `tests/test_additions.py` checks them against independent calculations where one exists.
+
+**Studies (no new equations)**
+
+- **EJC against GHB** (`compare_models`): the EJC with the Moscarda closure at the current ν, and GHB, on the same
+  surface and mesh, in 3D and 2D, with the 3D/2D and EJC/GHB ratios.
+- **Parameter sweep** (`parameter_sweep`): the FoS at evenly spaced values of one input, for the chosen models and
+  dimensions; the other inputs stay as they are.
+- **Back-analysis** (`back_analysis`): the value of one input at which the FoS equals a target, by bisection. It needs
+  an accepted FoS at both ends of [lo, hi] and a sign change of F − target; it halves the bracket until it is
+  narrower than 10⁻⁶ (hi − lo), then solves once more at the linear interpolation across the last bracket. If F steps
+  (a column entering the mass), the result is the step. On the Baskoyak failure circle (GHB, 2D), F = 1 at
+  D = 0.72087, where `qa/qa_baskoyak.py` found 0.721 from a cubic fit.
+- **Monte Carlo** (`monte_carlo`): each chosen input is drawn from a normal distribution truncated to its valid
+  range. The mean is the current value and the standard deviation is yours to enter: there is no default spread.
+  Normal deviates come from the Box–Muller transform (Box and Muller 1958) on a seeded Mulberry32 stream, the same in
+  both apps; draws outside the range are rejected. For each model and dimension the result gives:
+  - the accepted count, mean and standard deviation (n − 1);
+  - the reliability index β = (mean − 1)/SD;
+  - the probability of failure P_f = P(F < 1) among the accepted results, with its standard error
+    √(P_f(1 − P_f)/n); when no sample fails, the apps give the rule-of-three bound P_f < 3/n at 95 % (Hanley and
+    Lippman-Hand 1983);
+  - the 5, 50 and 95 % values.
+
+  Withheld runs are counted and left out. The inputs are sampled independently: correlation (between GSI and σci,
+  say) is not modelled.
+
+**Slope geometry**
+
+- **Slope profile** (`profile`): the face as points (x, z) from the toe (0, 0) to the crest edge (x_e, h_e), with x
+  decreasing and z not decreasing. The ground is z = 0 on the pit floor ahead of the toe, the face by linear
+  interpolation, and the crest behind the edge. The apps also build the points from benches: n benches of height h_b
+  at the bench face angle β_b, separated by berms w_b wide (the bench terms of Read and Stacey 2009). H becomes h_e
+  and β the overall angle from the toe. The critical-surface search follows the profile for its exits
+  (`ground_point`). On the traced Baskoyak section the engine matches the independent Bishop code of
+  `qa/qa_baskoyak.py` to 1e-12 (2000 slices).
+- **Ground behind the crest** (`crest_slope`, α): z = h_e + (x_e − x) tan α behind the crest edge; α = 0 is flat.
+- **Wall curved in plan** (`plan_radius`, R_p; 3D only): the toe line is a circle of radius |R_p| about a vertical
+  axis at (R_p, 0). A point (x, y) lies on the section at x′, its signed distance from that line:
+  - concave wall (R_p > 0, the pit inside the circle): x′ = R_p − r;
+  - convex nose (R_p < 0): x′ = r − |R_p|;
+  - with r = √((x − R_p)² + y²).
+
+  Ground and water are taken at x′. On y = 0, x′ = x, so the 2D section is unchanged. A convex axis must lie behind
+  the grid (|R_p| more than the distance from the toe to the back of the grid).
+
+  On the thesis slope (80 × 80 columns, dry), a concave wall raises the FoS steadily: 2.7116 straight; 2.7146,
+  2.7160, 2.7235 and 2.7568 at R_p = 6400, 3200, 1600 and 800 m. A convex nose does not change it steadily on a fixed
+  sphere: 2.7100, 2.7086, 2.7105 and 2.7183 at R_p = −6400, −3000, −1500 and −800 m. Before reading a trend from
+  convex walls, search for the critical sphere at each radius.
+
+**Slip-surface shape** (`elong`, λ; `mid_length`, L; 3D only)
+
+z_b = z_c − √q with q = R² − (x − x_c)² − (y_c/λ)² and y_c = max(|y| − L/2, 0): ellipsoidal end caps of half-width
+λR around a cylindrical middle part of length L. The y grid spans the half-width Y = λR + L/2 (Δy = Y/N_y); λ = 1,
+L = 0 is the sphere. At each y the surface is a circle about the rotation axis through (x_c, z_c), of radius
+ρ = √(R² − (y_c/λ)²). The base normal, n ∝ (x_c − x, −y_c/λ², z_c − z_b), has its x–z part pointing at the axis and
+its y part parallel to it, so N′ and U have no moment about the axis. Hungr's equations therefore keep their form,
+with ρ per column. The central section stays the circle (x_c, z_c, R), so the 2D analysis is unchanged.
+
+On the thesis slope (40 × 40 columns; 2D with 40 slices), 3D/2D is 1.110 for the sphere and 1.104, 1.102 and 1.100
+at λ = 1.5, 2 and 3: wider caps alone keep the end effect. A cylindrical middle removes it: 3D/2D is 1.038, 1.013 and
+1.003 at L = 500, 2000 and 10,000 m. The 3D FoS tends to the 2D FoS, dry and wet, within the 0.5 % of eq. 4.17 at
+L = 100R (`test_a_long_slide_tends_to_the_2d_result`).
+
+**Rock mass**
+
+- **Disturbance zone** (`d_zone`, T): bases closer than T to the face take m_b, s and a with D; the others take
+  D = 0. The distance is the shortest one from the base point (x, z_b) on its section to the face line
+  (`face_distance`). Each zone has its own projection limit (Section 4.6). The option is not used with Mohr-Coulomb.
+  - D is the blast-damage factor of Hoek et al. (2002). Hoek (2012, a RocNews technical note) recommends applying D
+    only within a damaged zone of thickness T behind the face.
+  - That note could not be opened from the environment these additions were written in. It is cited from memory,
+    and its suggested thicknesses are not used: T has no default, so enter it from your site.
+  - T = 0 gives the D = 0 result, and T beyond every base the D-everywhere result, both exactly.
+
+**Water**
+
+- **Piezometric line** (`piezo`): u = γ_w max(0, z_w − z_b), with z_w interpolated along the points (x decreasing)
+  and constant beyond the end points. On a curved wall it is swept like the ground. It replaces H_w and β_w. The
+  line (0, 0), (−H_w/tan β_w, H_w) reproduces the water table exactly.
+- **Tension crack** (`crack_depth`, z_t; `crack_water`, f_w):
+  - The crack is vertical, at x_tc, the first point from the back of the central section where the slip circle lies
+    z_t below the ground. The mass ends there: columns and slices with x < x_tc are removed.
+  - Water stands f_w z_t above the crack bottom on the central section, at the same level across y.
+  - Each row of columns (in 2D the section, per metre) carries the hydrostatic force P = ½ γ_w h_w² (times Δy),
+    horizontal towards the pit, at h_w/3 above the crack bottom, with lever arm e = z_c − z_P about the axis.
+  - This is the usual treatment of a water-filled tension crack in limit equilibrium (Hoek and Bray 1981; Duncan and
+    Wright 2005).
+
+**Loading**
+
+- **Seismic load** (`kh`): the pseudo-static method (Terzaghi 1950; Kramer 1996). A horizontal force k_h W acts at
+  each column's or slice's centroid, at height (z_b + z_t)/2, towards the pit.
+
+**The global equation with these forces.** A horizontal force Q at height z_Q has the moment Q e about the rotation
+axis, e = z_c − z_Q, in the same sense as the weight's W (x_c − x):
+
+- F_M (eq. 4.15) adds the moments: F = Σ τ A ρ / (Σ W (x_c − x) + Σ Q e);
+- F_H (eq. 4.14) adds each moment divided by the lever arm ρ of its column or row, as W κ = W (x_c − x)/ρ:
+  F = Σ τ A / (Σ W κ + Σ Q e/ρ);
+- Bishop's 2D equation does the same per metre.
+
+Local vertical balance (eq. 4.12) is unchanged, since the forces are horizontal. In 2D the engine matches an
+independent Bishop calculation with these moment terms to 1e-10. The whole-mass free-body diagram shows E = k_h W and
+P, and its moment balance includes them.
+
+References for the additions:
+
+- Box, G. E. P. and Muller, M. E. (1958). A note on the generation of random normal deviates. *Annals of Mathematical
+  Statistics* 29(2), 610–611.
+- Duncan, J. M. and Wright, S. G. (2005). *Soil Strength and Slope Stability*. Wiley.
+- Hanley, J. A. and Lippman-Hand, A. (1983). If nothing goes wrong, is everything all right? Interpreting zero
+  numerators. *JAMA* 249(13), 1743–1745.
+- Hoek, E. (2012). Blast damage factor D. Technical note for RocNews, February 2012.
+- Hoek, E., Carranza-Torres, C. and Corkum, B. (2002). Hoek-Brown failure criterion – 2002 edition. *Proc. NARMS-TAC
+  2002*, Toronto, 267–273.
+- Hoek, E. and Bray, J. W. (1981). *Rock Slope Engineering*, 3rd edn. Institution of Mining and Metallurgy, London.
+- Kramer, S. L. (1996). *Geotechnical Earthquake Engineering*. Prentice Hall.
+- Read, J. and Stacey, P. (eds) (2009). *Guidelines for Open Pit Slope Design*. CSIRO Publishing.
+- Terzaghi, K. (1950). Mechanism of landslides. In *Application of Geology to Engineering Practice* (Berkey volume),
+  Geological Society of America, 83–123.
+
 ## Verification
 
 `python verification.py --slow` (or the Verification page with the slow box ticked) gives **89 PASS, 0 FAIL,
@@ -327,6 +465,12 @@ INFO rows are reference values, never targets:
 - Coarse meshes underestimate FoS (10×10 is about 2.6 % low dry and 4.4 % low wet), and convergence is not an
   error bound.
 - The bisection scan does not prove that the root is globally unique.
+- The additions are standard formulations implemented here and checked against independent calculations where one
+  exists, but they are not part of the thesis, and no published 3D case checks them.
+  - Curved walls and slip-surface shapes are 3D only; the 2D section is y = 0.
+  - The tension crack is placed on the central section and runs straight across y.
+  - The seismic load is pseudo-static, with one constant k_h.
+  - Monte Carlo samples its inputs independently, without correlation.
 - Results are a research tool, not a design tool.
 
 ## Files
@@ -334,12 +478,15 @@ INFO rows are reference values, never targets:
 | File | Content |
 |---|---|
 | `app.py`, `views/` | Streamlit entry point and the seven pages |
-| `ui.py` | Sidebar, input state, presets, running and caching |
+| `ui.py` | Sidebar, input state, presets, cases, running and caching |
+| `study_panels.py` | Calculator studies: EJC against GHB, parameter sweep, back-analysis, Monte Carlo |
+| `casefile.py` | Case files and the page link, in the web app's format (no Streamlit) |
+| `report.py` | The one-page HTML report, with the cross-section as SVG (no Streamlit) |
 | `engine.py` | Calculation engine (no Streamlit) |
 | `plots.py` | Plotly figures (no Streamlit) |
 | `presets.py` | Preset cases and their sources |
 | `data/presets_law_desterre.json` | Law (2024) and D'Esterre (2024) cases in engine coordinates (source of those presets) |
 | `data/presets_baskoyak.json` | Baskoyak case: sources, site data, traced section and failure circle, derivation of ν (source of those presets) |
 | `verification.py` | Targets and the verification runner |
-| `tests/` | pytest suite: strength, LEM, targets, figures, headless pages |
+| `tests/` | pytest suite: strength, LEM, targets, figures, headless pages, the additions (`test_additions.py`, `test_app_additions.py`) |
 | `VERIFICATION.md` | The verification table |

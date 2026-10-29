@@ -5,8 +5,10 @@ history:
 
 - `ejc_app/`: the interactive Streamlit app for the submitted thesis method (EJC with the Moscarda closure, Route 2,
   Hungr 3D / Bishop 2D, with the Law, D'Esterre and Baskoyak (a real failure) presets, a critical-surface
-  search, and 3D columns set as N × N, N × N_y or a plan size in metres). Run it with
-  `cd ejc_app && streamlit run app.py`; see `ejc_app/README.md` and `ejc_app/VERIFICATION.md`.
+  search, and 3D columns set as N × N, N × N_y or a plan size in metres). It also has nine additions, all off by
+  default: benches or a profile, a curved wall, ellipsoidal surfaces, a disturbance zone, a piezometric line, a
+  tension crack, seismic load, studies (EJC against GHB, sweeps, back-analysis, Monte Carlo), and case files with a
+  report. Run it with `cd ejc_app && streamlit run app.py`; see `ejc_app/README.md` and `ejc_app/VERIFICATION.md`.
 - `webapp/`: the same app as a web page, with the engine ported to JavaScript and checked against
   `ejc_app/engine.py`; published privately on claude.ai. See `webapp/README.md`.
 - `qa/`: the QA/QC of both engines against the thesis, exact solutions, randomised tests and published case

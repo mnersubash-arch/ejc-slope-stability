@@ -16,6 +16,9 @@ shown. INFO rows are reference values (published and reported results), not targ
 - 2 cross-checks of the Mohr-Coulomb option against the `slope3d` package's record (c' = 100 kPa, phi' = 0).
 - INFO: Carranza-Torres' published value, Moscarda (2025), Law (2024) and D'Esterre (2024) reported values, and
   the "about" figures of the Limitations page.
+- The nine additions of 29 October 2026 (README, "Additions") are off in every row, and the table is unchanged with
+  them in the engine. They have no rows here: `tests/test_additions.py` checks them against independent
+  calculations, and `tests/test_app_additions.py` checks them in the app.
 
 | Group | Item | Target | Computed | Difference | Tolerance | Status | Note |
 |---|---|---|---|---|---|---|---|
